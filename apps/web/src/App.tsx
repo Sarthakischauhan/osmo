@@ -23,16 +23,20 @@ export function App() {
   const speaking = useRef(false);
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
-  const savePick = useRef<(next: VoiceSelection) => void>();
+  const pickSetters = useRef<{ save: (next: VoiceSelection) => void; choose: (next: VoiceSelection) => void }>();
   const onEvent = useCallback((event: ServerEvent) => {
     dispatch(event);
     cues.current?.onServerEvent(event);
-    // A voice command (`set_voice`) moved the session: the picker value and summary follow it.
-    if (event.type === "voice.configured" && event.source === "tool") savePick.current?.(event.selection);
+    // The server confirmed a pick (session start, picker, or `set_voice`): only now is it saved.
+    // On error the picker snaps back to what is still in effect, and nothing is saved.
+    if (event.type === "voice.configured") {
+      if (event.error === undefined) pickSetters.current?.save(event.selection);
+      else pickSetters.current?.choose(event.selection);
+    }
   }, []);
   const [registry, setRegistry] = useState<VoiceModel[]>([]);
-  const [pick, save] = usePersistedPick(registry);
-  savePick.current = save;
+  const [pick, save, choose] = usePersistedPick(registry);
+  pickSetters.current = { save, choose };
   const session = useOsmoSession({
     url: sameOriginSocketUrl(window.location),
     model: pick?.model,
@@ -59,11 +63,12 @@ export function App() {
   const { configure } = session;
   const onPick = useCallback(
     (next: VoiceSelection) => {
-      save(next);
-      // Applied to the live session: voice/effort via session.update, a model change by hot-swap.
+      // Shown right away; saved once `voice.configured` confirms it (on session start if idle).
+      // Live: voice/effort via session.update, a model change by hot-swap.
+      choose(next);
       configure(next);
     },
-    [save, configure],
+    [choose, configure],
   );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
@@ -197,7 +202,7 @@ export function App() {
                   onPreview: session.previewVoice,
                   onPreviewStop: session.stopPreview,
                   previewing: session.previewing,
-                  previewDisabled: session.state === "speaking",
+                  previewDisabled: session.state !== "idle" && session.state !== "listening",
                 }
               : undefined
           }

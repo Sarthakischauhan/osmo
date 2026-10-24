@@ -34,21 +34,42 @@ export function restorePick(saved: string | null, registry: readonly VoiceModel[
   return effort === undefined ? { model: model.id, voice } : { model: model.id, voice, effort };
 }
 
-/** Picker value persisted in localStorage, restored (and re-validated) whenever the registry changes. */
+/** The saved pick, or null when storage is unavailable (private mode, blocked, quota). */
+export function readSavedPick(key = PICK_STORAGE_KEY): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSavedPick(key: string, next: VoiceSelection): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Storage unavailable: the pick still applies for this page.
+  }
+}
+
+/**
+ * Picker value restored from localStorage (re-validated whenever the registry changes).
+ * `choose` only updates the in-memory pick; `save` also persists it, and is meant to be
+ * called once the server confirms the pick with `voice.configured`.
+ */
 export function usePersistedPick(
   registry: readonly VoiceModel[],
   key = PICK_STORAGE_KEY,
-): [VoiceSelection | undefined, (next: VoiceSelection) => void] {
-  const [pick, setPick] = useState<VoiceSelection | undefined>(() => restorePick(window.localStorage.getItem(key), registry));
+): [VoiceSelection | undefined, (next: VoiceSelection) => void, (next: VoiceSelection) => void] {
+  const [pick, setPick] = useState<VoiceSelection | undefined>(() => restorePick(readSavedPick(key), registry));
   useEffect(() => {
-    setPick(restorePick(window.localStorage.getItem(key), registry));
+    setPick(restorePick(readSavedPick(key), registry));
   }, [registry, key]);
   const save = useCallback(
     (next: VoiceSelection) => {
-      window.localStorage.setItem(key, JSON.stringify(next));
+      writeSavedPick(key, next);
       setPick(next);
     },
     [key],
   );
-  return [pick, save];
+  return [pick, save, setPick];
 }

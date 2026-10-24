@@ -571,7 +571,10 @@ export function RadialPicker({
         style={{ left: cx, top: cy, width: orbSize, height: orbSize }}
         aria-expanded={state.depth > 0}
         aria-label={orbLabel === undefined ? PICKER_LABEL : `${orbLabel}. ${PICKER_LABEL}`}
-        onFocus={open}
+        onFocus={(event) => {
+          // Keyboard focus only: a tap or click focuses the orb too, and must not open the dial.
+          if (focusVisible(event.currentTarget)) open();
+        }}
         onClick={() => {
           if (onOrbActivate) onOrbActivate();
           else if (state.depth === 0) open();
@@ -599,3 +602,12 @@ const RING_LABELS: Record<RingKey, string> = {
   voices: "Voices",
   effort: "Reasoning effort",
 };
+
+/** Whether `element` has keyboard (`:focus-visible`) focus; false where the selector is unsupported. */
+export function focusVisible(element: Element): boolean {
+  try {
+    return element.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}

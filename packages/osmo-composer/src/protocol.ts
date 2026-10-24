@@ -88,7 +88,13 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     patch: z.record(z.unknown()),
   }),
   z.object({ type: z.literal("models"), models: z.array(voiceModelSchema), selection: voiceSelectionSchema }),
-  z.object({ type: z.literal("voice.configured"), selection: voiceSelectionSchema, source: z.enum(["client", "tool"]) }),
+  // `error` set: the change was rejected or failed and `selection` is what is still in effect.
+  z.object({
+    type: z.literal("voice.configured"),
+    selection: voiceSelectionSchema,
+    source: z.enum(["client", "tool"]),
+    error: z.string().optional(),
+  }),
   // Answer to a `voice.preview` request: base64 PCM16 (24 kHz mono, ~2 s) or an error.
   z.object({
     type: z.literal("voice.preview"),

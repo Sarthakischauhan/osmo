@@ -55,6 +55,9 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
   const previewRequest = useRef<{ id: string; model: string; voice: string } | undefined>();
   const previewCount = useRef(0);
   const speakingRef = useRef(false);
+  // Previews only while the session is idle or listening (the server enforces the same).
+  const previewStateRef = useRef(true);
+  const previewingRef = useRef(false);
   const [connection, setConnection] = useState<OsmoConnection>("disconnected");
   const [serverState, setServerState] = useState<OsmoState>("idle");
   const [detail, setDetail] = useState<string | undefined>();
@@ -122,7 +125,10 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
       client.send({ type: "session.start", voice, model, effort });
-      await mic.start((frame) => client.sendAudio(frame));
+      // A preview plays on the speakers: keep it out of the mic so it is not heard as the user.
+      await mic.start((frame) => {
+        if (!previewingRef.current) client.sendAudio(frame);
+      });
       setConnection("connected");
       setStartedAt(Date.now());
     } catch (cause) {
@@ -163,7 +169,7 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
 
   const previewVoice = useCallback((pick: { model: string; voice: string }) => {
     const current = runtime.current;
-    if (!current || speakingRef.current) return;
+    if (!current || !previewStateRef.current) return;
     current.preview.flush();
     previewCount.current += 1;
     const id = `p${previewCount.current}`;
@@ -177,6 +183,8 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
 
   const shownState: OsmoState = playing ? "speaking" : serverState;
   speakingRef.current = shownState === "speaking";
+  previewStateRef.current = shownState === "idle" || shownState === "listening";
+  previewingRef.current = previewing !== undefined;
   // Never talk over the agent: a preview stops as soon as it speaks.
   useEffect(() => {
     if (shownState === "speaking") stopPreview();
