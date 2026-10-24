@@ -114,11 +114,20 @@ async function main() {
 
   // Turn 4: sandboxed html.
   send(ws, { type: "transcript.delta", role: "user", text: "Build me a tip calculator." });
-  send(ws, { type: "widget.render", widget: { id: "w4", type: "html", props: { html: TIP_CALCULATOR } } });
+  send(ws, { type: "widget.render", widget: { id: "w4", type: "html", props: { html: TIP_CALCULATOR, title: "Tip calculator" } } });
   send(ws, { type: "transcript.delta", role: "assistant", text: "Here's a tip calculator. Drag the slider." });
   send(ws, { type: "state", state: "thinking" });
   await pause(700);
   await page.screenshot({ path: `${OUT}/04-html-widget.png` });
+
+  // Fullscreen modal: same header bar with a close control; Esc closes it.
+  await page.click('button[aria-label="Zoom in"]');
+  await page.click('button[aria-label="Open fullscreen"]');
+  await page.waitForSelector('[role="dialog"] iframe');
+  await pause(300);
+  await page.screenshot({ path: `${OUT}/05-html-modal.png` });
+  await page.keyboard.press("Escape");
+  await page.waitForSelector('[role="dialog"]', { state: "detached", timeout: 1000 });
 
   await browser.close();
   console.log(`saved screenshots to ${OUT}; widget.action=${JSON.stringify(action)}`);
