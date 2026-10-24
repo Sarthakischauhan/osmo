@@ -18,6 +18,7 @@ from websockets.asyncio.server import ServerConnection, serve
 
 from symphony_server.app import create_app, osmo_tools
 from symphony_server.settings import Settings
+from symphony_server.voices import XAI_VOICES_URL
 
 
 class FakeGrok:
@@ -107,11 +108,22 @@ def unreachable(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"unexpected network call to {request.url}")
 
 
+def no_voice_list(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(503, json={"error": "voice list unavailable in tests"})
+
+
 def make_client(
-    settings: Settings, handler: Callable[[httpx.Request], httpx.Response] = unreachable
+    settings: Settings,
+    handler: Callable[[httpx.Request], httpx.Response] = unreachable,
+    voices: Callable[[httpx.Request], httpx.Response] = no_voice_list,
 ) -> TestClient:
-    """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    """The app with every outbound HTTP call answered by `handler` (by default: fail the test).
+    xAI's voice list is answered by `voices` (by default 503, so the documented roster is used)."""
+
+    def route(request: httpx.Request) -> httpx.Response:
+        return voices(request) if str(request.url) == XAI_VOICES_URL else handler(request)
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(route))
     tools = osmo_tools(http_client)
     config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
     return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client))

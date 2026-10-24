@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from conftest import FakeGrok
 from symphony_server.voices import (
+    DOCUMENTED_VOICES,
     PREVIEW_BYTES,
     Capabilities,
     Selection,
@@ -68,7 +69,7 @@ def test_models_event_on_connect(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         event = next_event(ws, "models")
         assert event["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
-        assert [v["id"] for v in event["models"][0]["voices"]] == ["eve", "ara", "sal"]
+        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in DOCUMENTED_VOICES]
 
 
 def test_set_voice_tool_reconfigures_and_notifies_browser(client: TestClient, grok: FakeGrok) -> None:

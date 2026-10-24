@@ -29,7 +29,7 @@ from symphony_server.voices import (
     PREVIEW_RATE_LIMIT,
     PREVIEW_RATE_WINDOW_S,
     PREVIEW_SAMPLE_RATE,
-    VOICE_MODELS,
+    VoiceCatalog,
     KeyedRateLimiter,
     PreviewCache,
     default_selection,
@@ -61,7 +61,8 @@ def create_app(
         settings.credentials_key,
         env={"XAI_API_KEY": settings.xai_api_key} if settings.xai_api_key else {},
     )
-    previews = PreviewCache(settings.realtime_url, credentials, settings.preview_cache_dir)
+    catalog = VoiceCatalog(http_client, credentials)
+    previews = PreviewCache(settings.realtime_url, credentials, settings.preview_cache_dir, catalog=catalog)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
 
@@ -79,13 +80,13 @@ def create_app(
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:
         """The picker's registry before any socket is open (the same payload as the `models` event)."""
-        models = with_locks(VOICE_MODELS, credentials)
+        models = with_locks(await catalog.refresh(), credentials)
         return ModelsEvent(models=list(models), selection=default_selection(models, settings.voice))
 
     @app.get("/voice-preview")
     async def voice_preview(request: Request, model: str = "", voice: str = "") -> Response:
         """A cached ~2 s PCM16 mono sample of `voice` on `model`; same checks as the `voice.preview` event."""
-        refused = preview_error(VOICE_MODELS, model, voice)
+        refused = preview_error(await catalog.refresh(), model, voice)
         if refused is not None:
             return Response(refused, status_code=400, media_type="text/plain")
         if not preview_limiter.allow(request.client.host if request.client else "unknown"):
@@ -100,7 +101,7 @@ def create_app(
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await OsmoSession(websocket, settings, tools, previews, credentials).run()
+        await OsmoSession(websocket, settings, tools, previews, credentials, catalog).run()
 
     if settings.static_dir is not None and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")

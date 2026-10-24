@@ -57,6 +57,8 @@ from symphony_server.voices import (
     preview_error,
     default_selection,
     Selection,
+    VoiceCatalog,
+    VoiceModel,
     realtime_url_for,
     resolve_selection,
     set_voice_description,
@@ -85,7 +87,7 @@ SWAP_WAIT_S = 15.0
 PREVIEW_STATES: tuple[OsmoState, ...] = ("idle", "listening")
 
 
-def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
+def realtime_tools(tools: Mapping[str, Tool], models: tuple[VoiceModel, ...] = VOICE_MODELS) -> list[dict[str, Any]]:
     """Session tool list: Grok's server-side web search plus Symphony's functions."""
     functions = [{"type": "function", **tool.get_schema()} for tool in tools.values()]
     return [
@@ -105,7 +107,7 @@ def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": SET_VOICE,
-            "description": set_voice_description(VOICE_MODELS),
+            "description": set_voice_description(models),
             "parameters": SET_VOICE_PARAMETERS,
         },
         *functions,
@@ -127,12 +129,14 @@ class OsmoSession:
         tools: Mapping[str, Tool],
         previews: PreviewCache,
         credentials: CredentialStore,
+        catalog: VoiceCatalog,
     ) -> None:
         self.browser = browser
+        self.catalog = catalog
         self.previews = previews
         self.credentials = credentials
         self.preview_tasks: set[asyncio.Task[None]] = set()
-        self.selection = default_selection(with_locks(VOICE_MODELS, credentials), settings.voice)
+        self.selection = default_selection(with_locks(catalog.models, credentials), settings.voice)
         self.instructions = settings.instructions
         self.settings = settings
         self.tools = tools
@@ -162,7 +166,9 @@ class OsmoSession:
     # ------------------------------------------------------------ browser side
 
     async def run(self) -> None:
-        await self.emit(ModelsEvent(models=list(with_locks(VOICE_MODELS, self.credentials)), selection=self.selection))
+        models = with_locks(await self.catalog.refresh(), self.credentials)
+        self.selection = default_selection(models, self.settings.voice)
+        await self.emit(ModelsEvent(models=list(models), selection=self.selection))
         try:
             while True:
                 message = await self.browser.receive()
@@ -260,7 +266,7 @@ class OsmoSession:
             await self.set_state("idle", "xAI is not connected: add a key or set XAI_API_KEY on the server")
             return
         picked = resolve_selection(
-            with_locks(VOICE_MODELS, self.credentials), event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
+            with_locks(self.catalog.models, self.credentials), event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
         )
         if isinstance(picked, Selection):
             self.selection = picked
@@ -282,7 +288,7 @@ class OsmoSession:
                 session=grok.SessionConfig(
                     voice=self.selection.voice,
                     instructions=self.instructions,
-                    tools=realtime_tools(self.tools),
+                    tools=realtime_tools(self.tools, self.catalog.models),
                     reasoning=None if effort is None else grok.Reasoning(effort=effort),
                 )
             ),
@@ -347,7 +353,7 @@ class OsmoSession:
 
         The browser always hears back: `voice.configured` with the applied selection, or with the
         selection still in effect plus `error` when the change was rejected or failed."""
-        picked = resolve_selection(with_locks(VOICE_MODELS, self.credentials), change, self.selection)
+        picked = resolve_selection(with_locks(self.catalog.models, self.credentials), change, self.selection)
         if isinstance(picked, str):
             log.warning("rejected voice change from %s: %s", source, picked)
             await self.emit(VoiceConfigured(selection=self.selection, source=source, error=picked))
@@ -367,7 +373,7 @@ class OsmoSession:
         return picked
 
     async def preview(self, request: VoicePreviewRequest) -> None:
-        refused = preview_error(VOICE_MODELS, request.model, request.voice)
+        refused = preview_error(self.catalog.models, request.model, request.voice)
         if refused is None and self.state not in PREVIEW_STATES:
             refused = f"previews play only while idle or listening (now {self.state})"
         if refused is None and not self.preview_limiter.allow():
