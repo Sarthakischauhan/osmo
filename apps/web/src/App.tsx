@@ -14,6 +14,9 @@ import {
   usePersistedPick,
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { ConnectProviderDialog, type ProviderInfo, providersResponseSchema } from "./ConnectProvider";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
@@ -44,22 +47,50 @@ export function App() {
     effort: pick?.effort,
     onEvent,
   });
-  if (session.voiceModels !== registry && session.voiceModels.length > 0) setRegistry(session.voiceModels);
-  // The registry before any socket is open, so the picker works around the idle orb too.
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/voice-models", { signal: controller.signal })
+  // A new `models` event from the socket replaces the registry; later HTTP refreshes may override it.
+  const socketModels = useRef(session.voiceModels);
+  if (session.voiceModels !== socketModels.current) {
+    socketModels.current = session.voiceModels;
+    if (session.voiceModels.length > 0) setRegistry(session.voiceModels);
+  }
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [connecting, setConnecting] = useState<ProviderInfo>();
+  // The registry (with `locked` models) and the providers, before any socket is open and after a connect.
+  const refresh = useCallback((signal?: AbortSignal) => {
+    fetch("/voice-models", { signal })
       .then((response) => (response.ok ? response.json() : undefined))
       .then((body: unknown) => {
         const parsed = serverEventSchema.safeParse(body);
-        if (parsed.success && parsed.data.type === "models") {
-          const models = parsed.data.models;
-          setRegistry((current) => (current.length > 0 ? current : models));
-        }
+        if (parsed.success && parsed.data.type === "models") setRegistry(parsed.data.models);
       })
       .catch(() => undefined);
-    return () => controller.abort();
+    fetch("/providers", { signal })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((body: unknown) => {
+        const parsed = providersResponseSchema.safeParse(body);
+        if (parsed.success) setProviders(parsed.data.providers);
+      })
+      .catch(() => undefined);
   }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    refresh(controller.signal);
+    // Back from an OAuth sign-in: the server redirects to `/#connected=<provider>`.
+    const connected = /^#connected=([\w-]+)$/.exec(window.location.hash)?.[1];
+    if (connected) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      toast.success(`${connected} connected`);
+    }
+    return () => controller.abort();
+  }, [refresh]);
+  const onLockedProvider = useCallback(
+    (id: string) => {
+      const provider = providers.find((p) => p.id === id);
+      if (provider) setConnecting(provider);
+      else toast(`Osmo cannot connect ${id} yet`);
+    },
+    [providers],
+  );
   const { configure } = session;
   const onPick = useCallback(
     (next: VoiceSelection) => {
@@ -203,11 +234,23 @@ export function App() {
                   onPreviewStop: session.stopPreview,
                   previewing: session.previewing,
                   previewDisabled: session.state !== "idle" && session.state !== "listening",
+                  onLockedProvider,
                 }
               : undefined
           }
         />
       </footer>
+      <ConnectProviderDialog
+        provider={connecting}
+        onOpenChange={(open) => {
+          if (!open) setConnecting(undefined);
+        }}
+        onConnected={() => {
+          setConnecting(undefined);
+          refresh();
+        }}
+      />
+      <Toaster position="top-center" />
     </div>
   );
 }

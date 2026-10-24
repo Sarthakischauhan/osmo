@@ -38,6 +38,7 @@ export const providerIcons: Record<string, ProviderIcon> = {
   elevenlabs: { label: "ElevenLabs", logo: `${MODELS_DEV}/elevenlabs.svg` },
   deepgram: { label: "Deepgram", logo: `${MODELS_DEV}/deepgram.svg` },
   cartesia: { label: "Cartesia", logo: `${MODELS_DEV}/cartesia.svg` },
+  openrouter: { label: "OpenRouter", logo: `${MODELS_DEV}/openrouter.svg` },
 };
 
 /** The entry for a provider, falling back to its id as label (and so a monogram). */
