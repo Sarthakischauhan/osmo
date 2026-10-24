@@ -50,7 +50,38 @@ export function App() {
   }, []);
   useEffect(() => cues.current?.onConnection(session.connection), [session.connection]);
   const pending = connected ? pendingChoice(feed, answered) : undefined;
-  const amber = orbMode(session.connection, session.state, pending !== undefined) === "awaiting";
+  const mode = orbMode(session.connection, session.state, pending !== undefined);
+  const amber = mode === "awaiting";
+
+  useEffect(() => {
+    const labels: Record<typeof mode, string> = {
+      connecting: "Connecting",
+      idle: "Ready",
+      listening: "Listening",
+      awaiting: "Your choice",
+      thinking: "Thinking",
+      speaking: "Speaking",
+    };
+    const colors: Record<typeof mode, [string, string, string]> = {
+      connecting: ["#d6dae4", "#8c94a8", "#464c60"],
+      idle: ["#e2e6ff", "#8c96f0", "#3e3aaa"],
+      listening: ["#e6ecff", "#8192f8", "#4338ca"],
+      awaiting: ["#ffecbe", "#fbbf24", "#b45309"],
+      thinking: ["#fff", "#ddd6fe", "#a78bfa"],
+      speaking: ["#e0e7ff", "#818cf8", "#4c1d95"],
+    };
+    const [light, mid, deep] = colors[mode];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><radialGradient id="g" cx="35%" cy="28%" r="70%"><stop stop-color="${light}"/><stop offset=".55" stop-color="${mid}"/><stop offset="1" stop-color="${deep}"/></radialGradient></defs><circle cx="32" cy="32" r="25" fill="${mid}" opacity=".3"/><circle cx="32" cy="32" r="21" fill="url(#g)"/></svg>`;
+    const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+    const previousTitle = document.title;
+    const previousHref = icon?.href;
+    document.title = `Osmo · ${labels[mode]}`;
+    if (icon) icon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    return () => {
+      document.title = previousTitle;
+      if (icon && previousHref) icon.href = previousHref;
+    };
+  }, [mode]);
   useEffect(() => cues.current?.onAmber(amber ? pending : undefined), [amber, pending]);
   const onFeedChange = useCallback((event: ChangeEvent<HTMLElement>) => {
     const target = event.target;

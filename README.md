@@ -1,34 +1,16 @@
-# osmo
+<p align="center">
+  <img src="docs/osmo-orb.svg" alt="Osmo orb" width="200" />
+</p>
 
-Symphony as a harness and my chat SDK voice product.
+# Osmo
 
-## Osmo
+**Building a Muse with a durable harness and a first-class chat SDK that speaks its protocol**
 
-Osmo is a voice-only assistant. You talk to the orb. Symphony thinks and runs tools, and the answers come back as speech plus live widgets (cards, options, charts, sandboxed HTML). Voice is the only input. Widgets are the only visual output besides the orb.
+Osmo brings together <a href="https://github.com/Sarthakischauhan/symphony">Symphony</a>, a durable harness for agents, and the <a href="https://github.com/Sarthakischauhan/chat-sdk">Chat SDK</a>, designed to speak the harness protocol. The aim is a Muse: an assistant that can listen, reason, use tools, and respond through voice and an interactive canvas.
 
-```mermaid
-flowchart LR
-  subgraph Browser["Browser (apps/web)"]
-    OC["osmo-composer<br/>mic, playback, orb states<br/>WS client"]
-    WG["chat SDK widgets<br/>card · options · chart · html<br/>sends widget.action"]
-  end
+## How it works
 
-  subgraph Symphony["Symphony core server (apps/symphony-server)"]
-    WS["/ws endpoint<br/>maps events both ways"]
-    LOOP["tool loop<br/>render_widget + schema"]
-    CORE["core_server<br/>(vendored, /api)"]
-  end
-
-  GROK["Grok Voice realtime<br/>speech-to-speech<br/>emits tool calls"]
-  TOOLS["Tools<br/>web_search · weather · stocks<br/>HTML generation"]
-
-  OC <-- "PCM16 binary frames,<br/>session.start/end, interrupt, state, transcript.delta" --> WS
-  WG <-- "widget.render / widget.update,<br/>widget.action" --> WS
-  WS <-- "realtime WS<br/>(XAI_API_KEY stays here)" --> GROK
-  WS --> LOOP
-  LOOP -- invoke --> TOOLS
-  CORE -. "shares Tools" .- LOOP
-```
+The browser captures speech and streams audio to the session endpoint. Symphony owns the agent turn: it connects to the model, handles model events, runs tools, validates widget payloads, and emits protocol events. The chat SDK consumes those events to render conversation content and interactive widgets. Audio playback and the visual conversation stay synchronized as one session.
 
 ### One turn
 
@@ -56,61 +38,23 @@ sequenceDiagram
   S->>G: conversation.item.create (user turn) + response.create
 ```
 
-### Layout
+The protocol is the boundary between the harness and the experience. Symphony is responsible for reliably coordinating work; the SDK is responsible for making that work legible and actionable. This separation lets the interface evolve without owning agent execution, and lets the harness serve a first-class UI without dictating its presentation.
 
-| Path | Owns |
+## What Osmo is exploring
+
+- **Voice-native interaction:** speech is the primary input and spoken responses are part of the session, not an add-on to a text chat.
+- **A durable agent harness:** model turns, tool execution, and state transitions belong to Symphony rather than the UI.
+- **Protocol-driven UI:** messages, activity, and widgets are structured events the SDK can render and act on.
+- **An extensible model boundary:** the harness should be able to support different model providers while keeping the client-facing protocol stable.
+
+## Project boundaries
+
+| Part | Responsibility |
 | --- | --- |
-| `apps/symphony-server` | Python FastAPI app. Mounts `core_server`'s run API at `/api` and adds `/ws`. Owns the Grok realtime session, the tool loop, `render_widget`/`update_widget`, and prop validation. |
-| `vendor/core_server` | Symphony's `core_server`, vendored **unmodified** from [symphony@a335957](https://github.com/Sarthakischauhan/symphony/tree/a335957c53009d6c4f82e8176a9abf975b736979/core_server) until it is published. See `vendor/README.md`. |
-| `packages/osmo-composer` | Orb UI, mic capture and playback, WS client, wire protocol types. No chat SDK imports. |
-| `packages/osmo-widgets` | Osmo-only widgets (chart, sandboxed html), the widget prop schemas, and the chat-sdk registry that maps `card`/`options` onto `@sarchauhan/chat` components. |
-| `apps/web` | Full-screen page: orb at the bottom, widget canvas above. |
+| [Symphony](https://github.com/Sarthakischauhan/symphony) | Durable agent execution, session coordination, and tools. |
+| [Chat SDK](https://github.com/Sarthakischauhan/chat-sdk) | Protocol-aware conversation UI, message rendering, and interactive widgets. |
+| Osmo client | Voice capture and playback, orb state, and composition of the SDK experience. |
 
-### Wire protocol (browser ↔ Symphony)
+## Contributing
 
-One WebSocket at `/ws`. Binary frames are PCM16 audio, 24 kHz mono, little-endian. Text frames are JSON:
-
-| Direction | Event | Payload |
-| --- | --- | --- |
-| client → server | binary | mic audio |
-| client → server | `session.start` / `session.end` | `voice?`, `instructions?` |
-| client → server | `interrupt` | — |
-| client → server | `widget.action` | `id`, `action`, `value?` |
-| server → client | binary | assistant audio |
-| server → client | `state` | `state` (idle, listening, thinking, speaking, working), `detail?` (`barge-in` = flush playback) |
-| server → client | `transcript.delta` | `role`, `text` |
-| server → client | `widget.render` | `widget: {id, type, props}` |
-| server → client | `widget.update` | `id`, `patch` |
-
-The browser never sees the Grok key or Grok's event format. Symphony speaks the xAI realtime events documented at <https://docs.x.ai/docs/guides/voice/agent> and <https://docs.x.ai/developers/rest-api-reference/inference/voice>.
-
-### Run locally
-
-```sh
-# server (Python 3.11+, uv)
-cd apps/symphony-server
-uv venv -p 3.12 .venv && uv pip install --no-sources -p .venv -r requirements.txt
-XAI_API_KEY=... .venv/bin/python -m symphony_server      # :8787
-
-# web
-pnpm install && pnpm dev:web                              # :5173, proxies /ws to :8787
-```
-
-`--no-sources` is needed because the vendored `core_server` keeps its upstream uv-workspace sources unmodified.
-
-### Test
-
-```sh
-pnpm typecheck && pnpm test                               # TS packages + web
-cd apps/symphony-server && .venv/bin/mypy && .venv/bin/python -m pytest -q
-```
-
-The server tests run against a local fake Grok websocket server and mocked HTTP. They need no network and no key.
-
-### Deploy
-
-`Dockerfile` builds one container in which symphony-server serves the built web app and `/ws` on `$PORT`. Set `XAI_API_KEY` as a runtime secret on the host. It is never baked into the image.
-
-```sh
-docker build -t osmo . && docker run -p 8080:8080 -e XAI_API_KEY=... osmo
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, development, and test instructions.
