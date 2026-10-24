@@ -53,14 +53,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
         widgets: [...turn.widgets, { id: event.widget.id, type: event.widget.type, props: asRecord(event.widget.props) }],
       }));
     case "widget.update":
-      return {
-        ...feed,
-        turns: feed.turns.map((turn) =>
-          turn.role === "assistant" && turn.widgets.some((w) => w.id === event.id)
-            ? { ...turn, widgets: turn.widgets.map((w) => (w.id === event.id ? { ...w, props: { ...w.props, ...event.patch } } : w)) }
-            : turn,
-        ),
-      };
+      return updateWidget(feed, event.id, event.patch);
     case "state":
       if (event.state === "working" && event.detail) {
         const label = event.detail;
@@ -73,6 +66,27 @@ export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
           : feed;
       }
   }
+}
+
+/**
+ * Patch exactly one widget: the newest one carrying this id. Older widgets stay frozen even if an
+ * id were ever reused (for example by a server session started after End), so an update can never
+ * reach back and rewrite something already above the current message.
+ */
+function updateWidget(feed: Feed, id: string, patch: Record<string, unknown>): Feed {
+  for (let t = feed.turns.length - 1; t >= 0; t--) {
+    const turn = feed.turns[t];
+    if (turn?.role !== "assistant") continue;
+    let w = -1;
+    turn.widgets.forEach((widget, i) => {
+      if (widget.id === id) w = i;
+    });
+    if (w === -1) continue;
+    const widgets = turn.widgets.map((widget, i) => (i === w ? { ...widget, props: { ...widget.props, ...patch } } : widget));
+    const turns = feed.turns.map((existing, i) => (i === t ? { ...turn, widgets } : existing));
+    return { ...feed, turns };
+  }
+  return feed;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
