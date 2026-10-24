@@ -20,9 +20,9 @@ importers:
       '@osmo/chat-sdk-widgets':
         specifier: workspace:*
         version: link:../../packages/chat-sdk-widgets
-      '@osmo/orb-composer':
+      '@osmo/osmo-composer':
         specifier: workspace:*
-        version: link:../../packages/orb-composer
+        version: link:../../packages/osmo-composer
       react:
         specifier: ^18.3.1
         version: 18.3.1

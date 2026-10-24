@@ -1,18 +1,18 @@
 import { type ClientEvent, type ServerEvent, serverEventSchema } from "./protocol";
 
-export interface OrbClientHandlers {
+export interface OsmoClientHandlers {
   onEvent: (event: ServerEvent) => void;
   onAudio: (frame: ArrayBuffer) => void;
   onClose: () => void;
 }
 
 /** The single browser WebSocket to Symphony: binary = PCM16, text = JSON events. */
-export class OrbClient {
+export class OsmoClient {
   private socket: WebSocket | null = null;
 
   constructor(
     private readonly url: string,
-    private readonly handlers: OrbClientHandlers,
+    private readonly handlers: OsmoClientHandlers,
   ) {}
 
   connect(): Promise<void> {

@@ -7,8 +7,8 @@
  */
 import { chromium, type WebSocketRoute } from "playwright-core";
 
-const BASE = process.env.ORB_URL ?? "http://127.0.0.1:4173";
-const OUT = process.argv[2] ?? "/workspace/orb-shots";
+const BASE = process.env.OSMO_URL ?? "http://127.0.0.1:4173";
+const OUT = process.argv[2] ?? "/workspace/osmo-shots";
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 type Json = Record<string, unknown>;

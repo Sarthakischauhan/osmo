@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@osmo/chat-sdk-widgets": "workspace:*",
-    "@osmo/orb-composer": "workspace:*",
+    "@osmo/osmo-composer": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

@@ -1,5 +1,5 @@
 import { WidgetView } from "@osmo/chat-sdk-widgets";
-import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOrbSession } from "@osmo/orb-composer";
+import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, emptyFeed, reduceFeed } from "./feed";
 
@@ -8,7 +8,7 @@ const MODEL_LABEL = "grok-voice-latest";
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
   const onEvent = useCallback((event: ServerEvent) => dispatch(event), []);
-  const session = useOrbSession({ url: sameOriginSocketUrl(window.location), onEvent });
+  const session = useOsmoSession({ url: sameOriginSocketUrl(window.location), onEvent });
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <strong>Orb</strong>
+          <strong>Osmo</strong>
           <span className={`status ${connected ? "on" : ""}`}>
             <i />
             {connected ? "connected" : session.connection} · {MODEL_LABEL}

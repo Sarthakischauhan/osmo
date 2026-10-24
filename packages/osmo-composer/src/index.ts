@@ -1,7 +1,7 @@
 export * from "./protocol";
-export { OrbClient, sameOriginSocketUrl } from "./client";
+export { OsmoClient, sameOriginSocketUrl } from "./client";
 export { MicCapture, PcmPlayer } from "./audio";
-export { useOrbSession } from "./useOrbSession";
-export type { OrbConnection, OrbSession, OrbSessionOptions } from "./useOrbSession";
+export { useOsmoSession } from "./useOsmoSession";
+export type { OsmoConnection, OsmoSession, OsmoSessionOptions } from "./useOsmoSession";
 export { OrbComposer } from "./OrbComposer";
 export type { OrbComposerProps } from "./OrbComposer";
