@@ -61,6 +61,7 @@ export const chartPropsSchema = z
 export const htmlPropsSchema = z
   .object({
     html: z.string().min(1).max(100_000),
+    title: z.string().min(1).max(80).optional(),
   })
   .strict();
 
@@ -96,6 +97,6 @@ export function describeWidget(widget: Widget): string {
       }`;
     }
     case "html":
-      return "interactive html widget";
+      return widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
   }
 }

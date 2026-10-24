@@ -27,4 +27,11 @@ describe("widgetSchema", () => {
     const bad = { type: "chart", props: { kind: "line", series: [{ name: "TSLA", points: [{ x: "d1", y: Number.NaN }] }] } };
     expect(widgetSchema.safeParse(bad).success).toBe(false);
   });
+
+  it("validates the optional html title and describes it", () => {
+    const parsed = widgetSchema.parse({ type: "html", props: { html: "<p>x</p>", title: "Tip calculator" } });
+    expect(describeWidget(parsed)).toBe('interactive html widget "Tip calculator"');
+    expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "" } }).success).toBe(false);
+    expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "t".repeat(81) } }).success).toBe(false);
+  });
 });
