@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./protocol": "./src/protocol.ts"
+    "./protocol": "./src/protocol.ts",
+    "./radial-picker.css": "./src/radial-picker/radialPicker.css"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

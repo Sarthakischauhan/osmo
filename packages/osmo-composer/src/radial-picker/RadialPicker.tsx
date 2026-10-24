@@ -1,0 +1,590 @@
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
+import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
+import {
+  CLOSE_GRACE_MS,
+  FREEZE_AFTER_SNAP_MS,
+  PREVIEW_HOVER_MS,
+  PX_PER_SLOT,
+  RINGS,
+  type RingKey,
+  SNAP_IDLE_MS,
+  SNAP_MS,
+  easeOut,
+  hitTest,
+  itemAt,
+  itemPresence,
+  moreMarkers,
+  polar,
+  slotAngle,
+} from "./geometry";
+import { type ProviderIcon, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
+import { type Context, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
+
+export interface RadialPickerProps {
+  registry: VoiceModel[];
+  value: VoiceSelection;
+  /** Fires once per commit (click, Enter or Space). Send `session.configure` from here. */
+  onChange: (next: VoiceSelection) => void;
+  orbSize?: number;
+  /** Provider glyphs and labels keyed by `VoiceModel.provider`; unknown providers get a monogram. */
+  providerIcons?: Record<string, ProviderIcon>;
+  /** Orb face; defaults to a neutral glass sphere. */
+  orb?: ReactNode;
+  /** Called ~400 ms after a voice pill is hovered or focused; play a short sample. */
+  onPreview?: (pick: { model: string; voice: string }) => void;
+  /** Called when the hovered/focused voice changes or the dial closes. */
+  onPreviewStop?: () => void;
+  /** The voice currently previewing, for the pill's playing indicator. */
+  previewing?: { model: string; voice: string };
+  /** No previews right now (e.g. the agent is speaking). */
+  previewDisabled?: boolean;
+}
+
+const EFFORT_LABEL: Record<Effort, string> = { low: "Low", medium: "Med", high: "High" };
+const EFFORT_BARS: Record<Effort, number> = { low: 1, medium: 2, high: 3 };
+/** Dial canvas: R3 radius plus room for half a pill. */
+const REACH = 300;
+const KEY_ORDER: RingKey[] = ["providers", "models", "voices", "effort"];
+
+interface Glide {
+  ring: RingKey;
+  from: number;
+  to: number;
+  start: number;
+}
+
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+export function RadialPicker({
+  registry,
+  value,
+  onChange,
+  orbSize = 96,
+  providerIcons = defaultIcons,
+  orb,
+  onPreview,
+  onPreviewStop,
+  previewing,
+  previewDisabled = false,
+}: RadialPickerProps) {
+  const groups = useMemo(() => groupProviders(registry), [registry]);
+  const [state, dispatch] = useReducer(reducePicker, initialPicker);
+  const reduced = useReducedMotion();
+  const [glide, setGlide] = useState<{ ring: RingKey; value: number } | undefined>();
+  const [hover, setHover] = useState<{ ring: RingKey; index: number } | undefined>();
+  const [active, setActive] = useState<Partial<Record<RingKey, number>>>({});
+
+  const ids = `rp${useId().replace(/:/g, "")}`;
+  const root = useRef<HTMLDivElement>(null);
+  const orbButton = useRef<HTMLButtonElement>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const ctx: Context = { groups, value };
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
+  const timers = useRef<{ close?: number; snap?: number; thaw?: number; preview?: number; frame?: number }>({});
+  const lastPointer = useRef<{ x: number; y: number } | undefined>();
+  const wheelCarry = useRef(0);
+  const drag = useRef<{ ring: RingKey; angle: number; id: number } | undefined>();
+
+  const cx = REACH;
+  const cy = REACH;
+  const width = REACH * 2;
+
+  const group = groups.find((g) => g.id === state.provider);
+  const pathModel = group?.models.find((m) => m.id === state.model);
+  const efforts = effortsOf(pathModel);
+  const counts: Record<RingKey, number> = {
+    providers: groups.length,
+    models: group?.models.length ?? 0,
+    voices: pathModel?.voices.length ?? 0,
+    effort: efforts.length,
+  };
+  const countsRef = useRef(counts);
+  countsRef.current = counts;
+  const openRings: RingKey[] = KEY_ORDER.filter(
+    (key) => (key === "providers" && state.depth >= 1) || (key === "models" && state.depth >= 2) || (key === "voices" && state.depth >= 3) || (key === "effort" && state.depth >= 3 && efforts.length > 0),
+  );
+
+  const offsetOf = (ring: RingKey) => (glide?.ring === ring ? glide.value : state.offsets[ring]);
+
+  // ---------------------------------------------------------------- open / close
+
+  const open = useCallback(() => {
+    window.clearTimeout(timers.current.close);
+    dispatch({ type: "open", ...ctxRef.current });
+  }, []);
+
+  const close = useCallback(() => {
+    const t = timers.current;
+    window.clearTimeout(t.close);
+    window.clearTimeout(t.snap);
+    window.clearTimeout(t.thaw);
+    window.clearTimeout(t.preview);
+    if (t.frame !== undefined) cancelAnimationFrame(t.frame);
+    setGlide(undefined);
+    setHover(undefined);
+    setActive({});
+    dispatch({ type: "close" });
+    onPreviewStop?.();
+  }, [onPreviewStop]);
+
+  const scheduleClose = () => {
+    if (timers.current.close !== undefined || stateRef.current.depth === 0) return;
+    timers.current.close = window.setTimeout(() => {
+      timers.current.close = undefined;
+      close();
+    }, CLOSE_GRACE_MS);
+  };
+  const cancelClose = () => {
+    window.clearTimeout(timers.current.close);
+    timers.current.close = undefined;
+  };
+
+  useEffect(() => {
+    const t = timers.current;
+    return () => {
+      window.clearTimeout(t.close);
+      window.clearTimeout(t.snap);
+      window.clearTimeout(t.thaw);
+      window.clearTimeout(t.preview);
+      if (t.frame !== undefined) cancelAnimationFrame(t.frame);
+    };
+  }, []);
+
+  // ---------------------------------------------------------------- hover
+
+  const hoverItem = useCallback((ring: RingKey, index: number | undefined) => {
+    setHover(index === undefined ? undefined : { ring, index });
+    if (index === undefined) return;
+    const now = performance.now();
+    const { groups: gs } = ctxRef.current;
+    const current = stateRef.current;
+    if (ring === "providers") {
+      const target = gs[index];
+      if (target) dispatch({ type: "hoverProvider", provider: target.id, now, ...ctxRef.current });
+    } else if (ring === "models") {
+      const target = gs.find((g) => g.id === current.provider)?.models[index];
+      if (target) dispatch({ type: "hoverModel", model: target.id, now, ...ctxRef.current });
+    }
+  }, []);
+
+  const pointAt = useCallback(
+    (x: number, y: number) => {
+      const current = stateRef.current;
+      const hit = hitTest(cx, cy, x, y);
+      if (hit.ring === "none") {
+        setHover(undefined);
+        scheduleClose();
+        return;
+      }
+      cancelClose();
+      if (hit.ring === "orb") {
+        if (current.depth === 0) open();
+        setHover(undefined);
+        return;
+      }
+      const ringOpen =
+        (hit.ring === "providers" && current.depth >= 1) || (hit.ring === "models" && current.depth >= 2) || ((hit.ring === "voices" || hit.ring === "effort") && current.depth >= 3);
+      if (!ringOpen) {
+        setHover(undefined);
+        return;
+      }
+      const ring = RINGS[hit.ring];
+      hoverItem(hit.ring, itemAt(ring, countsRef.current[hit.ring], current.offsets[hit.ring], hit.angle));
+    },
+    // scheduleClose / cancelClose only touch refs.
+    [cx, cy, hoverItem, open],
+  );
+
+  const localPoint = (clientX: number, clientY: number) => {
+    const box = root.current?.getBoundingClientRect();
+    return box ? { x: clientX - box.left, y: clientY - box.top } : undefined;
+  };
+
+  // ---------------------------------------------------------------- scrolling
+
+  const settleLater = useCallback(
+    (ring: RingKey) => {
+      const t = timers.current;
+      const finish = () => {
+        setGlide(undefined);
+        dispatch({ type: "settle", ring, now: performance.now() });
+        window.clearTimeout(t.thaw);
+        t.thaw = window.setTimeout(() => {
+          dispatch({ type: "thaw", now: performance.now() });
+          // Resume hover where the pointer rests now.
+          const point = lastPointer.current;
+          if (point) window.setTimeout(() => pointAt(point.x, point.y), 0);
+        }, FREEZE_AFTER_SNAP_MS + 5);
+      };
+      const from = stateRef.current.offsets[ring];
+      dispatch({ type: "snap", ring, count: countsRef.current[ring] });
+      const to = reducePicker(stateRef.current, { type: "snap", ring, count: countsRef.current[ring] }).offsets[ring];
+      if (reduced || Math.abs(to - from) < 0.001) {
+        finish();
+        return;
+      }
+      const glideState: Glide = { ring, from, to, start: performance.now() };
+      const frame = (now: number) => {
+        const k = easeOut((now - glideState.start) / SNAP_MS);
+        setGlide({ ring, value: glideState.from + (glideState.to - glideState.from) * k });
+        if (k < 1) t.frame = requestAnimationFrame(frame);
+        else {
+          t.frame = undefined;
+          finish();
+        }
+      };
+      if (t.frame !== undefined) cancelAnimationFrame(t.frame);
+      t.frame = requestAnimationFrame(frame);
+    },
+    [pointAt, reduced],
+  );
+
+  const scrollBy = useCallback(
+    (ring: RingKey, slots: number) => {
+      const t = timers.current;
+      if (t.frame !== undefined) {
+        cancelAnimationFrame(t.frame);
+        t.frame = undefined;
+        setGlide(undefined);
+      }
+      window.clearTimeout(t.snap);
+      if (reduced) {
+        // Whole slots only, no glide.
+        wheelCarry.current += slots;
+        const whole = wheelCarry.current >= 0.5 ? 1 : wheelCarry.current <= -0.5 ? -1 : 0;
+        if (whole === 0) return;
+        wheelCarry.current = 0;
+        dispatch({ type: "scroll", ring, slots: whole, count: countsRef.current[ring] });
+        settleLater(ring);
+        return;
+      }
+      dispatch({ type: "scroll", ring, slots, count: countsRef.current[ring] });
+      t.snap = window.setTimeout(() => settleLater(ring), SNAP_IDLE_MS);
+    },
+    [reduced, settleLater],
+  );
+
+  // Wheel needs a non-passive listener to stop the page from scrolling.
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      const current = stateRef.current;
+      if (current.depth === 0) return;
+      const point = localPoint(event.clientX, event.clientY);
+      if (!point) return;
+      const hit = hitTest(cx, cy, point.x, point.y);
+      if (hit.ring === "none" || hit.ring === "orb") return;
+      const isOpen =
+        (hit.ring === "providers" && current.depth >= 1) || (hit.ring === "models" && current.depth >= 2) || ((hit.ring === "voices" || hit.ring === "effort") && current.depth >= 3);
+      if (!isOpen) return;
+      event.preventDefault();
+      const scale = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? 400 : 1;
+      scrollBy(hit.ring, ((event.deltaY + event.deltaX) * scale) / PX_PER_SLOT);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [cx, cy, scrollBy]);
+
+  // ---------------------------------------------------------------- previews
+
+  const previewTarget =
+    hover?.ring === "voices" && !reduced ? hover.index : document.activeElement?.id === `${ids}-voices` ? active.voices : undefined;
+  const previewVoice = previewTarget === undefined ? undefined : pathModel?.voices[previewTarget];
+  const previewKey = previewVoice && pathModel ? `${pathModel.id}/${previewVoice.id}` : undefined;
+  useEffect(() => {
+    const t = timers.current;
+    window.clearTimeout(t.preview);
+    if (!previewKey || previewDisabled || !onPreview) return;
+    const [model, voice] = [previewKey.slice(0, previewKey.indexOf("/")), previewKey.slice(previewKey.indexOf("/") + 1)];
+    t.preview = window.setTimeout(() => onPreview({ model, voice }), PREVIEW_HOVER_MS);
+    return () => {
+      window.clearTimeout(t.preview);
+      onPreviewStop?.();
+    };
+  }, [previewKey, previewDisabled, onPreview, onPreviewStop]);
+
+  // ---------------------------------------------------------------- commit
+
+  const commit = (ring: RingKey, index: number) => {
+    if (ring === "providers") {
+      const target = groups[index];
+      if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
+      return;
+    }
+    if (ring === "models") {
+      const model = group?.models[index];
+      if (model) onChange(pickModel(model, value));
+      return;
+    }
+    if (!pathModel) return;
+    const base = pathModel.id === value.model ? value : pickModel(pathModel, value);
+    if (ring === "voices") {
+      const voice = pathModel.voices[index];
+      if (voice) onChange({ ...base, voice: voice.id });
+    } else {
+      const effort = efforts[index];
+      if (effort) onChange({ ...base, effort });
+    }
+  };
+
+  // ---------------------------------------------------------------- keyboard
+
+  const onRingKey = (ring: RingKey, event: KeyboardEvent<HTMLDivElement>) => {
+    const count = counts[ring];
+    const current = active[ring] ?? 0;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      orbButton.current?.focus();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = Math.min(count - 1, Math.max(0, current + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1)));
+      setActive((previous) => ({ ...previous, [ring]: next }));
+      dispatch({ type: "reveal", ring, index: next, count });
+      if (ring === "providers" || ring === "models") {
+        // Keyboard moves count as hover for opening the next ring.
+        const now = performance.now();
+        if (!isFrozen(stateRef.current, ring, now)) hoverItem(ring, next);
+        setHover(undefined);
+      }
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      commit(ring, current);
+    }
+  };
+
+  const onRingFocus = (ring: RingKey) => {
+    if (active[ring] !== undefined) return;
+    const selected = selectedIndex(ring);
+    const start = selected >= 0 ? selected : Math.max(0, Math.ceil(state.offsets[ring]));
+    setActive((previous) => ({ ...previous, [ring]: start }));
+    if (ring === "providers" || ring === "models") hoverItem(ring, start);
+    setHover(undefined);
+  };
+
+  const selectedIndex = (ring: RingKey): number => {
+    if (ring === "providers") return groups.findIndex((g) => g.models.some((m) => m.id === value.model));
+    if (ring === "models") return group?.models.findIndex((m) => m.id === value.model) ?? -1;
+    if (!pathModel || pathModel.id !== value.model) return -1;
+    if (ring === "voices") return pathModel.voices.findIndex((v) => v.id === value.voice);
+    return value.effort === undefined ? -1 : efforts.indexOf(value.effort);
+  };
+
+  // ---------------------------------------------------------------- render
+
+  const valueModel = registry.find((m) => m.id === value.model);
+  const summary = [
+    valueModel ? providerIcon(providerIcons, valueModel.provider).label : undefined,
+    value.model,
+    valueModel?.voices.find((v) => v.id === value.voice)?.label ?? value.voice,
+    value.effort,
+  ]
+    .filter((part) => part !== undefined)
+    .join(" · ");
+
+  const renderRing = (key: RingKey) => {
+    const ring = RINGS[key];
+    const offset = offsetOf(key);
+    const count = counts[key];
+    const selected = selectedIndex(key);
+    const markers = moreMarkers(ring, count, offset);
+    const labelFor = (index: number): { text: string; title: string; node: ReactNode } => {
+      if (key === "providers") {
+        const g = groups[index];
+        const entry = providerIcon(providerIcons, g?.id ?? "");
+        return { text: entry.label, title: entry.label, node: entry.icon ?? <span className="rp-monogram">{entry.label.slice(0, 1).toUpperCase()}</span> };
+      }
+      if (key === "models") {
+        const m = group?.models[index];
+        return { text: m?.label ?? "", title: m?.id ?? "", node: m?.label };
+      }
+      if (key === "voices") {
+        const v = pathModel?.voices[index];
+        const playing = previewing !== undefined && previewing.model === pathModel?.id && previewing.voice === v?.id;
+        return {
+          text: v?.label ?? "",
+          title: v ? `${v.label} · ${v.traits.join(", ")}` : "",
+          node: (
+            <>
+              {v?.label}
+              {playing && (
+                <span className="rp-playing" aria-label="previewing">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              )}
+            </>
+          ),
+        };
+      }
+      const level = efforts[index] ?? "low";
+      return {
+        text: EFFORT_LABEL[level],
+        title: `Reasoning effort: ${level}`,
+        node: (
+          <>
+            {EFFORT_LABEL[level]}
+            <span className="rp-meter" aria-hidden>
+              {[1, 2, 3].map((bar) => (
+                <i key={bar} data-on={bar <= EFFORT_BARS[level]} />
+              ))}
+            </span>
+          </>
+        ),
+      };
+    };
+    const items: ReactNode[] = [];
+    for (let index = 0; index < count; index++) {
+      const position = index - offset;
+      const presence = itemPresence(ring, position);
+      if (presence.opacity <= 0) continue;
+      const { x, y } = polar(cx, cy, ring.radius, slotAngle(ring, position));
+      const isSelected = index === selected;
+      const isActive = active[key] === index && document.activeElement?.id === `${ids}-${key}`;
+      const isHover = (hover?.ring === key && hover.index === index) || isActive;
+      const isPath = (key === "providers" && groups[index]?.id === state.provider) || (key === "models" && group?.models[index]?.id === state.model);
+      const label = labelFor(index);
+      items.push(
+        <div
+          key={`${key}-${index}`}
+          className="rp-slot"
+          style={{ left: x, top: y, opacity: presence.opacity, transform: `translate(-50%, -50%) scale(${presence.scale})` }}
+        >
+          <div
+            id={`${ids}-${key}-${index}`}
+            role="option"
+            aria-selected={isSelected}
+            title={label.title}
+            aria-label={label.title}
+            className={`rp-item rp-${key}`}
+            data-state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
+            style={{ animationDelay: `${Math.max(0, Math.round(position)) * 20}ms` }}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => commit(key, index)}
+          >
+            {label.node}
+          </div>
+        </div>,
+      );
+    }
+    const marker = (position: number, side: string) => {
+      const { x, y } = polar(cx, cy, ring.radius, slotAngle(ring, position));
+      return (
+        <span key={side} className="rp-more" aria-hidden style={{ left: x, top: y }}>
+          …
+        </span>
+      );
+    };
+    const activeIndex = active[key];
+    return (
+      <div
+        key={key}
+        id={`${ids}-${key}`}
+        className="rp-ring"
+        data-ring={key}
+        role="listbox"
+        tabIndex={0}
+        aria-label={RING_LABELS[key]}
+        aria-orientation="horizontal"
+        aria-activedescendant={activeIndex === undefined ? undefined : `${ids}-${key}-${activeIndex}`}
+        onKeyDown={(event) => onRingKey(key, event)}
+        onFocus={() => onRingFocus(key)}
+      >
+        {items}
+        {markers.before && marker(-0.8, "before")}
+        {markers.after && marker(ring.visible - 0.2, "after")}
+      </div>
+    );
+  };
+
+  return (
+    <div
+      ref={root}
+      className="rp"
+      data-open={state.depth > 0}
+      data-depth={state.depth}
+      data-reduced-motion={reduced}
+      style={{ width, height: cy + orbSize / 2 + 64 }}
+      onPointerMove={(event) => {
+        const point = localPoint(event.clientX, event.clientY);
+        if (!point) return;
+        lastPointer.current = point;
+        const dragging = drag.current;
+        if (dragging && dragging.id === event.pointerId) {
+          const angle = (Math.atan2(cy - point.y, point.x - cx) * 180) / Math.PI;
+          scrollBy(dragging.ring, (angle - dragging.angle) / RINGS[dragging.ring].step);
+          dragging.angle = angle;
+          return;
+        }
+        if (event.pointerType !== "touch") pointAt(point.x, point.y);
+      }}
+      onPointerDown={(event) => {
+        const point = localPoint(event.clientX, event.clientY);
+        if (!point || event.pointerType !== "touch") return;
+        const hit = hitTest(cx, cy, point.x, point.y);
+        if (hit.ring === "none" || hit.ring === "orb") return;
+        drag.current = { ring: hit.ring, angle: hit.angle, id: event.pointerId };
+        root.current?.setPointerCapture(event.pointerId);
+      }}
+      onPointerUp={() => {
+        drag.current = undefined;
+      }}
+      onPointerLeave={() => {
+        lastPointer.current = undefined;
+        setHover(undefined);
+        scheduleClose();
+      }}
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !root.current?.contains(next)) {
+          if (!root.current?.matches(":hover")) close();
+        }
+      }}
+    >
+      <button
+        ref={orbButton}
+        type="button"
+        className="rp-orb"
+        style={{ left: cx, top: cy, width: orbSize, height: orbSize }}
+        aria-expanded={state.depth > 0}
+        aria-label="Change provider, model, voice and reasoning"
+        onFocus={open}
+        onClick={() => (state.depth === 0 ? open() : undefined)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") close();
+        }}
+      >
+        {orb ?? <span className="rp-glass" aria-hidden />}
+      </button>
+      {/* After the orb in DOM order so Tab goes orb → providers → models → voices → effort. */}
+      <div className="rp-dial">{openRings.map(renderRing)}</div>
+      <output className="rp-summary" style={{ top: cy + orbSize / 2 + 18 }} aria-live="polite">
+        {summary}
+      </output>
+    </div>
+  );
+}
+
+const RING_LABELS: Record<RingKey, string> = {
+  providers: "Providers",
+  models: "Models",
+  voices: "Voices",
+  effort: "Reasoning effort",
+};
