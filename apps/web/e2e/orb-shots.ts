@@ -13,6 +13,17 @@ const PREFIX = process.argv[4] ?? "";
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 const send = (ws: WebSocketRoute, event: Record<string, unknown>) => ws.send(JSON.stringify(event));
+/** A tone with a 4 Hz syllable-like envelope, as raw PCM16 little-endian. */
+function tone(amplitude: number, seconds: number): Buffer {
+  const rate = 24000;
+  const buffer = Buffer.alloc(rate * seconds * 2);
+  for (let i = 0; i < rate * seconds; i++) {
+    const envelope = 0.6 + 0.4 * Math.sin((2 * Math.PI * 4 * i) / rate);
+    const sample = Math.sin((2 * Math.PI * 220 * i) / rate) * amplitude * envelope;
+    buffer.writeInt16LE(Math.round(sample * 32767), i * 2);
+  }
+  return buffer;
+}
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function connect(page: Page, sockets: WebSocketRoute[]): Promise<WebSocketRoute> {
@@ -37,21 +48,36 @@ async function main() {
   await page.goto(BASE);
 
   if (MODE === "orb") {
-    const orb = async (name: string) => {
-      await pause(900);
+    const orb = async (name: string, wait = 900) => {
+      await pause(wait);
       const box = await page.locator(".dock").boundingBox();
       if (!box) throw new Error("no dock");
-      await page.screenshot({ path: `${OUT}/${name}.png`, clip: { x: box.x + box.width / 2 - 200, y: box.y - 40, width: 400, height: box.height + 60 } });
+      await page.screenshot({ path: `${OUT}/${name}.png`, clip: { x: box.x + box.width / 2 - 200, y: box.y - 60, width: 400, height: box.height + 80 } });
     };
-    await orb("orb-1-idle-amber");
+    await orb("orb-1-idle");
     const ws = await connect(page, sockets);
     send(ws, { type: "state", state: "listening" });
-    await orb("orb-2-waiting-listening-amber");
+    await orb("orb-2-listening");
     send(ws, { type: "state", state: "thinking" });
     await orb("orb-3-thinking");
     send(ws, { type: "state", state: "speaking" });
-    await pause(400);
-    await orb("orb-4-speaking");
+    // Real playback: a voiced 24 kHz PCM16 tone at three loudnesses, measured by the orb's analyser.
+    for (const [i, amplitude] of [0.03, 0.08, 0.3].entries()) {
+      for (let k = 0; k < 8; k++) ws.send(tone(amplitude, 0.25));
+      await page.waitForFunction(() => Number(document.querySelector(".orb-canvas")?.getAttribute("data-level") ?? 0) > 0.02);
+      await pause(700);
+      const level = await page.getAttribute(".orb-canvas", "data-level");
+      await orb(`orb-4-speaking-${i + 1}-level-${level}`, 0);
+      await pause(2200);
+    }
+    send(ws, { type: "state", state: "listening" });
+    send(ws, { type: "transcript.delta", role: "user", text: "Find me a dinner spot." });
+    send(ws, {
+      type: "widget.render",
+      widget: { id: "w1-a", type: "options", props: { prompt: "Pick a dinner spot", choices: [{ id: "i", label: "Italian" }, { id: "r", label: "Ramen" }] } },
+    });
+    await pause(1500);
+    await page.screenshot({ path: `${OUT}/orb-5-awaiting-choice-amber.png` });
   } else {
     // Session 1 shows a weather card as w1, then the user ends the call; the feed stays on screen.
     const first = await connect(page, sockets);
