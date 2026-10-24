@@ -2,14 +2,14 @@
 
 Symphony as a harness and my chat SDK voice product.
 
-## Orb
+## Osmo
 
-Orb is a voice-only assistant. You talk to the orb. Symphony thinks and runs tools, and the answers come back as speech plus live widgets (cards, options, charts, sandboxed HTML). Voice is the only input. Widgets are the only visual output besides the orb.
+Osmo is a voice-only assistant. You talk to the orb. Symphony thinks and runs tools, and the answers come back as speech plus live widgets (cards, options, charts, sandboxed HTML). Voice is the only input. Widgets are the only visual output besides the orb.
 
 ```mermaid
 flowchart LR
   subgraph Browser["Browser (apps/web)"]
-    OC["orb-composer<br/>mic, playback, orb states<br/>WS client"]
+    OC["osmo-composer<br/>mic, playback, orb states<br/>WS client"]
     WG["chat SDK widgets<br/>card · options · chart · html<br/>sends widget.action"]
   end
 
@@ -62,7 +62,7 @@ sequenceDiagram
 | --- | --- |
 | `apps/symphony-server` | Python FastAPI app. Mounts `core_server`'s run API at `/api` and adds `/ws`. Owns the Grok realtime session, the tool loop, `render_widget`/`update_widget`, and prop validation. |
 | `vendor/core_server` | Symphony's `core_server`, vendored **unmodified** from [symphony@a335957](https://github.com/Sarthakischauhan/symphony/tree/a335957c53009d6c4f82e8176a9abf975b736979/core_server) until it is published. See `vendor/README.md`. |
-| `packages/orb-composer` | Orb UI, mic capture and playback, WS client, wire protocol types. No chat SDK imports. |
+| `packages/osmo-composer` | Orb UI, mic capture and playback, WS client, wire protocol types. No chat SDK imports. |
 | `packages/chat-sdk-widgets` | Widget registry, the 4 renderers and the `widget.action` callback. |
 | `apps/web` | Full-screen page: orb at the bottom, widget canvas above. |
 
@@ -112,5 +112,5 @@ The server tests run against a local fake Grok websocket server and mocked HTTP.
 `Dockerfile` builds one container in which symphony-server serves the built web app and `/ws` on `$PORT`. Set `XAI_API_KEY` as a runtime secret on the host. It is never baked into the image.
 
 ```sh
-docker build -t orb . && docker run -p 8080:8080 -e XAI_API_KEY=... orb
+docker build -t osmo . && docker run -p 8080:8080 -e XAI_API_KEY=... osmo
 ```
