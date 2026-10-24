@@ -23,7 +23,8 @@ from symphony_server import grok_events as grok
 
 log = logging.getLogger("symphony.voices")
 
-Effort = Literal["low", "medium", "high"]
+# xAI documents `reasoning.effort` as "high" (default) or "none"; low/medium stay for other providers.
+Effort = Literal["none", "low", "medium", "high"]
 
 SET_VOICE = "set_voice"
 PREVIEW_LINE = "Hi, this is how I sound. Nice to meet you."
@@ -71,17 +72,28 @@ class SetVoiceArgs(_Wire):
     effort: Effort | None = None
 
 
+GROK_VOICES = [
+    Voice(id="eve", label="Eve", traits=["warm", "bright", "upbeat"]),
+    Voice(id="ara", label="Ara", traits=["calm", "soft", "friendly"]),
+    Voice(id="sal", label="Sal", traits=["deep", "smooth", "steady"]),
+]
+GROK_CAPABILITIES = Capabilities(tools=True, interrupt=True, customVoices=False, reasoningEffort=["high", "none"])
+
 VOICE_MODELS: tuple[VoiceModel, ...] = (
     VoiceModel(
         id="grok-voice-latest",
         provider="xai",
         label="Grok Voice",
-        capabilities=Capabilities(tools=True, interrupt=True, customVoices=False),
-        voices=[
-            Voice(id="eve", label="Eve", traits=["warm", "bright", "upbeat"]),
-            Voice(id="ara", label="Ara", traits=["calm", "soft", "friendly"]),
-            Voice(id="sal", label="Sal", traits=["deep", "smooth", "steady"]),
-        ],
+        capabilities=GROK_CAPABILITIES,
+        voices=GROK_VOICES,
+        defaultVoice="eve",
+    ),
+    VoiceModel(
+        id="grok-voice-3.0",
+        provider="xai",
+        label="Grok Voice 3.0",
+        capabilities=GROK_CAPABILITIES,
+        voices=GROK_VOICES,
         defaultVoice="eve",
     ),
 )
@@ -91,7 +103,7 @@ SET_VOICE_PARAMETERS: dict[str, Any] = {
     "properties": {
         "model": {"type": "string", "description": "Voice model id; omit to keep the current one."},
         "voice": {"type": "string", "description": "Voice id from the catalog; pick by traits when asked for a kind of voice."},
-        "effort": {"type": "string", "enum": ["low", "medium", "high"], "description": "Only for models that list reasoning effort."},
+        "effort": {"type": "string", "enum": ["none", "low", "medium", "high"], "description": "Only for models that list reasoning effort."},
     },
     "additionalProperties": False,
 }
@@ -136,6 +148,14 @@ def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], c
     if effort is None and allowed:
         effort = "medium" if "medium" in allowed else allowed[0]
     return Selection(model=model.id, voice=voice.id, effort=effort)
+
+
+def default_selection(models: tuple[VoiceModel, ...], voice: str) -> Selection:
+    """The first model with `voice` if it has one (else its default voice) and its default effort."""
+    model = models[0]
+    base = Selection(model=model.id, voice=model.defaultVoice)
+    picked = resolve_selection(models, {"voice": voice} if any(v.id == voice for v in model.voices) else {}, base)
+    return picked if isinstance(picked, Selection) else base
 
 
 def realtime_url_for(base: str, model: str) -> str:

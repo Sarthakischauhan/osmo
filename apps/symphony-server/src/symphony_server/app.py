@@ -19,10 +19,11 @@ from core_server import (
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
+from symphony_server.protocol import ModelsEvent
 from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
-from symphony_server.voices import PreviewCache
+from symphony_server.voices import VOICE_MODELS, PreviewCache, default_selection
 
 log = logging.getLogger("symphony")
 
@@ -56,6 +57,11 @@ def create_app(
     app = FastAPI(title="symphony-server", lifespan=lifespan)
     install_middlewares(app, core_config, prefix="/api")
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
+
+    @app.get("/voice-models")
+    async def voice_models() -> ModelsEvent:
+        """The picker's registry before any socket is open (the same payload as the `models` event)."""
+        return ModelsEvent(models=list(VOICE_MODELS), selection=default_selection(VOICE_MODELS, settings.voice))
 
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:

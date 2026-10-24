@@ -13,6 +13,7 @@ import json
 import logging
 import secrets
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from core_harness import Tool
@@ -47,6 +48,7 @@ from symphony_server.voices import (
     SET_VOICE_PARAMETERS,
     VOICE_MODELS,
     PreviewCache,
+    default_selection,
     Selection,
     realtime_url_for,
     resolve_selection,
@@ -97,6 +99,13 @@ def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
     ]
 
 
+@dataclass
+class HistoryItem:
+    role: Literal["user", "assistant"]
+    text: str
+    item_id: str | None = None
+
+
 class OsmoSession:
     def __init__(
         self, browser: WebSocket, settings: Settings, tools: Mapping[str, Tool], previews: PreviewCache
@@ -104,9 +113,7 @@ class OsmoSession:
         self.browser = browser
         self.previews = previews
         self.preview_tasks: set[asyncio.Task[None]] = set()
-        default = VOICE_MODELS[0]
-        voice = settings.voice if any(v.id == settings.voice for v in default.voices) else default.defaultVoice
-        self.selection = Selection(model=default.id, voice=voice)
+        self.selection = default_selection(VOICE_MODELS, settings.voice)
         self.instructions = settings.instructions
         self.settings = settings
         self.tools = tools
@@ -120,6 +127,9 @@ class OsmoSession:
         self.muted = False
         self.response_active = False
         self.outputs_pending = False
+        # Spoken turns so far, replayed into a fresh upstream when the model is hot-swapped.
+        self.history: list[HistoryItem] = []
+        self.upstream_count = 0
 
     # ------------------------------------------------------------ browser side
 
@@ -187,13 +197,29 @@ class OsmoSession:
 
     # ------------------------------------------------------------ upstream side
 
-    async def send_upstream(self, event: grok.GrokClientEvent) -> None:
-        if self.upstream is None:
+    async def send_upstream(self, event: grok.GrokClientEvent, target: ClientConnection | None = None) -> None:
+        upstream = target or self.upstream
+        if upstream is None:
             return
         try:
-            await self.upstream.send(event.model_dump_json(exclude_none=True))
+            await upstream.send(event.model_dump_json(exclude_none=True))
         except ConnectionClosed:
-            await self.upstream_lost()
+            if upstream is self.upstream:
+                await self.upstream_lost()
+
+    async def open_upstream(self, model: str) -> ClientConnection | None:
+        try:
+            upstream = await connect(
+                realtime_url_for(self.settings.realtime_url, model),
+                additional_headers={"Authorization": f"Bearer {self.settings.xai_api_key}"},
+                max_size=None,
+            )
+        except (OSError, ConnectionClosed) as exc:
+            log.error("could not reach Grok realtime: %s", exc)
+            return None
+        self.upstream_count += 1
+        log.info("upstream #%d open (model %s)", self.upstream_count, model)
+        return upstream
 
     async def start(self, event: SessionStart) -> None:
         if self.upstream is not None:
@@ -206,14 +232,8 @@ class OsmoSession:
         )
         if isinstance(picked, Selection):
             self.selection = picked
-        try:
-            self.upstream = await connect(
-                realtime_url_for(self.settings.realtime_url, self.selection.model),
-                additional_headers={"Authorization": f"Bearer {self.settings.xai_api_key}"},
-                max_size=None,
-            )
-        except (OSError, ConnectionClosed) as exc:
-            log.error("could not reach Grok realtime: %s", exc)
+        self.upstream = await self.open_upstream(self.selection.model)
+        if self.upstream is None:
             await self.set_state("idle", "could not reach the voice model")
             return
         self.instructions = event.instructions or self.settings.instructions
@@ -221,16 +241,55 @@ class OsmoSession:
         self.pump = asyncio.create_task(self.pump_upstream(self.upstream))
         await self.set_state("listening")
 
-    async def send_session_update(self) -> None:
+    async def send_session_update(self, target: ClientConnection | None = None) -> None:
+        """Voice and reasoning effort go through `session.update`, which xAI accepts mid-session."""
+        effort = self.selection.effort
         await self.send_upstream(
             grok.SessionUpdate(
                 session=grok.SessionConfig(
                     voice=self.selection.voice,
                     instructions=self.instructions,
                     tools=realtime_tools(self.tools),
+                    reasoning=None if effort is None else grok.Reasoning(effort=effort),
                 )
-            )
+            ),
+            target,
         )
+
+    async def hot_swap(self) -> bool:
+        """Move the live conversation onto a new realtime model without dropping the browser.
+
+        The model is fixed per upstream connection (`?model=`), so open a second
+        connection, configure it, replay the spoken turns, switch audio over and only
+        then close the old one. The browser WebSocket is never touched.
+        """
+        old, old_pump = self.upstream, self.pump
+        old_number = self.upstream_count
+        fresh = await self.open_upstream(self.selection.model)
+        if fresh is None:
+            return False
+        await self.send_session_update(fresh)
+        carried = [item for item in self.history if item.text.strip()]
+        for item in carried:
+            await self.send_upstream(grok.ConversationItemCreate(item=history_item(item)), fresh)
+        self.upstream = fresh
+        self.pump = asyncio.create_task(self.pump_upstream(fresh))
+        self.response_active = False
+        self.outputs_pending = False
+        log.info(
+            "hot-swap upstream #%d -> #%d (model %s): carried %d items",
+            old_number,
+            self.upstream_count,
+            self.selection.model,
+            len(carried),
+        )
+        if old is not None:
+            await old.close()
+            log.info("upstream #%d closed after hot-swap", old_number)
+        # A `set_voice` call runs inside the old pump; it ends on its own once the socket is closed.
+        if old_pump is not None and old_pump is not asyncio.current_task():
+            old_pump.cancel()
+        return True
 
     async def configure(self, change: Mapping[str, Any], source: Literal["client", "tool"]) -> Selection | str:
         """The one path for picker commits and `set_voice`: validate, apply upstream, tell the browser."""
@@ -238,13 +297,15 @@ class OsmoSession:
         if isinstance(picked, str):
             log.warning("rejected voice change from %s: %s", source, picked)
             return picked
-        model_changed = picked.model != self.selection.model
+        previous = self.selection
         self.selection = picked
         if self.upstream is not None:
-            if model_changed:
-                # The realtime model is fixed per connection (`?model=`); it applies from the next session.
-                log.info("model %s applies from the next session", picked.model)
-            await self.send_session_update()
+            if picked.model != previous.model:
+                if not await self.hot_swap():
+                    self.selection = previous
+                    return f"could not open {picked.model}; still on {previous.model}"
+            else:
+                await self.send_session_update()
         await self.emit(VoiceConfigured(selection=picked, source=source))
         return picked
 
@@ -328,6 +389,7 @@ class OsmoSession:
             await self.set_state("thinking")
         elif isinstance(event, grok.InputTranscriptionCompleted):
             if event.transcript.strip():
+                self.history.append(HistoryItem(role="user", text=event.transcript, item_id=event.item_id))
                 await self.emit(TranscriptDelta(role="user", text=event.transcript, itemId=event.item_id))
         elif isinstance(event, grok.ResponseCreated):
             self.muted = False
@@ -336,6 +398,7 @@ class OsmoSession:
                 await self.set_state("thinking")
         elif isinstance(event, grok.OutputAudioTranscriptDelta):
             if not self.muted:
+                self.remember_assistant(event.item_id, event.delta)
                 await self.emit(TranscriptDelta(role="assistant", text=event.delta, itemId=event.item_id))
         elif isinstance(event, grok.OutputAudioDelta):
             await self.assistant_audio(base64.b64decode(event.delta))
@@ -369,7 +432,13 @@ class OsmoSession:
         elif call.name == UPDATE_WIDGET:
             result = await self.update_widget(parsed)
         elif call.name == SET_VOICE:
+            before = self.upstream
             outcome = await self.configure(parsed, "tool")
+            if self.upstream is not before:
+                # Hot-swapped: the call belongs to the closed session. The new model sees the
+                # user's request in the carried history and confirms the switch itself.
+                await self.send_upstream(grok.ResponseCreate())
+                return
             result = (
                 {"error": outcome}
                 if isinstance(outcome, str)
@@ -429,13 +498,20 @@ class OsmoSession:
         if widget is None:
             return
         await self.interrupt_response()
+        text = action_text(action, widget)
+        self.history.append(HistoryItem(role="user", text=text))
         await self.send_upstream(
-            grok.ConversationItemCreate(
-                item=grok.UserMessageItem(content=[grok.InputText(text=action_text(action, widget))])
-            )
+            grok.ConversationItemCreate(item=grok.UserMessageItem(content=[grok.InputText(text=text)]))
         )
         await self.send_upstream(grok.ResponseCreate())
         await self.set_state("thinking")
+
+    def remember_assistant(self, item_id: str | None, delta: str) -> None:
+        last = self.history[-1] if self.history else None
+        if last is not None and last.role == "assistant" and last.item_id == item_id:
+            last.text += delta
+        else:
+            self.history.append(HistoryItem(role="assistant", text=delta, item_id=item_id))
 
     async def interrupt_response(self) -> None:
         self.muted = True
@@ -448,6 +524,12 @@ class OsmoSession:
         await self.interrupt_response()
         if self.upstream is not None:
             await self.set_state("listening", BARGE_IN)
+
+
+def history_item(item: HistoryItem) -> grok.UserMessageItem | grok.AssistantMessageItem:
+    if item.role == "user":
+        return grok.UserMessageItem(content=[grok.InputText(text=item.text)])
+    return grok.AssistantMessageItem(content=[grok.OutputText(text=item.text)])
 
 
 def action_text(action: WidgetAction, widget: Widget) -> str:
