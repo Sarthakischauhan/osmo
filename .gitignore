@@ -4,3 +4,8 @@ dist/
 *.png
 *.pdf
 coverage/
+.venv/
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/

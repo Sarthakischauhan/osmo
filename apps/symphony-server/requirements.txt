@@ -1,0 +1,11 @@
+# Install with: uv pip install --no-sources -r requirements.txt
+# (--no-sources: the vendored core_server ships its upstream uv workspace
+# sources unmodified; outside that workspace they must be ignored.)
+#
+# core-server is vendored unmodified until it is published; replace this
+# line with a version pin then. symphony-core / symphony-harness are its
+# upstream siblings, pinned to the same commit as the vendored copy.
+symphony-core @ git+https://github.com/Sarthakischauhan/symphony@a335957c53009d6c4f82e8176a9abf975b736979#subdirectory=core_ai
+symphony-harness @ git+https://github.com/Sarthakischauhan/symphony@a335957c53009d6c4f82e8176a9abf975b736979#subdirectory=core_harness
+core-server @ file:../../vendor/core_server
+-e .[dev]
