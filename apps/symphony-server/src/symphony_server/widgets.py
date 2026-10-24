@@ -63,6 +63,7 @@ class ChartProps(_Strict):
 
 class HtmlProps(_Strict):
     html: str = Field(min_length=1, max_length=100_000)
+    title: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class CardWidget(_Strict):
@@ -107,6 +108,8 @@ def describe_widget(widget: Widget) -> str:
     if isinstance(widget, ChartWidget):
         names = ", ".join(s.name for s in widget.props.series)
         return f"{widget.props.kind} chart, {names}, {len(widget.props.series[0].points)} points"
+    if widget.props.title:
+        return f'interactive html widget "{widget.props.title}"'
     return "interactive html widget"
 
 
@@ -120,7 +123,8 @@ RENDER_WIDGET_PARAMETERS: dict[str, Any] = {
                 "card: {title, body (markdown), image?, actions?: [{id,label}]}; "
                 "options: {prompt, choices: [{id,label,detail?}]}; "
                 "chart: {kind: 'line'|'bar', series: [{name, points: [{x, y}]}]}; "
-                "html: {html} (a complete self-contained document; it runs in a sandboxed iframe)"
+                "html: {html, title?} (a complete self-contained document shown under a header bar with "
+                "title, reload, zoom and fullscreen; it runs in a sandboxed iframe with no network)"
             ),
         },
     },
