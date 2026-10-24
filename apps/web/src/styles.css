@@ -25,7 +25,6 @@ button { font: inherit; color: inherit; }
 .end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
 .end:hover { background: var(--panel-3); }
 
-.canvas { overflow-y: auto; }
 .feed { max-width: 608px; margin: 0 auto; padding: 24px 0 32px; display: flex; flex-direction: column; gap: 18px; }
 .empty { color: var(--muted); text-align: center; margin-top: 18vh; }
 
@@ -36,46 +35,79 @@ button { font: inherit; color: inherit; }
 .turn.assistant { display: grid; grid-template-columns: 28px 1fr; gap: 0; animation: rise .25s ease-out; }
 .avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
 .assistant-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
-.line { margin: 0; font-size: 13px; }
-.cursor { display: inline-block; width: 4px; height: 12px; margin-left: 2px; vertical-align: -1px; background: var(--accent-strong); animation: blink 1s steps(2) infinite; }
 
-.activity { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 14px; background: var(--panel); font-size: 10px; color: var(--muted); }
-.activity-label { font-family: var(--mono); color: var(--text); flex: 1; }
-.activity-status { color: var(--muted); }
+/* chat-sdk (@sarchauhan/chat) renders text, tool rows and card/options widgets.
+   Osmo keeps its borderless look by overriding chat-sdk's tokens and frames here only. */
+.canvas.chat-root {
+  display: block; overflow-y: auto; border-radius: 0; isolation: auto;
+  --chat-bg: var(--bg);
+  --chat-bg-elevated: var(--panel);
+  --chat-fg: var(--text);
+  --chat-fg-muted: var(--muted);
+  --chat-fg-subtle: var(--muted);
+  --chat-border: transparent;
+  --chat-border-strong: transparent;
+  --chat-control-bg: var(--panel-2);
+  --chat-control-hover: var(--panel-3);
+  --chat-accent: var(--accent);
+  --chat-primary: var(--accent);
+  --chat-primary-fg: #111;
+  --chat-ring: transparent;
+  --chat-user-bg: var(--panel-3);
+  --chat-user-fg: var(--text);
+  --chat-radius: 20px;
+  --chat-radius-lg: 20px;
+  --chat-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --chat-body-size: 13px;
+}
+.canvas.chat-root .chat-widget-card,
+.canvas.chat-root .chat-prebuilt,
+.canvas.chat-root .chat-question,
+.canvas.chat-root .agent-tool,
+.canvas.chat-root .chat-question-option,
+.canvas.chat-root .chat-question footer,
+.canvas.chat-root .chat-question button,
+.canvas.chat-root .chat-widget-header,
+.canvas.chat-root .chat-widget-meta { border: 0; box-shadow: none; outline: none; }
+.canvas.chat-root .chat-widget-card { border-radius: 20px; background: var(--panel); padding: 16px; }
+.canvas.chat-root .chat-widget-header { padding: 0 0 6px; background: none; }
+.canvas.chat-root .chat-widget-body { padding: 0; }
+.canvas.chat-root .chat-widget-label-row { display: none; }
+.canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
+.canvas.chat-root .chat-question { border-radius: 20px; background: #15151f; padding: 16px; }
+.canvas.chat-root .chat-question-eyebrow { display: none; }
+.canvas.chat-root .chat-question h3 { font-size: 12px; margin: 0; }
+.canvas.chat-root .chat-question-description { font-size: 10px; color: var(--accent); }
+.canvas.chat-root .chat-question-option { border-radius: 14px; background: #1d1d2a; transition: background .2s ease; }
+.canvas.chat-root .chat-question-option:hover,
+.canvas.chat-root .chat-question-option[data-selected="true"] { background: #262638; }
+.canvas.chat-root .chat-question footer { background: none; }
+.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--panel-3); color: var(--text); }
+.canvas.chat-root .agent-tool { border-radius: 14px; background: var(--panel); font-size: 10px; }
+.canvas.chat-root .agent-tool-complete .agent-tool-state,
+.canvas.chat-root .agent-tool-complete .agent-tool-dot,
+.canvas.chat-root .agent-tool-complete .agent-tool-chevron { display: none; }
+.canvas.chat-root .agent-tool summary { padding: 8px 14px; font-size: 10px; color: var(--muted); }
+.canvas.chat-root .agent-tool-name { font: 10px var(--mono); color: var(--text); }
 
-.widget-slot { animation: rise .3s ease-out; }
-.w-card { border-radius: 20px; background: var(--panel); padding: 16px; }
-.w-title { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
-.w-body { font-size: 12px; color: #d4d4d8; }
-.w-body p { margin: 0 0 6px; }
-.w-body code { font-family: var(--mono); background: var(--panel-2); padding: 1px 6px; border-radius: 6px; }
-.w-card-image { width: 100%; border-radius: 14px; margin-bottom: 10px; }
-.w-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.w-button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
-.w-button:hover { background: var(--panel-3); }
+.osmo-card-image { width: 100%; border-radius: 14px; margin-bottom: 10px; }
+.osmo-card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
+.osmo-card-actions button:hover { background: var(--panel-3); }
 
-.w-options { background: #15151f; }
-.w-options-head { display: flex; justify-content: space-between; align-items: baseline; }
-.w-hint { font-size: 10px; color: var(--accent); }
-.w-choices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.w-choice { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-radius: 14px; background: #1d1d2a; transition: background .2s ease; cursor: pointer; text-align: left; font-size: 12px; }
-.w-choice:hover, .w-choice:focus-visible { background: #262638; outline: none; }
-.w-choice-index { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #2a2a44; color: var(--accent); font-size: 10px; }
-.w-choice-label { flex: 1; }
-.w-choice-detail { font: 10px var(--mono); color: var(--muted); }
+.osmo-chart { border-radius: 20px; background: var(--panel); padding: 16px; }
+.osmo-chart svg { width: 100%; height: 160px; display: block; }
+.osmo-chart-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 11px; }
+.osmo-legend { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.osmo-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.osmo-chart-last { margin-left: auto; font: 12px var(--mono); }
+.osmo-chart-last em { font-style: normal; margin-left: 6px; }
+.osmo-chart-last .up { color: #4ade80; }
+.osmo-chart-last .down { color: #f87171; }
+.osmo-chart-axis { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--muted); margin-top: 4px; }
 
-.w-chart svg { width: 100%; height: 160px; display: block; }
-.w-chart-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 11px; }
-.w-legend { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
-.w-legend i { width: 8px; height: 8px; border-radius: 2px; }
-.w-chart-last { margin-left: auto; font: 12px var(--mono); }
-.w-chart-last em { font-style: normal; margin-left: 6px; }
-.w-chart-last .up { color: #4ade80; }
-.w-chart-last .down { color: #f87171; }
-.w-chart-axis { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--muted); margin-top: 4px; }
-
-.w-html { padding: 0; overflow: hidden; border-radius: 20px; }
-.w-html iframe { width: 100%; height: 320px; border: 0; display: block; background: #111; }
+.osmo-html { overflow: hidden; border-radius: 20px; background: var(--panel); }
+.osmo-html iframe { width: 100%; height: 320px; border: 0; display: block; background: #111; }
 
 .dock { padding: 18px 0 22px; background: linear-gradient(to top, var(--bg) 60%, transparent); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
@@ -97,5 +129,4 @@ button { font: inherit; color: inherit; }
 @keyframes pulse { from { transform: scaleX(.85); } to { transform: scaleX(1.1); } }
 @keyframes sweep { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes blink { to { visibility: hidden; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
