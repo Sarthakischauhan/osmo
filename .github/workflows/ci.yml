@@ -17,3 +17,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+  symphony-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/symphony-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv -p 3.12 .venv
+      - run: uv pip install --no-sources -p .venv -r requirements.txt
+      - name: vendored core_server is unmodified
+        working-directory: .
+        run: |
+          git clone -q https://github.com/Sarthakischauhan/symphony /tmp/symphony
+          git -C /tmp/symphony checkout -q a335957c53009d6c4f82e8176a9abf975b736979
+          diff -r /tmp/symphony/core_server vendor/core_server
+      - run: .venv/bin/mypy
+      - run: .venv/bin/python -m pytest -q
