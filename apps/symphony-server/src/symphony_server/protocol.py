@@ -1,4 +1,4 @@
-"""Orb wire protocol (browser <-> Symphony), mirroring packages/orb-composer/src/protocol.ts.
+"""Osmo wire protocol (browser <-> Symphony), mirroring packages/osmo-composer/src/protocol.ts.
 
 Binary frames are PCM16 audio; text frames are the JSON events below.
 """
@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-OrbState = Literal["idle", "listening", "thinking", "speaking", "working"]
+OsmoState = Literal["idle", "listening", "thinking", "speaking", "working"]
 
 
 class _Event(BaseModel):
@@ -46,7 +46,7 @@ client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
 
 class StateEvent(_Event):
     type: Literal["state"] = "state"
-    state: OrbState
+    state: OsmoState
     detail: str | None = None
 
 

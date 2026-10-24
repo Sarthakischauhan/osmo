@@ -1,7 +1,7 @@
 [project]
 name = "symphony-server"
 version = "0.1.0"
-description = "Orb's Symphony server: owns the Grok realtime session, runs tools, validates widgets"
+description = "Osmo's Symphony server: owns the Grok realtime session, runs tools, validates widgets"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [

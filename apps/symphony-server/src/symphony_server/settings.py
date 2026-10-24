@@ -6,7 +6,7 @@ from pathlib import Path
 
 DEFAULT_REALTIME_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 
-DEFAULT_INSTRUCTIONS = """You are Orb, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
+DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
 # Style
 - Speak in one or two short sentences. Never read out lists, numbers tables, URLs or markup.
@@ -33,10 +33,10 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        static = os.getenv("ORB_STATIC_DIR")
+        static = os.getenv("OSMO_STATIC_DIR")
         return cls(
             xai_api_key=os.getenv("XAI_API_KEY") or None,
             realtime_url=os.getenv("XAI_REALTIME_URL", DEFAULT_REALTIME_URL),
-            voice=os.getenv("ORB_VOICE", "eve"),
+            voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,
         )

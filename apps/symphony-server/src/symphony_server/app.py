@@ -1,4 +1,4 @@
-"""Symphony server: core_server's run API plus Orb's realtime WebSocket."""
+"""Symphony server: core_server's run API plus Osmo's realtime WebSocket."""
 
 from __future__ import annotations
 
@@ -19,20 +19,20 @@ from core_server import (
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-from symphony_server.session import OrbSession
+from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
 
 log = logging.getLogger("symphony")
 
 
-def orb_tools(client: httpx.AsyncClient) -> dict[str, Tool]:
+def osmo_tools(client: httpx.AsyncClient) -> dict[str, Tool]:
     tools: list[Tool] = [WeatherTool(client), StockTool(client)]
     return {tool.name: tool for tool in tools}
 
 
-def orb_core_config(settings: Settings, tools: dict[str, Tool]) -> ServerConfig:
-    """core_server config whose text runs share Orb's tools and prompt."""
+def osmo_core_config(settings: Settings, tools: dict[str, Tool]) -> ServerConfig:
+    """core_server config whose text runs share Osmo's tools and prompt."""
     return build_config(system_prompt=settings.instructions, tools=list(tools.values()))
 
 
@@ -56,9 +56,9 @@ def create_app(
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
 
     @app.websocket("/ws")
-    async def orb_socket(websocket: WebSocket) -> None:
+    async def osmo_socket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await OrbSession(websocket, settings, tools).run()
+        await OsmoSession(websocket, settings, tools).run()
 
     if settings.static_dir is not None and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")
