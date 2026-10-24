@@ -45,7 +45,7 @@ async function main() {
   await page.screenshot({ path: `${OUT}/01-idle.png` });
 
   await page.click("button.orb");
-  await page.waitForFunction(() => document.querySelector(".status.on") !== null);
+  await page.waitForFunction(() => document.querySelector('.orb[data-connection="connected"]') !== null);
   const ws = socket;
   if (!ws) throw new Error("app never opened /ws");
   send(ws, { type: "state", state: "listening" });

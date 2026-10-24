@@ -39,6 +39,7 @@ export function OrbComposer({ session, className, style }: OrbComposerProps) {
         type="button"
         className="orb"
         data-state={shown}
+        data-connection={connection}
         aria-label={shown === "speaking" ? "Interrupt" : connection === "disconnected" ? "Start talking" : "Orb"}
         onClick={onTap}
       >
