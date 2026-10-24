@@ -13,7 +13,7 @@ import json
 import logging
 import secrets
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from core_harness import Tool
 from pydantic import ValidationError
@@ -24,19 +24,34 @@ from websockets.exceptions import ConnectionClosed
 from symphony_server import grok_events as grok
 from symphony_server.protocol import (
     Interrupt,
+    ModelsEvent,
     OsmoState,
     RenderedWidget,
     ServerEvent,
+    SessionConfigure,
     SessionEnd,
     SessionStart,
     StateEvent,
     TranscriptDelta,
+    VoiceConfigured,
+    VoicePreviewRequest,
+    VoicePreviewResult,
     WidgetAction,
     WidgetRender,
     WidgetUpdate,
     client_event_adapter,
 )
 from symphony_server.settings import Settings
+from symphony_server.voices import (
+    SET_VOICE,
+    SET_VOICE_PARAMETERS,
+    VOICE_MODELS,
+    PreviewCache,
+    Selection,
+    realtime_url_for,
+    resolve_selection,
+    set_voice_description,
+)
 from symphony_server.widgets import (
     RENDER_WIDGET_PARAMETERS,
     UPDATE_WIDGET_PARAMETERS,
@@ -72,13 +87,27 @@ def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
             "description": "Change props of a widget already on the canvas.",
             "parameters": UPDATE_WIDGET_PARAMETERS,
         },
+        {
+            "type": "function",
+            "name": SET_VOICE,
+            "description": set_voice_description(VOICE_MODELS),
+            "parameters": SET_VOICE_PARAMETERS,
+        },
         *functions,
     ]
 
 
 class OsmoSession:
-    def __init__(self, browser: WebSocket, settings: Settings, tools: Mapping[str, Tool]) -> None:
+    def __init__(
+        self, browser: WebSocket, settings: Settings, tools: Mapping[str, Tool], previews: PreviewCache
+    ) -> None:
         self.browser = browser
+        self.previews = previews
+        self.preview_tasks: set[asyncio.Task[None]] = set()
+        default = VOICE_MODELS[0]
+        voice = settings.voice if any(v.id == settings.voice for v in default.voices) else default.defaultVoice
+        self.selection = Selection(model=default.id, voice=voice)
+        self.instructions = settings.instructions
         self.settings = settings
         self.tools = tools
         self.upstream: ClientConnection | None = None
@@ -95,6 +124,7 @@ class OsmoSession:
     # ------------------------------------------------------------ browser side
 
     async def run(self) -> None:
+        await self.emit(ModelsEvent(models=list(VOICE_MODELS), selection=self.selection))
         try:
             while True:
                 message = await self.browser.receive()
@@ -109,6 +139,8 @@ class OsmoSession:
         except WebSocketDisconnect:
             pass
         finally:
+            for task in self.preview_tasks:
+                task.cancel()
             await self.close_upstream()
 
     async def forward_audio(self, pcm: bytes) -> None:
@@ -134,6 +166,12 @@ class OsmoSession:
             await self.interrupt()
         elif isinstance(event, WidgetAction):
             await self.widget_action(event)
+        elif isinstance(event, SessionConfigure):
+            await self.configure(event.model_dump(exclude={"type"}, exclude_none=True), "client")
+        elif isinstance(event, VoicePreviewRequest):
+            task = asyncio.create_task(self.preview(event))
+            self.preview_tasks.add(task)
+            task.add_done_callback(self.preview_tasks.discard)
 
     async def emit(self, event: ServerEvent) -> None:
         try:
@@ -163,9 +201,14 @@ class OsmoSession:
         if not self.settings.xai_api_key:
             await self.set_state("idle", "XAI_API_KEY is not configured on the server")
             return
+        picked = resolve_selection(
+            VOICE_MODELS, event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
+        )
+        if isinstance(picked, Selection):
+            self.selection = picked
         try:
             self.upstream = await connect(
-                self.settings.realtime_url,
+                realtime_url_for(self.settings.realtime_url, self.selection.model),
                 additional_headers={"Authorization": f"Bearer {self.settings.xai_api_key}"},
                 max_size=None,
             )
@@ -173,17 +216,55 @@ class OsmoSession:
             log.error("could not reach Grok realtime: %s", exc)
             await self.set_state("idle", "could not reach the voice model")
             return
+        self.instructions = event.instructions or self.settings.instructions
+        await self.send_session_update()
+        self.pump = asyncio.create_task(self.pump_upstream(self.upstream))
+        await self.set_state("listening")
+
+    async def send_session_update(self) -> None:
         await self.send_upstream(
             grok.SessionUpdate(
                 session=grok.SessionConfig(
-                    voice=event.voice or self.settings.voice,
-                    instructions=event.instructions or self.settings.instructions,
+                    voice=self.selection.voice,
+                    instructions=self.instructions,
                     tools=realtime_tools(self.tools),
                 )
             )
         )
-        self.pump = asyncio.create_task(self.pump_upstream(self.upstream))
-        await self.set_state("listening")
+
+    async def configure(self, change: Mapping[str, Any], source: Literal["client", "tool"]) -> Selection | str:
+        """The one path for picker commits and `set_voice`: validate, apply upstream, tell the browser."""
+        picked = resolve_selection(VOICE_MODELS, change, self.selection)
+        if isinstance(picked, str):
+            log.warning("rejected voice change from %s: %s", source, picked)
+            return picked
+        model_changed = picked.model != self.selection.model
+        self.selection = picked
+        if self.upstream is not None:
+            if model_changed:
+                # The realtime model is fixed per connection (`?model=`); it applies from the next session.
+                log.info("model %s applies from the next session", picked.model)
+            await self.send_session_update()
+        await self.emit(VoiceConfigured(selection=picked, source=source))
+        return picked
+
+    async def preview(self, request: VoicePreviewRequest) -> None:
+        try:
+            audio = await self.previews.get(request.model, request.voice)
+        except Exception as exc:  # a failed preview is reported to the pill, never fatal to the session
+            log.warning("voice preview %s/%s failed: %s", request.model, request.voice, exc)
+            await self.emit(
+                VoicePreviewResult(requestId=request.requestId, model=request.model, voice=request.voice, error=str(exc))
+            )
+            return
+        await self.emit(
+            VoicePreviewResult(
+                requestId=request.requestId,
+                model=request.model,
+                voice=request.voice,
+                audio=base64.b64encode(audio).decode("ascii"),
+            )
+        )
 
     async def close_upstream(self) -> None:
         upstream, self.upstream = self.upstream, None
@@ -287,6 +368,13 @@ class OsmoSession:
             result = await self.render_widget(parsed)
         elif call.name == UPDATE_WIDGET:
             result = await self.update_widget(parsed)
+        elif call.name == SET_VOICE:
+            outcome = await self.configure(parsed, "tool")
+            result = (
+                {"error": outcome}
+                if isinstance(outcome, str)
+                else {"configured": outcome.model_dump(exclude_none=True), "say": "Confirm the switch in one short line."}
+            )
         elif call.name in self.tools:
             await self.set_state("working", activity_label(call.name, parsed))
             try:

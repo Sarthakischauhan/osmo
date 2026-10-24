@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
+from symphony_server.voices import PreviewCache
 
 log = logging.getLogger("symphony")
 
@@ -43,6 +44,7 @@ def create_app(
     tools: dict[str, Tool],
     http_client: httpx.AsyncClient,
 ) -> FastAPI:
+    previews = PreviewCache(settings.realtime_url, settings.xai_api_key, settings.preview_cache_dir)
     backend = InProcessRunBackend(RunExecutor(core_config))
 
     @asynccontextmanager
@@ -58,7 +60,7 @@ def create_app(
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await OsmoSession(websocket, settings, tools).run()
+        await OsmoSession(websocket, settings, tools, previews).run()
 
     if settings.static_dir is not None and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")

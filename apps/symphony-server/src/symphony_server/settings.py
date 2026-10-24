@@ -19,6 +19,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - To change a widget already on screen, call update_widget with its id.
 
 # Tools
+- set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): pick from the catalog by traits, then confirm in one short line.
 - get_weather for forecasts, get_stock_history for tickers, web_search for anything current (places, news, facts).
 """
 
@@ -30,13 +31,16 @@ class Settings:
     voice: str = "eve"
     instructions: str = DEFAULT_INSTRUCTIONS
     static_dir: Path | None = None
+    preview_cache_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
         static = os.getenv("OSMO_STATIC_DIR")
+        previews = os.getenv("OSMO_PREVIEW_CACHE_DIR")
         return cls(
             xai_api_key=os.getenv("XAI_API_KEY") or None,
             realtime_url=os.getenv("XAI_REALTIME_URL", DEFAULT_REALTIME_URL),
             voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,
+            preview_cache_dir=Path(previews) if previews else None,
         )

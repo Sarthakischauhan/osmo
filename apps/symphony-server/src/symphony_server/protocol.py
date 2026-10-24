@@ -9,6 +9,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from symphony_server.voices import Effort, Selection, VoiceModel
+
 OsmoState = Literal["idle", "listening", "thinking", "speaking", "working"]
 
 
@@ -20,6 +22,24 @@ class SessionStart(_Event):
     type: Literal["session.start"]
     voice: str | None = None
     instructions: str | None = None
+    model: str | None = None
+    effort: Effort | None = None
+
+
+class SessionConfigure(_Event):
+    """The picker's commit: switch model, voice and reasoning effort."""
+
+    type: Literal["session.configure"]
+    model: str = Field(min_length=1)
+    voice: str = Field(min_length=1)
+    effort: Effort | None = None
+
+
+class VoicePreviewRequest(_Event):
+    type: Literal["voice.preview"]
+    requestId: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    voice: str = Field(min_length=1)
 
 
 class SessionEnd(_Event):
@@ -38,7 +58,7 @@ class WidgetAction(_Event):
 
 
 ClientEvent = Annotated[
-    Union[SessionStart, SessionEnd, Interrupt, WidgetAction],
+    Union[SessionStart, SessionEnd, Interrupt, WidgetAction, SessionConfigure, VoicePreviewRequest],
     Field(discriminator="type"),
 ]
 client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
@@ -76,4 +96,33 @@ class WidgetUpdate(_Event):
     patch: dict[str, Any]
 
 
-ServerEvent = Union[StateEvent, TranscriptDelta, WidgetRender, WidgetUpdate]
+class ModelsEvent(_Event):
+    """The voice model registry the picker shows, plus the server's current selection."""
+
+    type: Literal["models"] = "models"
+    models: list[VoiceModel]
+    selection: Selection
+
+
+class VoiceConfigured(_Event):
+    """The session's model/voice/effort changed (picker commit or the `set_voice` tool)."""
+
+    type: Literal["voice.configured"] = "voice.configured"
+    selection: Selection
+    source: Literal["client", "tool"]
+
+
+class VoicePreviewResult(_Event):
+    """Answer to a `voice.preview` request: base64 PCM16 24 kHz mono, about 2 s, or an error."""
+
+    type: Literal["voice.preview"] = "voice.preview"
+    requestId: str
+    model: str
+    voice: str
+    audio: str | None = None
+    error: str | None = None
+
+
+ServerEvent = Union[
+    StateEvent, TranscriptDelta, WidgetRender, WidgetUpdate, ModelsEvent, VoiceConfigured, VoicePreviewResult
+]
