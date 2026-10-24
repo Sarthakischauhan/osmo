@@ -326,3 +326,14 @@ describe("model ring labels", () => {
     expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
   });
 });
+
+describe("summary font", () => {
+  it("uses the ring pills' sans (inherited from .rp), not a monospace", () => {
+    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+    const summary = css.match(/\.rp-summary \{([^}]*)\}/)?.[1] ?? "";
+    expect(summary).toMatch(/font-family: inherit/);
+    expect(summary).toMatch(/font-weight: 500/);
+    expect(summary).not.toMatch(/mono/i);
+    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: Inter/);
+  });
+});

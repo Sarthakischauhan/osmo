@@ -127,7 +127,10 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   color: #b5b5b5;
-  font: 12px "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Same sans as the ring pills (inherited from .rp). */
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
