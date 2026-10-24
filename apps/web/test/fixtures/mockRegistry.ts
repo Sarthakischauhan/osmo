@@ -52,9 +52,9 @@ export const MOCK_REGISTRY: VoiceModel[] = [
 ];
 
 /** Providers the mock server reports as not connected; their models arrive `locked`. */
-export const LOCKED_PROVIDERS = ["openai", "openrouter"];
+export const LOCKED_PROVIDERS = ["openai", "openrouter", "vercel"];
 
 /** MOCK_REGISTRY plus an OpenRouter model, with LOCKED_PROVIDERS' models locked (provider-auth e2e). */
-export const LOCKED_REGISTRY: VoiceModel[] = [...MOCK_REGISTRY, model("openrouter", "openrouter-voice", "OR Voice", duo)].map((m) =>
+export const LOCKED_REGISTRY: VoiceModel[] = [...MOCK_REGISTRY, model("openrouter", "openrouter-voice", "OR Voice", duo), model("vercel", "vercel-voice", "Gateway Voice", duo)].map((m) =>
   LOCKED_PROVIDERS.includes(m.provider) ? { ...m, locked: true } : m,
 );

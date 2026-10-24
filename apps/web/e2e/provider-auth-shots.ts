@@ -3,7 +3,7 @@
  *
  *   OSMO_URL=http://127.0.0.1:8787 node --experimental-strip-types apps/web/e2e/provider-auth-shots.ts <outDir>
  *
- * `/voice-models` and `/providers` are served from fixtures (OpenAI and OpenRouter not connected) and
+ * `/voice-models` and `/providers` are served from fixtures (OpenAI, OpenRouter and Vercel AI Gateway not connected) and
  * `POST /providers/openai/key` answers like a provider that rejects the key, so no real key is needed.
  * Keyboard only: Tab to the ring, Enter on a locked provider, Tab through the dialog, Escape to close.
  */
@@ -20,6 +20,7 @@ const PROVIDERS = [
   { id: "xai", label: "xAI", authKinds: ["api_key"], connected: true },
   { id: "openai", label: "OpenAI", authKinds: ["api_key"], connected: false },
   { id: "openrouter", label: "OpenRouter", authKinds: ["api_key", "oauth"], connected: false },
+  { id: "vercel", label: "Vercel AI Gateway", authKinds: ["api_key"], connected: false },
 ];
 
 async function orbCenter(page: Page) {
@@ -106,6 +107,23 @@ async function main() {
     }),
   );
   check("dialog has no borders", noBorders);
+  await page.keyboard.press("Escape");
+  await pause(300);
+
+  // Vercel AI Gateway: api_key only, logo from models.dev at runtime.
+  await page.mouse.move(c.x, c.y, { steps: 4 });
+  await page.waitForSelector('[role=listbox][aria-label="Providers"]');
+  await page.mouse.move(5, 5);
+  await pause(600);
+  await page.locator(".dock .rp-orb").focus();
+  await page.keyboard.press("Tab");
+  for (let i = 0; i < providers.indexOf("vercel"); i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Enter");
+  await dialog.waitFor();
+  await pause(400);
+  check("Vercel dialog opens titled Connect Vercel AI Gateway", (await dialog.getByText("Connect Vercel AI Gateway").count()) >= 1);
+  check("Vercel dialog has a key field", (await dialog.locator("input").count()) >= 1);
+  await page.screenshot({ path: `${OUT}/auth-4-dialog-vercel.png` });
   check(`fixture locks ${LOCKED_PROVIDERS.join(", ")}`, true);
   await browser.close();
   writeFileSync(`${OUT}/provider-auth-checks.txt`, `${checks.join("\n")}\n`);

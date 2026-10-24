@@ -39,6 +39,8 @@ export const providerIcons: Record<string, ProviderIcon> = {
   deepgram: { label: "Deepgram", logo: `${MODELS_DEV}/deepgram.svg` },
   cartesia: { label: "Cartesia", logo: `${MODELS_DEV}/cartesia.svg` },
   openrouter: { label: "OpenRouter", logo: `${MODELS_DEV}/openrouter.svg` },
+  // models.dev serves a real mark at the `vercel` slug, so no bundled fallback is needed.
+  vercel: { label: "Vercel AI Gateway", logo: `${MODELS_DEV}/vercel.svg` },
 };
 
 /** The entry for a provider, falling back to its id as label (and so a monogram). */
