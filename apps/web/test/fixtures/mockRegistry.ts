@@ -18,10 +18,9 @@ const duo: [string, string, string[]][] = [
 ];
 
 /**
- * Dev-only registry for /dev/picker: 7 providers, one (openai) with 9 models,
- * one model (claude-voice-1) with 6 voices and all three efforts, plus the real
- * grok-voice-latest with Eve, Ara and Sal. Symphony's `models` event replaces
- * entries with the same id when the page is connected.
+ * Test fixture (never bundled): 7 providers, one (openai) with 9 models, one model
+ * (claude-voice-1) with 6 voices and all three efforts, plus the real
+ * grok-voice-latest with Eve, Ara and Sal. Used by the main-app picker e2e.
  */
 export const MOCK_REGISTRY: VoiceModel[] = [
   model("xai", "grok-voice-latest", "Grok Voice", [
