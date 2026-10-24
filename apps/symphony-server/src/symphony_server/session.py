@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import secrets
 from collections.abc import Mapping
 from typing import Any
 
@@ -308,7 +309,9 @@ class OsmoSession:
         except ValidationError as exc:
             return {"shown": None, "error": f"invalid widget, nothing shown: {compact_errors(exc)}"}
         self.widget_count += 1
-        widget_id = f"w{self.widget_count}"
+        # Ids must be unique across sessions too: the browser keeps earlier widgets on screen when a
+        # new session starts, so a per-session counter alone would collide with them.
+        widget_id = f"w{self.widget_count}-{secrets.token_hex(4)}"
         self.widgets[widget_id] = widget
         await self.emit(
             WidgetRender(widget=RenderedWidget(id=widget_id, type=widget.type, props=widget_props(widget)))

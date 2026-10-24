@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -74,11 +75,13 @@ def test_render_widget_validates_pushes_and_reports_shown(client: TestClient, gr
         start(ws, grok)
         call(grok, "render_widget", WEATHER_CARD, "c1")
         render = next_event(ws, "widget.render")
-        assert render["widget"] == {"id": "w1", "type": "card", "props": WEATHER_CARD["props"]}
+        widget_id = render["widget"]["id"]
+        assert re.fullmatch(r"w1-[0-9a-f]{8}", widget_id)
+        assert render["widget"] == {"id": widget_id, "type": "card", "props": WEATHER_CARD["props"]}
 
         output = grok.next_of("conversation.item.create")["item"]
         assert output["type"] == "function_call_output" and output["call_id"] == "c1"
-        assert json.loads(output["output"]) == {"shown": 'card "Palo Alto weekend"', "id": "w1"}
+        assert json.loads(output["output"]) == {"shown": 'card "Palo Alto weekend"', "id": widget_id}
 
         grok.send({"type": "response.done"})
         assert grok.next_json()["type"] == "response.create"
@@ -129,6 +132,46 @@ def test_update_widget_streams_a_validated_patch(client: TestClient, grok: FakeG
             }
         )
         assert next_event(ws, "widget.update") == {"type": "widget.update", "id": widget_id, "patch": {"title": "Updated"}}
+
+
+def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        call(grok, "render_widget", WEATHER_CARD, "c6")
+        first = next_event(ws, "widget.render")["widget"]["id"]
+        grok.next_of("conversation.item.create")
+        call(grok, "render_widget", WEATHER_CARD, "c7")
+        second = next_event(ws, "widget.render")["widget"]["id"]
+        grok.next_of("conversation.item.create")
+        assert first != second
+
+        call(grok, "update_widget", {"id": second, "patch": {"title": "Only the new one"}}, "c8")
+        assert next_event(ws, "widget.update") == {
+            "type": "widget.update",
+            "id": second,
+            "patch": {"title": "Only the new one"},
+        }
+        assert json.loads(grok.next_of("conversation.item.create")["item"]["output"])["id"] == second
+
+
+def test_widget_ids_never_repeat_across_sessions(client: TestClient, grok: FakeGrok) -> None:
+    """The browser keeps earlier widgets on screen after End + restart, so a new session must not reuse their ids."""
+    ids = []
+    for call_id in ("s1", "s2"):
+        with client.websocket_connect("/ws") as ws:
+            start(ws, grok)
+            call(grok, "render_widget", WEATHER_CARD, call_id)
+            ids.append(next_event(ws, "widget.render")["widget"]["id"])
+            grok.next_of("conversation.item.create")
+    assert ids[0] != ids[1]
+
+
+def test_update_for_an_id_from_another_session_is_rejected(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        call(grok, "update_widget", {"id": "w1", "patch": {"title": "x"}}, "c9")
+        result = json.loads(grok.next_of("conversation.item.create")["item"]["output"])
+        assert "no widget 'w1'" in result["error"]
 
 
 def test_audio_flows_and_barge_in_mutes_until_next_response(client: TestClient, grok: FakeGrok) -> None:
