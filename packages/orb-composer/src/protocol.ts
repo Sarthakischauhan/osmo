@@ -9,6 +9,9 @@ import { z } from "zod";
 
 export const AUDIO_SAMPLE_RATE = 24000;
 
+/** `state.detail` value that tells the client to flush queued assistant audio now. */
+export const BARGE_IN = "barge-in";
+
 export const orbStateSchema = z.enum(["idle", "listening", "thinking", "speaking", "working"]);
 export type OrbState = z.infer<typeof orbStateSchema>;
 

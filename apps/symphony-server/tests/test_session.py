@@ -145,7 +145,7 @@ def test_audio_flows_and_barge_in_mutes_until_next_response(client: TestClient, 
         grok.send({"type": "response.output_audio_transcript.delta", "item_id": "a1", "delta": "stale"})
         grok.send({"type": "response.created"})
         grok.send({"type": "response.output_audio_transcript.delta", "item_id": "a2", "delta": "fresh"})
-        assert next_event(ws, "state")["state"] == "listening"
+        assert next_event(ws, "state") == {"type": "state", "state": "listening", "detail": "barge-in"}
         seen: list[str | bytes] = []
         while True:
             message = ws.receive()
@@ -164,7 +164,7 @@ def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGro
         assert next_event(ws, "state")["state"] == "thinking"
         ws.send_text(json.dumps({"type": "interrupt"}))
         assert grok.next_of("response.cancel")["type"] == "response.cancel"
-        assert next_event(ws, "state")["state"] == "listening"
+        assert next_event(ws, "state") == {"type": "state", "state": "listening", "detail": "barge-in"}
 
 
 def test_user_transcript_is_forwarded(client: TestClient, grok: FakeGrok) -> None:

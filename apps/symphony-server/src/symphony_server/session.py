@@ -50,6 +50,8 @@ log = logging.getLogger("symphony.session")
 
 RENDER_WIDGET = "render_widget"
 UPDATE_WIDGET = "update_widget"
+# `state` detail telling the client to drop queued assistant audio immediately.
+BARGE_IN = "barge-in"
 
 
 def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
@@ -235,10 +237,11 @@ class OrbSession:
 
     async def handle_grok_event(self, event: grok.GrokServerEvent) -> None:
         if isinstance(event, grok.SpeechStarted):
-            # Barge-in: stop forwarding assistant audio now; the client flushes
-            # its playback queue when it sees `listening`.
+            # Barge-in: stop forwarding assistant audio now and tell the client
+            # to flush its playback queue (a plain `listening` after response.done
+            # must not cut off audio that is still playing).
             self.muted = True
-            await self.set_state("listening")
+            await self.set_state("listening", BARGE_IN)
         elif isinstance(event, grok.SpeechStopped):
             await self.set_state("thinking")
         elif isinstance(event, grok.InputTranscriptionCompleted):
@@ -353,7 +356,7 @@ class OrbSession:
     async def interrupt(self) -> None:
         await self.interrupt_response()
         if self.upstream is not None:
-            await self.set_state("listening")
+            await self.set_state("listening", BARGE_IN)
 
 
 def action_text(action: WidgetAction, widget: Widget) -> str:
