@@ -1,7 +1,7 @@
 /* Radial picker. White alphas only on #0A0A0A; state is fill + soft glow, never lines or borders.
    Arcs are implied by spacing alone (no tracks).
    Borders are off by default; set --picker-border (e.g. 1px solid rgba(255, 255, 255, 0.12)) on .rp
-   or an ancestor to bring them back on pills and provider discs. */
+   (e.g. a .dock .rp rule) to bring them back on pills and provider discs. */
 .rp {
   --picker-border: none;
   --picker-border-hover: var(--picker-border);
