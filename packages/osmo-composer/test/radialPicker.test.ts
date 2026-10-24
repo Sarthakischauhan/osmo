@@ -9,6 +9,7 @@ import {
   edgeFalloff,
   hitTest,
   itemAt,
+  itemPresence,
   moreMarkers,
   nearestSlot,
   offsetFor,
@@ -347,3 +348,17 @@ describe("summary font", () => {
     expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: Inter/);
   });
 });
+
+describe("a 28-voice ring (xAI's documented roster)", () => {
+  it("shows a window with … markers, fades mid-glide and settles on whole slots", () => {
+    expect(moreMarkers(RINGS.voices, 28, 0)).toEqual({ before: false, after: true });
+    expect(moreMarkers(RINGS.voices, 28, 12)).toEqual({ before: true, after: true });
+    expect(moreMarkers(RINGS.voices, 28, 25)).toEqual({ before: true, after: false });
+    expect(snapOffset(RINGS.voices, 28, 12.4)).toBe(12);
+    expect(snapOffset(RINGS.voices, 28, 40)).toBe(25);
+    const presence = itemPresence(RINGS.voices, -0.25);
+    expect(presence.opacity).toBeGreaterThan(0);
+    expect(presence.opacity).toBeLessThan(1);
+  });
+});
+
