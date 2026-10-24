@@ -178,6 +178,16 @@ describe("reducer", () => {
     const s = reducePicker(open, { type: "scroll", ring: "providers", slots: 0.3, count: 3 });
     expect(reducePicker(s, { type: "hoverProvider", provider: "openai", now: 0, groups, value }).depth).toBe(1);
   });
+  it("a provider whose models are all locked is a locked group whose models ring never opens", () => {
+    const locked = groupProviders(REGISTRY.map((m) => (m.provider === "openai" ? { ...m, locked: true } : m)));
+    expect(locked.find((g) => g.id === "openai")?.locked).toBe(true);
+    expect(locked.filter((g) => g.id !== "openai").every((g) => !g.locked)).toBe(true);
+    const opened = reducePicker(initialPicker, { type: "open", groups: locked, value });
+    expect(reducePicker(opened, { type: "hoverProvider", provider: "openai", now: 0, groups: locked, value }).depth).toBe(1);
+    const other = locked.find((g) => g.id !== "openai")?.id ?? "";
+    const r2 = reducePicker(opened, { type: "hoverProvider", provider: other, now: 0, groups: locked, value });
+    expect(reducePicker(r2, { type: "hoverProvider", provider: "openai", now: 0, groups: locked, value })).toMatchObject({ depth: 1, provider: undefined });
+  });
   it("reveals a keyboard-focused item by scrolling the least", () => {
     const s = { ...open, offsets: { ...open.offsets, models: 0 } };
     expect(reducePicker(s, { type: "reveal", ring: "models", index: 6, count: 9 }).offsets.models).toBe(2);

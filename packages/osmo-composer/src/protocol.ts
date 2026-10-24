@@ -31,6 +31,8 @@ export const voiceModelSchema = z.object({
   }),
   voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
   defaultVoice: z.string(),
+  /** The provider has no credential on the server: picking it asks to connect it. */
+  locked: z.boolean().optional(),
 });
 export type VoiceModel = z.infer<typeof voiceModelSchema>;
 

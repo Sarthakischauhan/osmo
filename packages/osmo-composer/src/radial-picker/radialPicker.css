@@ -62,6 +62,11 @@
 /* Remote logos are drawn pure white whatever their own colours. */
 .rp-logo { display: block; width: 20px; height: 20px; object-fit: contain; filter: brightness(0) invert(1); opacity: 0.85; pointer-events: none; }
 .rp-item[data-state="hover"] .rp-logo, .rp-item[data-state="selected"] .rp-logo { opacity: 1; }
+/* Locked (not connected) providers are dimmed; no pins or badges. */
+.rp-item[data-locked="true"] { background: rgba(255, 255, 255, 0.02); color: rgba(255, 255, 255, 0.4); }
+.rp-item[data-locked="true"] .rp-logo { opacity: 0.32; }
+.rp-item[data-locked="true"][data-state="hover"] { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.7); }
+.rp-item[data-locked="true"][data-state="hover"] .rp-logo { opacity: 0.6; }
 .rp-models { height: 36px; max-width: 94px; padding: 0 14px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; display: inline-block; line-height: 36px; }
 .rp-voices, .rp-effort { height: 32px; padding: 0 12px; font-size: 12px; }
 .rp-voices { max-width: 84px; }

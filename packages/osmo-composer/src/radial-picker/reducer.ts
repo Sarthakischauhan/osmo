@@ -6,13 +6,15 @@ export const EFFORTS: readonly Effort[] = ["none", "low", "medium", "high"];
 export interface ProviderGroup {
   id: string;
   models: VoiceModel[];
+  /** Every model of this provider is locked (not connected on the server). */
+  locked: boolean;
 }
 
 /** Registry grouped by `provider`, in first-seen order. */
 export function groupProviders(registry: readonly VoiceModel[]): ProviderGroup[] {
   const groups = new Map<string, VoiceModel[]>();
   for (const model of registry) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
-  return [...groups].map(([id, models]) => ({ id, models }));
+  return [...groups].map(([id, models]) => ({ id, models, locked: models.every((model) => model.locked === true) }));
 }
 
 /** Effort levels a model offers, in low → high order. */
@@ -115,7 +117,9 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
       return initialPicker;
     case "hoverProvider": {
       if (state.depth === 0 || state.provider === action.provider || isFrozen(state, "providers", action.now)) return state;
+      // A locked provider has nothing to pick yet: its models ring stays closed.
       const group = action.groups.find((g) => g.id === action.provider);
+      if (group?.locked) return state.depth > 1 ? { ...state, depth: 1, provider: undefined, model: undefined } : state;
       return group ? openModels(state, group, action) : state;
     }
     case "hoverModel": {

@@ -42,6 +42,8 @@ export interface RadialPickerProps {
   previewing?: { model: string; voice: string };
   /** No previews right now (e.g. the agent is speaking). */
   previewDisabled?: boolean;
+  /** A locked provider (see `VoiceModel.locked`) was committed: offer to connect it. */
+  onLockedProvider?: (provider: string) => void;
 }
 
 const EFFORT_LABEL: Record<Effort, string> = { none: "Off", low: "Low", medium: "Med", high: "High" };
@@ -81,6 +83,7 @@ export function RadialPicker({
   previewDisabled = false,
   onOrbActivate,
   orbLabel,
+  onLockedProvider,
 }: RadialPickerProps) {
   const groups = useMemo(() => groupProviders(registry), [registry]);
   const [state, dispatch] = useReducer(reducePicker, initialPicker);
@@ -326,7 +329,10 @@ export function RadialPicker({
   const commit = (ring: RingKey, index: number) => {
     if (ring === "providers") {
       const target = groups[index];
-      if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
+      if (target?.locked) {
+        close();
+        onLockedProvider?.(target.id);
+      } else if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
       return;
     }
     if (ring === "models") {
@@ -414,7 +420,8 @@ export function RadialPicker({
       if (key === "providers") {
         const g = groups[index];
         const entry = providerIcon(providerIcons, g?.id ?? "");
-        return { text: entry.label, title: entry.label, node: <ProviderMark entry={entry} /> };
+        const title = g?.locked ? `${entry.label} · not connected` : entry.label;
+        return { text: entry.label, title, node: <ProviderMark entry={entry} /> };
       }
       if (key === "models") {
         const m = group?.models[index];
@@ -477,6 +484,8 @@ export function RadialPicker({
             id={`${ids}-${key}-${index}`}
             role="option"
             aria-selected={isSelected}
+            aria-haspopup={key === "providers" && groups[index]?.locked ? "dialog" : undefined}
+            data-locked={key === "providers" && groups[index]?.locked ? true : undefined}
             title={label.title}
             aria-label={label.title}
             className={`rp-item rp-${key}`}
