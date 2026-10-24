@@ -416,7 +416,7 @@ export function RadialPicker({
     const count = counts[key];
     const selected = selectedIndex(key);
     const markers = moreMarkers(ring, count, offset);
-    const labelFor = (index: number): { text: string; title: string; node: ReactNode } => {
+    const labelFor = (index: number): { text: string; title: string; node: ReactNode; tip?: string } => {
       if (key === "providers") {
         const g = groups[index];
         const entry = providerIcon(providerIcons, g?.id ?? "");
@@ -425,7 +425,8 @@ export function RadialPicker({
       }
       if (key === "models") {
         const m = group?.models[index];
-        return { text: m?.label ?? "", title: m?.id ?? "", node: m?.label };
+        const text = m ? modelRingLabel(m) : "";
+        return { text, title: m?.id ?? "", node: text, tip: m?.id };
       }
       if (key === "voices") {
         const v = pathModel?.voices[index];
@@ -486,8 +487,8 @@ export function RadialPicker({
             aria-selected={isSelected}
             aria-haspopup={key === "providers" && groups[index]?.locked ? "dialog" : undefined}
             data-locked={key === "providers" && groups[index]?.locked ? true : undefined}
-            title={label.title}
-            aria-label={label.title}
+            title={label.tip === undefined ? label.title : undefined}
+            aria-label={label.tip === undefined ? label.title : `${label.text}, ${label.tip}`}
             className={`rp-item rp-${key}`}
             data-state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
             style={{ animationDelay: `${Math.max(0, Math.round(position)) * 20}ms` }}
@@ -496,6 +497,11 @@ export function RadialPicker({
           >
             {label.node}
           </div>
+          {label.tip !== undefined && isHover && (
+            <span className="rp-tip" role="tooltip" data-for={`${ids}-${key}-${index}`}>
+              {label.tip}
+            </span>
+          )}
         </div>,
       );
     }
@@ -613,6 +619,11 @@ const RING_LABELS: Record<RingKey, string> = {
 };
 
 /** Whether `element` has keyboard (`:focus-visible`) focus; false where the selector is unsupported. */
+/** The model ring's text: the registry's short label, else its label. */
+export function modelRingLabel(model: Pick<VoiceModel, "label" | "shortLabel">): string {
+  return model.shortLabel ?? model.label;
+}
+
 export function focusVisible(element: Element): boolean {
   try {
     return element.matches(":focus-visible");

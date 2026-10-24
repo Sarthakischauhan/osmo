@@ -1,4 +1,4 @@
-export { RadialPicker, type RadialPickerProps } from "./RadialPicker";
+export { RadialPicker, type RadialPickerProps, modelRingLabel } from "./RadialPicker";
 export {
   isPlaceholderLogo,
   providerIcons,

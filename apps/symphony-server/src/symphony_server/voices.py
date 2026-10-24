@@ -68,6 +68,8 @@ class VoiceModel(_Wire):
     id: str
     provider: str
     label: str
+    # Short, distinct name for the model ring (e.g. "Latest" / "3.0"); the full id is shown on hover/focus.
+    shortLabel: str | None = None
     capabilities: Capabilities
     voices: list[Voice]
     defaultVoice: str
@@ -99,6 +101,7 @@ VOICE_MODELS: tuple[VoiceModel, ...] = (
         id="grok-voice-latest",
         provider="xai",
         label="Grok Voice",
+        shortLabel="Latest",
         capabilities=GROK_CAPABILITIES,
         voices=GROK_VOICES,
         defaultVoice="eve",
@@ -107,6 +110,7 @@ VOICE_MODELS: tuple[VoiceModel, ...] = (
         id="grok-voice-3.0",
         provider="xai",
         label="Grok Voice 3.0",
+        shortLabel="3.0",
         capabilities=GROK_CAPABILITIES,
         voices=GROK_VOICES,
         defaultVoice="eve",

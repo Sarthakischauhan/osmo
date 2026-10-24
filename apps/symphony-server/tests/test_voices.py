@@ -174,3 +174,13 @@ def test_voice_models_endpoint_serves_the_registry_before_any_socket(client: Tes
     assert [m["id"] for m in body["models"]] == ["grok-voice-latest", "grok-voice-3.0"]
     assert body["models"][0]["capabilities"]["reasoningEffort"] == ["high", "none"]
     assert body["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
+
+
+def test_model_ring_short_labels_are_distinct_and_served(client: TestClient) -> None:
+    from symphony_server.voices import VOICE_MODELS
+
+    shorts = [m.shortLabel for m in VOICE_MODELS]
+    assert shorts == ["Latest", "3.0"]
+    assert len(set(shorts)) == len(shorts)
+    served = client.get("/voice-models").json()["models"]
+    assert [(m["id"], m["shortLabel"]) for m in served] == [("grok-voice-latest", "Latest"), ("grok-voice-3.0", "3.0")]

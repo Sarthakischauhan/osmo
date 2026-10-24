@@ -23,6 +23,8 @@ export const voiceModelSchema = z.object({
   id: z.string(),
   provider: z.string(),
   label: z.string(),
+  /** Short, distinct name for the model ring; falls back to `label`. */
+  shortLabel: z.string().nullish(),
   capabilities: z.object({
     tools: z.boolean(),
     interrupt: z.boolean(),
