@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Orb wire protocol: one WebSocket between the browser and Symphony.
+ * Osmo wire protocol: one WebSocket between the browser and Symphony.
  * Binary frames carry PCM16 audio (24 kHz mono, little-endian) both ways.
  * Text frames carry the JSON events below. Nothing here mirrors Grok's
  * event format, so the composer can sit on top of any backend.
@@ -12,8 +12,8 @@ export const AUDIO_SAMPLE_RATE = 24000;
 /** `state.detail` value that tells the client to flush queued assistant audio now. */
 export const BARGE_IN = "barge-in";
 
-export const orbStateSchema = z.enum(["idle", "listening", "thinking", "speaking", "working"]);
-export type OrbState = z.infer<typeof orbStateSchema>;
+export const osmoStateSchema = z.enum(["idle", "listening", "thinking", "speaking", "working"]);
+export type OsmoState = z.infer<typeof osmoStateSchema>;
 
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
@@ -33,7 +33,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
 export const serverEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("state"), state: orbStateSchema, detail: z.string().optional() }),
+  z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
   z.object({
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),

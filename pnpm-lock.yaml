@@ -28,7 +28,7 @@ importers:
         specifier: ^2.1.4
         version: 2.1.9
 
-  packages/orb-composer:
+  packages/osmo-composer:
     dependencies:
       zod:
         specifier: ^3.23.8
