@@ -41,7 +41,7 @@ Vite serves the client on port `5173` and proxies `/ws`, `/api`, `/voice-models`
 
 Models of a provider without a credential arrive `locked`; picking one in the radial ring opens
 "Connect provider". Keys are validated with one cheap authenticated request (xAI and OpenAI
-`GET /v1/models`, OpenRouter `GET /api/v1/key`) and then kept only on the server:
+`GET /v1/models`, OpenRouter `GET /api/v1/key`, Vercel AI Gateway `GET https://ai-gateway.vercel.sh/v1/credits`) and then kept only on the server:
 
 - `OSMO_CREDENTIALS_FILE`: Fernet-encrypted credentials file (default `~/.config/osmo/credentials.enc`).
 - `OSMO_CREDENTIALS_KEY`: Fernet key for that file. When unset, one is generated once into

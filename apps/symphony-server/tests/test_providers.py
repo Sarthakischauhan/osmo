@@ -33,7 +33,7 @@ class FakeProviders:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if request.method == "GET" and request.url.path in ("/v1/models", "/api/v1/key"):
+        if request.method == "GET" and request.url.path in ("/v1/models", "/api/v1/key", "/v1/credits"):
             ok = request.headers.get("Authorization") == f"Bearer {GOOD_KEY}"
             return httpx.Response(200, json={"data": []}) if ok else httpx.Response(401, json={"error": "invalid key"})
         if request.method == "POST" and str(request.url) == "https://openrouter.ai/api/v1/auth/keys":
@@ -63,7 +63,7 @@ def test_providers_lists_auth_kinds_and_openrouter_alone_offers_oauth(tmp_path: 
     with make_client(settings(tmp_path), fake) as client:
         body = client.get("/providers").json()
     kinds = {p["id"]: p["authKinds"] for p in body["providers"]}
-    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"]}
+    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"]}
     assert all(p["connected"] is False for p in body["providers"])
     assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected"}
 
@@ -210,3 +210,31 @@ def test_locked_models_cannot_be_selected(tmp_path: Path, fake: FakeProviders) -
             ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "eve"}))
             event = json.loads(ws.receive_text())
             assert event["type"] == "voice.configured" and "locked" in event["error"]
+
+
+def test_vercel_key_validation_failure_stores_nothing(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        response = client.post("/providers/vercel/key", json={"key": BAD_KEY})
+        assert response.status_code == 400
+        assert BAD_KEY not in response.text
+        assert connected(client.get("/providers"))["vercel"] is False
+    assert [str(r.url) for r in fake.requests] == ["https://ai-gateway.vercel.sh/v1/credits"]
+    assert not (tmp_path / "creds.enc").exists()
+
+
+def test_vercel_valid_key_connects_and_secret_never_appears_in_responses_or_logs(
+    tmp_path: Path, fake: FakeProviders, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    with make_client(settings(tmp_path), fake) as client:
+        saved = client.post("/providers/vercel/key", json={"key": GOOD_KEY})
+        assert saved.status_code == 204
+        listing = client.get("/providers")
+        assert connected(listing)["vercel"] is True
+        bodies = [saved.text, listing.text, client.get("/voice-models").text]
+        assert client.delete("/providers/vercel").status_code == 204
+        assert connected(client.get("/providers"))["vercel"] is False
+    assert fake.requests[0].headers["Authorization"] == f"Bearer {GOOD_KEY}"
+    assert all(GOOD_KEY not in body for body in bodies)
+    assert GOOD_KEY not in caplog.text
+    assert GOOD_KEY.encode() not in (tmp_path / "creds.enc").read_bytes()

@@ -67,7 +67,7 @@ class ProviderSpec:
 
 
 # Only OpenRouter documents an OAuth flow that hands an app an API key for its users
-# (https://openrouter.ai/docs/use-cases/oauth-pkce). xAI and OpenAI only issue API keys from
+# (https://openrouter.ai/docs/use-cases/oauth-pkce). xAI, OpenAI and Vercel only issue API keys from
 # their consoles, so they are api_key only.
 PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(id="xai", label="xAI", validate_url="https://api.x.ai/v1/models", env_var="XAI_API_KEY"),
@@ -78,6 +78,11 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         validate_url="https://openrouter.ai/api/v1/key",
         oauth=OAuthSpec(authorize_url="https://openrouter.ai/auth", token_url="https://openrouter.ai/api/v1/auth/keys"),
     ),
+    # Vercel AI Gateway keys come from the Vercel dashboard (api_key only). Validated with
+    # `GET https://ai-gateway.vercel.sh/v1/credits` ("Check credit balance",
+    # https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api#check-credit-balance), which needs
+    # the key; `GET /v1/models` is public and would accept any key.
+    ProviderSpec(id="vercel", label="Vercel AI Gateway", validate_url="https://ai-gateway.vercel.sh/v1/credits"),
 )
 
 
