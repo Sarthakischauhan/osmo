@@ -1,7 +1,10 @@
-import { WidgetView } from "@osmo/chat-sdk-widgets";
+import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
+import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
+import "@sarchauhan/chat/styles.css";
+import type { AgentPart } from "@sarchauhan/protocol";
 import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type Feed, emptyFeed, reduceFeed } from "./feed";
+import { type Feed, type Turn, emptyFeed, reduceFeed } from "./feed";
 
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
@@ -14,7 +17,14 @@ export function App() {
   }, [feed]);
 
   const connected = session.connection === "connected";
-  const lastTurn = feed.turns[feed.turns.length - 1];
+  const { sendWidgetAction } = session;
+  const respondToWidget = useCallback(
+    async (response: WidgetResponse) => {
+      if (response.widgetId === undefined || response.actionId === undefined || typeof response.value !== "string") return;
+      sendWidgetAction(response.widgetId, response.actionId, response.value);
+    },
+    [sendWidgetAction],
+  );
 
   return (
     <div className="app">
@@ -32,55 +42,35 @@ export function App() {
         </div>
       </header>
 
-      <main className="canvas">
-        <div className="feed">
-          {feed.turns.length === 0 && (
-            <div className="empty">
-              <p>Ask about the weather, a stock, places nearby, or have it build something.</p>
-            </div>
-          )}
-          {feed.turns.map((turn) =>
-            turn.role === "user" ? (
-              <div key={turn.key} className="turn user">
-                <p className="bubble">{turn.text}</p>
-                <span className="spoken">🎙 spoken</span>
+      <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
+        <main className="canvas chat-root" data-theme="dark">
+          <div className="feed">
+            {feed.turns.length === 0 && (
+              <div className="empty">
+                <p>Ask about the weather, a stock, places nearby, or have it build something.</p>
               </div>
-            ) : (
-              <div key={turn.key} className="turn assistant">
-                <span className="avatar" aria-hidden />
-                <div className="assistant-body">
-                  {turn.text && (
-                    <p className="line">
-                      {turn.text}
-                      {turn === lastTurn && session.state === "speaking" && <span className="cursor" />}
-                    </p>
-                  )}
-                  {turn.activities.map((activity, i) => (
-                    <div key={i} className="activity">
-                      <span className="activity-icon" aria-hidden>
-                        ⌕
-                      </span>
-                      <span className="activity-label">{activity.label}</span>
-                      {!activity.done && <span className="activity-status">Working…</span>}
-                    </div>
-                  ))}
-                  {turn.widgets.map((widget) => (
-                    <div key={widget.id} className="widget-slot">
-                      <WidgetView
-                        id={widget.id}
-                        type={widget.type}
-                        props={widget.props}
-                        onAction={session.sendWidgetAction}
-                      />
-                    </div>
-                  ))}
+            )}
+            {feed.turns.map((turn) =>
+              turn.role === "user" ? (
+                <div key={turn.key} className="turn user">
+                  <div className="bubble">
+                    <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
+                  </div>
+                  <span className="spoken">🎙 spoken</span>
                 </div>
-              </div>
-            ),
-          )}
-          <div ref={bottom} />
-        </div>
-      </main>
+              ) : (
+                <div key={turn.key} className="turn assistant">
+                  <span className="avatar" aria-hidden />
+                  <div className="assistant-body">
+                    <MessageContent parts={assistantParts(turn)} />
+                  </div>
+                </div>
+              ),
+            )}
+            <div ref={bottom} />
+          </div>
+        </main>
+      </WidgetProvider>
 
       <footer className="dock">
         <OrbComposer session={session} />
@@ -99,4 +89,24 @@ function Clock({ since }: { since: number }) {
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   return <span className="clock">{`${mm}:${ss}`}</span>;
+}
+
+/** One assistant turn as chat-sdk message parts: the spoken line, tool activity rows, then widgets. */
+function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[] {
+  const parts: AgentPart[] = [];
+  if (turn.text) parts.push({ type: "text", text: turn.text });
+  turn.activities.forEach((activity, i) =>
+    parts.push({
+      type: "tool",
+      toolName: "activity",
+      toolCallId: `${turn.key}-tool-${i}`,
+      title: activity.label,
+      state: activity.done ? "output-available" : "input-available",
+    }),
+  );
+  for (const widget of turn.widgets) {
+    const part = toWidgetPart(widget.id, widget.type, widget.props);
+    if (part) parts.push(part);
+  }
+  return parts;
 }

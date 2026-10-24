@@ -1,5 +1,5 @@
 {
-  "name": "@osmo/chat-sdk-widgets",
+  "name": "@osmo/osmo-widgets",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,15 +12,17 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sarchauhan/chat": "0.0.2",
+    "@sarchauhan/protocol": "0.0.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.4",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
   },
   "peerDependencies": {
     "react": "^18.3.1"

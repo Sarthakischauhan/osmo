@@ -84,8 +84,9 @@ async function main() {
   await pause(400);
   await page.screenshot({ path: `${OUT}/02-speaking-options.png` });
 
-  // Tap an option: it must go out as widget.action.
+  // Pick an option and confirm (chat-sdk QuestionWidget): it must go out as widget.action.
   await page.click("text=Ramen counter");
+  await page.click(".chat-question button[type=submit]");
   await pause(100);
   const action = received.map((m) => JSON.parse(m) as Json).find((m) => m.type === "widget.action");
   if (!action || action.value !== "ramen") throw new Error(`widget.action not sent: ${JSON.stringify(action)}`);

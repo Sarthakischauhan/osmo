@@ -63,7 +63,7 @@ sequenceDiagram
 | `apps/symphony-server` | Python FastAPI app. Mounts `core_server`'s run API at `/api` and adds `/ws`. Owns the Grok realtime session, the tool loop, `render_widget`/`update_widget`, and prop validation. |
 | `vendor/core_server` | Symphony's `core_server`, vendored **unmodified** from [symphony@a335957](https://github.com/Sarthakischauhan/symphony/tree/a335957c53009d6c4f82e8176a9abf975b736979/core_server) until it is published. See `vendor/README.md`. |
 | `packages/osmo-composer` | Orb UI, mic capture and playback, WS client, wire protocol types. No chat SDK imports. |
-| `packages/chat-sdk-widgets` | Widget registry, the 4 renderers and the `widget.action` callback. |
+| `packages/osmo-widgets` | Osmo-only widgets (chart, sandboxed html), the widget prop schemas, and the chat-sdk registry that maps `card`/`options` onto `@sarchauhan/chat` components. |
 | `apps/web` | Full-screen page: orb at the bottom, widget canvas above. |
 
 ### Wire protocol (browser ↔ Symphony)

@@ -1,4 +1,4 @@
-"""Widget prop schemas, mirroring packages/chat-sdk-widgets/src/schema.ts.
+"""Widget prop schemas, mirroring packages/osmo-widgets/src/schema.ts.
 
 Every render_widget / update_widget call is validated here before anything is
 sent to the browser, so a bad tool call never breaks the canvas.
