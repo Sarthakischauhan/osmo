@@ -2,18 +2,19 @@
 
 A hover/scroll dial around the orb for choosing **provider → model → voice + reasoning effort**.
 The picker only calls `onChange`; the app sends `session.configure {model, voice, effort}` over
-the existing Osmo WebSocket (`useOsmoSession().configure`). Try it at **`/dev/picker`** in `apps/web`.
+the existing Osmo WebSocket (`useOsmoSession().configure`). In `apps/web` it wraps the main orb (`OrbComposer`'s `picker` prop).
 
 ```tsx
 import { RadialPicker, usePersistedPick, useOsmoSession } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
 
 const session = useOsmoSession({ url, voice: pick?.voice, model: pick?.model, effort: pick?.effort });
-const [pick, save] = usePersistedPick(session.voiceModels); // localStorage "osmo.voice-pick"
+// `choose` shows a pick; `save` also writes localStorage "osmo.voice-pick" — call it on `voice.configured`.
+const [pick, save, choose] = usePersistedPick(session.voiceModels);
 <RadialPicker
   registry={session.voiceModels}            // from Symphony's `models` event
   value={pick}
-  onChange={(next) => { save(next); session.configure(next); }}
+  onChange={(next) => { choose(next); session.configure(next); }}
   onPreview={session.previewVoice}
   onPreviewStop={session.stopPreview}
   previewing={session.previewing}
@@ -42,14 +43,15 @@ const [pick, save] = usePersistedPick(session.voiceModels); // localStorage "osm
 
 ## `providerIcons`
 
-Keyed by `VoiceModel.provider`; each entry is `{ label, logo? }`. `label` is used in the summary
-pill and tooltip; `logo` is an image URL loaded at runtime and drawn pure white
-(`filter: brightness(0) invert(1)`). No logo, or one that fails to load, gives a monogram of the label.
+Keyed by `VoiceModel.provider`; each entry is `{ label, logo?, fallback? }`. `label` is used in the
+summary pill and tooltip. Logos are drawn pure white (`filter: brightness(0) invert(1)`). The chain is:
 
-Defaults load from `https://models.dev/logos/<slug>.svg` for the slugs models.dev has
-(`xai`, `openai`, `google`, `anthropic`, `mistral`). models.dev answers unknown slugs with a
-generic placeholder (HTTP 200), so `elevenlabs`, `deepgram` and `cartesia` have no URL and show a monogram.
-No SVG is bundled.
+1. `logo`, fetched at runtime (by default `https://models.dev/logos/<slug>.svg` for every provider);
+   used unless the request fails, the `<img>` errors, or the SVG is models.dev's generic placeholder
+   (it answers unknown slugs with 200 and a "sparkles" icon, detected by `isPlaceholderLogo`);
+2. `fallback`, a bundled monochrome (`currentColor`) copy in `logos/` — only for the slugs models.dev
+   really has: `xai`, `openai`, `google`, `anthropic`, `mistral`;
+3. otherwise a monogram of `label` (today: ElevenLabs, Deepgram, Cartesia).
 
 ```ts
 import { providerIcons } from "@osmo/osmo-composer";

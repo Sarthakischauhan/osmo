@@ -16,7 +16,15 @@ import {
   ringSpec,
   snapOffset,
 } from "../src/radial-picker/geometry";
-import { PICK_STORAGE_KEY, defaultPick, restorePick } from "../src/radial-picker/persistence";
+import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
+import { focusVisible } from "../src/radial-picker/RadialPicker";
+import {
+  type LogoFetch,
+  isPlaceholderLogo,
+  providerIcons,
+  resetLogoChecks,
+  resolveLogo,
+} from "../src/radial-picker/providerIcons";
 import { effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "../src/radial-picker/reducer";
 
 const voice = (id: string) => ({ id, label: id.toUpperCase(), traits: [] });
@@ -209,5 +217,90 @@ describe("persistence", () => {
   it("repairs a stale voice or effort within a model that still exists", () => {
     expect(restorePick(JSON.stringify({ model: "deep", voice: "gone", effort: "high" }), REGISTRY)).toEqual({ model: "deep", voice: "v1", effort: "high" });
     expect(restorePick(JSON.stringify({ model: "grok-voice-latest", voice: "sal", effort: "high" }), REGISTRY)).toEqual({ model: "grok-voice-latest", voice: "sal" });
+  });
+});
+
+describe("provider logo fallback chain", () => {
+  const real = '<svg><path d="M12.4579 15.6036" fill="currentColor"/></svg>';
+  const placeholder = '<svg><path d="M9.8132 15.9038L9 18.75" stroke="currentColor"/></svg>';
+  const serve =
+    (pages: Record<string, { ok: boolean; body: string } | "network-error">): LogoFetch =>
+    async (url) => {
+      const page = pages[url];
+      if (page === undefined || page === "network-error") throw new Error("offline");
+      return { ok: page.ok, text: async () => page.body };
+    };
+  const entry = { label: "Acme", logo: "https://models.dev/logos/acme.svg", fallback: "/assets/acme.svg" };
+
+  it("uses the runtime models.dev logo first", async () => {
+    resetLogoChecks();
+    expect(await resolveLogo(entry, new Set(), serve({ [entry.logo]: { ok: true, body: real } }))).toBe(entry.logo);
+  });
+
+  it("falls back to the bundled logo on a placeholder, an HTTP error or a network error", async () => {
+    for (const page of [{ ok: true, body: placeholder }, { ok: false, body: "" }, "network-error" as const]) {
+      resetLogoChecks();
+      expect(await resolveLogo(entry, new Set(), serve({ [entry.logo]: page }))).toBe(entry.fallback);
+    }
+  });
+
+  it("falls back to the bundled logo when the runtime <img> fails to load", async () => {
+    resetLogoChecks();
+    const fetcher = serve({ [entry.logo]: { ok: true, body: real } });
+    expect(await resolveLogo(entry, new Set([entry.logo]), fetcher)).toBe(entry.fallback);
+  });
+
+  it("gives a monogram (undefined) when neither is usable", async () => {
+    resetLogoChecks();
+    const fetcher = serve({ [entry.logo]: { ok: true, body: placeholder } });
+    expect(await resolveLogo({ label: "Acme", logo: entry.logo }, new Set(), fetcher)).toBeUndefined();
+    expect(await resolveLogo(entry, new Set([entry.fallback]), fetcher)).toBeUndefined();
+    expect(await resolveLogo({ label: "Acme" })).toBeUndefined();
+  });
+
+  it("detects the models.dev placeholder", () => {
+    expect(isPlaceholderLogo(placeholder)).toBe(true);
+    expect(isPlaceholderLogo(real)).toBe(false);
+  });
+
+  it("bundles fallbacks only for providers models.dev really has", () => {
+    const bundledFor = Object.entries(providerIcons).filter(([, icon]) => icon.fallback !== undefined).map(([id]) => id);
+    expect(bundledFor).toEqual(["xai", "openai", "google", "anthropic", "mistral"]);
+    for (const icon of Object.values(providerIcons)) expect(icon.logo).toMatch(/^https:\/\/models\.dev\/logos\/.+\.svg$/);
+  });
+});
+
+describe("persistence storage errors", () => {
+  it("reads null when localStorage throws", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        get localStorage(): Storage {
+          throw new Error("SecurityError");
+        },
+      },
+    });
+    try {
+      expect(readSavedPick()).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(globalThis, "window", original);
+      else Reflect.deleteProperty(globalThis, "window");
+    }
+  });
+});
+
+describe("focusVisible", () => {
+  it("is true only when the element matches :focus-visible, false when unsupported", () => {
+    const element = (matches: (selector: string) => boolean) => ({ matches }) as unknown as Element;
+    expect(focusVisible(element((s) => s === ":focus-visible"))).toBe(true);
+    expect(focusVisible(element(() => false))).toBe(false);
+    expect(
+      focusVisible(
+        element(() => {
+          throw new SyntaxError("unsupported");
+        }),
+      ),
+    ).toBe(false);
   });
 });
