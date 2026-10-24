@@ -40,6 +40,8 @@ def next_event(ws: WebSocketTestSession, event_type: str) -> dict[str, Any]:
 def start(ws: WebSocketTestSession, grok: FakeGrok) -> dict[str, Any]:
     ws.send_text(json.dumps({"type": "session.start", "voice": "eve"}))
     assert next_event(ws, "state")["state"] == "listening"
+    # session.start reports the pick it applied.
+    assert next_event(ws, "voice.configured")["selection"]["voice"] == "eve"
     return grok.next_of("session.update")
 
 

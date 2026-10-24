@@ -8,9 +8,12 @@ the picker, the voice command and the server can never disagree.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
-from collections.abc import Mapping
+import time
+from collections import OrderedDict, deque
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -32,6 +35,13 @@ PREVIEW_SAMPLE_RATE = 24000
 PREVIEW_SECONDS = 2.0
 PREVIEW_BYTES = int(PREVIEW_SAMPLE_RATE * PREVIEW_SECONDS) * 2
 PREVIEW_TIMEOUT_S = 8.0
+# Previews kept in memory (LRU); disk copies are not bounded by this.
+PREVIEW_CACHE_MAX = 32
+# Each browser socket / HTTP client may request this many previews per window.
+PREVIEW_RATE_LIMIT = 6
+PREVIEW_RATE_WINDOW_S = 10.0
+# HTTP clients tracked by the /voice-preview limiter (LRU).
+PREVIEW_CLIENTS_MAX = 256
 
 
 class _Wire(BaseModel):
@@ -126,6 +136,50 @@ def find_model(models: tuple[VoiceModel, ...], model_id: str) -> VoiceModel | No
     return next((m for m in models if m.id == model_id), None)
 
 
+def preview_error(models: tuple[VoiceModel, ...], model_id: str, voice_id: str) -> str | None:
+    """Why (model, voice) cannot be previewed, or None when both are in the registry."""
+    model = find_model(models, model_id)
+    if model is None:
+        return f"unknown model {model_id!r}"
+    if not any(v.id == voice_id for v in model.voices):
+        return f"unknown voice {voice_id!r} for {model.id}"
+    return None
+
+
+class RateLimiter:
+    """At most `limit` hits per `window` seconds (sliding window)."""
+
+    def __init__(self, limit: int, window: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit = limit
+        self.window = window
+        self.clock = clock
+        self.hits: deque[float] = deque()
+
+    def allow(self) -> bool:
+        now = self.clock()
+        while self.hits and now - self.hits[0] >= self.window:
+            self.hits.popleft()
+        if len(self.hits) >= self.limit:
+            return False
+        self.hits.append(now)
+        return True
+
+
+class KeyedRateLimiter:
+    """One `RateLimiter` per key, keeping only the `max_keys` most recently seen keys."""
+
+    def __init__(self, limit: int, window: float, max_keys: int, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit, self.window, self.max_keys, self.clock = limit, window, max_keys, clock
+        self.limiters: OrderedDict[str, RateLimiter] = OrderedDict()
+
+    def allow(self, key: str) -> bool:
+        limiter = self.limiters.pop(key, None) or RateLimiter(self.limit, self.window, self.clock)
+        self.limiters[key] = limiter
+        while len(self.limiters) > self.max_keys:
+            self.limiters.popitem(last=False)
+        return limiter.allow()
+
+
 def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], current: Selection) -> Selection | str:
     """Apply a partial change to `current`; returns the new selection or an error for the model."""
     try:
@@ -168,12 +222,17 @@ def realtime_url_for(base: str, model: str) -> str:
 class PreviewCache:
     """2 s PCM16 samples per (model, voice), generated once, kept in memory and optionally on disk."""
 
-    def __init__(self, realtime_url: str, api_key: str | None, directory: Path | None) -> None:
+    def __init__(
+        self, realtime_url: str, api_key: str | None, directory: Path | None, max_entries: int = PREVIEW_CACHE_MAX
+    ) -> None:
         self.realtime_url = realtime_url
         self.api_key = api_key
         self.directory = directory
-        self.memory: dict[tuple[str, str], bytes] = {}
+        self.max_entries = max_entries
+        # LRU of generated audio; locks only live while a key is being fetched.
+        self.memory: OrderedDict[tuple[str, str], bytes] = OrderedDict()
         self.locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self.waiters: dict[tuple[str, str], int] = {}
 
     def disk_path(self, model: str, voice: str) -> Path | None:
         if self.directory is None:
@@ -182,22 +241,39 @@ class PreviewCache:
         return self.directory / f"{digest}.pcm"
 
     async def get(self, model: str, voice: str) -> bytes:
+        error = preview_error(VOICE_MODELS, model, voice)
+        if error is not None:
+            raise ValueError(error)
         key = (model, voice)
         lock = self.locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            cached = self.memory.get(key)
-            if cached is not None:
-                return cached
-            path = self.disk_path(model, voice)
-            if path is not None and path.is_file():
-                audio = path.read_bytes()
-            else:
-                audio = await self.generate(model, voice)
-                if path is not None:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(audio)
-            self.memory[key] = audio
-            return audio
+        self.waiters[key] = self.waiters.get(key, 0) + 1
+        try:
+            async with lock:
+                return await self.fetch(key)
+        finally:
+            self.waiters[key] -= 1
+            if self.waiters[key] == 0:
+                del self.waiters[key]
+                del self.locks[key]
+
+    async def fetch(self, key: tuple[str, str]) -> bytes:
+        model, voice = key
+        cached = self.memory.get(key)
+        if cached is not None:
+            self.memory.move_to_end(key)
+            return cached
+        path = self.disk_path(model, voice)
+        if path is not None and path.is_file():
+            audio = path.read_bytes()
+        else:
+            audio = await self.generate(model, voice)
+            if path is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(audio)
+        self.memory[key] = audio
+        while len(self.memory) > self.max_entries:
+            self.memory.popitem(last=False)
+        return audio
 
     async def generate(self, model: str, voice: str) -> bytes:
         if not self.api_key:
@@ -224,8 +300,11 @@ class PreviewCache:
                     async for message in upstream:
                         if isinstance(message, bytes):
                             audio.extend(message)
-                        elif done_event(message):
-                            break
+                        else:
+                            kind, chunk = preview_frame(message)
+                            if kind == "done":
+                                break
+                            audio.extend(chunk)
                         if len(audio) >= PREVIEW_BYTES:
                             break
                 except ConnectionClosed:
@@ -235,8 +314,15 @@ class PreviewCache:
         return bytes(audio[: PREVIEW_BYTES - PREVIEW_BYTES % 2])
 
 
-def done_event(text: str) -> bool:
+def preview_frame(text: str) -> tuple[Literal["audio", "done", "other"], bytes]:
+    """A JSON upstream frame during preview: base64 `response.output_audio.delta` audio (the same
+    encoding session.py decodes), `response.done`, or anything else."""
     try:
-        return grok.EventEnvelope.model_validate_json(text).type == "response.done"
-    except ValidationError:
-        return False
+        kind = grok.EventEnvelope.model_validate_json(text).type
+        if kind == "response.done":
+            return "done", b""
+        if kind == "response.output_audio.delta":
+            return "audio", base64.b64decode(grok.OutputAudioDelta.model_validate_json(text).delta)
+    except (ValidationError, ValueError):
+        log.warning("unparseable preview frame")
+    return "other", b""

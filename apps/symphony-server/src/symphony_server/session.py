@@ -12,6 +12,7 @@ import base64
 import json
 import logging
 import secrets
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -47,7 +48,12 @@ from symphony_server.voices import (
     SET_VOICE,
     SET_VOICE_PARAMETERS,
     VOICE_MODELS,
+    PREVIEW_RATE_LIMIT,
+    PREVIEW_RATE_WINDOW_S,
+    PREVIEW_SECONDS,
     PreviewCache,
+    RateLimiter,
+    preview_error,
     default_selection,
     Selection,
     realtime_url_for,
@@ -70,6 +76,12 @@ RENDER_WIDGET = "render_widget"
 UPDATE_WIDGET = "update_widget"
 # `state` detail telling the client to drop queued assistant audio immediately.
 BARGE_IN = "barge-in"
+# Only the most recent spoken turns are replayed into a hot-swapped upstream.
+MAX_REPLAY_ITEMS = 40
+# A picker model switch waits this long for an in-flight response or tool call to finish.
+SWAP_WAIT_S = 15.0
+# Voice previews are played only while the assistant is quiet.
+PREVIEW_STATES: tuple[OsmoState, ...] = ("idle", "listening")
 
 
 def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
@@ -130,6 +142,15 @@ class OsmoSession:
         # Spoken turns so far, replayed into a fresh upstream when the model is hot-swapped.
         self.history: list[HistoryItem] = []
         self.upstream_count = 0
+        # Set while no response or tool call is in flight; a picker model switch waits for it.
+        self.turn_idle = asyncio.Event()
+        self.turn_idle.set()
+        self.configure_lock = asyncio.Lock()
+        self.client_tasks: set[asyncio.Task[None]] = set()
+        self.preview_limiter = RateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S)
+        # Mic audio is not forwarded until this monotonic time, so a preview playing on the
+        # speakers is not heard as the user talking.
+        self.mic_paused_until = 0.0
 
     # ------------------------------------------------------------ browser side
 
@@ -149,12 +170,12 @@ class OsmoSession:
         except WebSocketDisconnect:
             pass
         finally:
-            for task in self.preview_tasks:
+            for task in (*self.preview_tasks, *self.client_tasks):
                 task.cancel()
             await self.close_upstream()
 
     async def forward_audio(self, pcm: bytes) -> None:
-        if self.upstream is None:
+        if self.upstream is None or time.monotonic() < self.mic_paused_until:
             return
         try:
             await self.upstream.send(pcm)
@@ -177,7 +198,11 @@ class OsmoSession:
         elif isinstance(event, WidgetAction):
             await self.widget_action(event)
         elif isinstance(event, SessionConfigure):
-            await self.configure(event.model_dump(exclude={"type"}, exclude_none=True), "client")
+            # Runs beside the receive loop: a model switch may wait for the current turn to end.
+            change = event.model_dump(exclude={"type"}, exclude_none=True)
+            task = asyncio.create_task(self.configure_from_client(change))
+            self.client_tasks.add(task)
+            task.add_done_callback(self.client_tasks.discard)
         elif isinstance(event, VoicePreviewRequest):
             task = asyncio.create_task(self.preview(event))
             self.preview_tasks.add(task)
@@ -240,6 +265,7 @@ class OsmoSession:
         await self.send_session_update()
         self.pump = asyncio.create_task(self.pump_upstream(self.upstream))
         await self.set_state("listening")
+        await self.emit(VoiceConfigured(selection=self.selection, source="client"))
 
     async def send_session_update(self, target: ClientConnection | None = None) -> None:
         """Voice and reasoning effort go through `session.update`, which xAI accepts mid-session."""
@@ -269,13 +295,14 @@ class OsmoSession:
         if fresh is None:
             return False
         await self.send_session_update(fresh)
-        carried = [item for item in self.history if item.text.strip()]
+        carried = [item for item in self.history if item.text.strip()][-MAX_REPLAY_ITEMS:]
         for item in carried:
             await self.send_upstream(grok.ConversationItemCreate(item=history_item(item)), fresh)
         self.upstream = fresh
         self.pump = asyncio.create_task(self.pump_upstream(fresh))
         self.response_active = False
         self.outputs_pending = False
+        self.turn_idle.set()
         log.info(
             "hot-swap upstream #%d -> #%d (model %s): carried %d items",
             old_number,
@@ -291,11 +318,32 @@ class OsmoSession:
             old_pump.cancel()
         return True
 
+    async def configure_from_client(self, change: Mapping[str, Any]) -> None:
+        """A picker commit. A model switch waits for the in-flight response or tool call to finish
+        (never cancelling it), then swaps and tells the browser the session is listening."""
+        async with self.configure_lock:
+            swapping = self.upstream is not None and change.get("model", self.selection.model) != self.selection.model
+            if swapping:
+                try:
+                    async with asyncio.timeout(SWAP_WAIT_S):
+                        await self.turn_idle.wait()
+                except TimeoutError:
+                    log.warning("model switch waited %.0fs for the turn to end; switching anyway", SWAP_WAIT_S)
+            before = self.upstream
+            outcome = await self.configure(change, "client")
+            if isinstance(outcome, Selection) and self.upstream is not before:
+                self.muted = False
+                await self.set_state("listening")
+
     async def configure(self, change: Mapping[str, Any], source: Literal["client", "tool"]) -> Selection | str:
-        """The one path for picker commits and `set_voice`: validate, apply upstream, tell the browser."""
+        """The one path for picker commits and `set_voice`: validate, apply upstream, tell the browser.
+
+        The browser always hears back: `voice.configured` with the applied selection, or with the
+        selection still in effect plus `error` when the change was rejected or failed."""
         picked = resolve_selection(VOICE_MODELS, change, self.selection)
         if isinstance(picked, str):
             log.warning("rejected voice change from %s: %s", source, picked)
+            await self.emit(VoiceConfigured(selection=self.selection, source=source, error=picked))
             return picked
         previous = self.selection
         self.selection = picked
@@ -303,13 +351,25 @@ class OsmoSession:
             if picked.model != previous.model:
                 if not await self.hot_swap():
                     self.selection = previous
-                    return f"could not open {picked.model}; still on {previous.model}"
+                    error = f"could not open {picked.model}; still on {previous.model}"
+                    await self.emit(VoiceConfigured(selection=previous, source=source, error=error))
+                    return error
             else:
                 await self.send_session_update()
         await self.emit(VoiceConfigured(selection=picked, source=source))
         return picked
 
     async def preview(self, request: VoicePreviewRequest) -> None:
+        refused = preview_error(VOICE_MODELS, request.model, request.voice)
+        if refused is None and self.state not in PREVIEW_STATES:
+            refused = f"previews play only while idle or listening (now {self.state})"
+        if refused is None and not self.preview_limiter.allow():
+            refused = "too many previews; try again in a few seconds"
+        if refused is not None:
+            await self.emit(
+                VoicePreviewResult(requestId=request.requestId, model=request.model, voice=request.voice, error=refused)
+            )
+            return
         try:
             audio = await self.previews.get(request.model, request.voice)
         except Exception as exc:  # a failed preview is reported to the pill, never fatal to the session
@@ -326,6 +386,8 @@ class OsmoSession:
                 audio=base64.b64encode(audio).decode("ascii"),
             )
         )
+        # The browser plays it now; keep its speakers out of the mic for that long.
+        self.mic_paused_until = time.monotonic() + PREVIEW_SECONDS
 
     async def close_upstream(self) -> None:
         upstream, self.upstream = self.upstream, None
@@ -336,6 +398,7 @@ class OsmoSession:
             pump.cancel()
         self.response_active = False
         self.outputs_pending = False
+        self.turn_idle.set()
 
     async def upstream_lost(self) -> None:
         await self.close_upstream()
@@ -394,6 +457,7 @@ class OsmoSession:
         elif isinstance(event, grok.ResponseCreated):
             self.muted = False
             self.response_active = True
+            self.turn_idle.clear()
             if self.state != "working":
                 await self.set_state("thinking")
         elif isinstance(event, grok.OutputAudioTranscriptDelta):
@@ -412,6 +476,7 @@ class OsmoSession:
                 await self.send_upstream(grok.ResponseCreate())
                 await self.set_state("thinking")
             else:
+                self.turn_idle.set()
                 await self.set_state("listening")
         elif isinstance(event, grok.ErrorEvent):
             log.error("grok error: %s", event.error.message)

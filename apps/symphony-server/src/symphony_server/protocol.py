@@ -110,6 +110,8 @@ class VoiceConfigured(_Event):
     type: Literal["voice.configured"] = "voice.configured"
     selection: Selection
     source: Literal["client", "tool"]
+    # Set when the change was rejected or failed; `selection` is then what is still in effect.
+    error: str | None = None
 
 
 class VoicePreviewResult(_Event):

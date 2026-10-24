@@ -16,14 +16,24 @@ from core_server import (
     create_router,
     install_middlewares,
 )
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 from symphony_server.protocol import ModelsEvent
 from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
-from symphony_server.voices import VOICE_MODELS, PreviewCache, default_selection
+from symphony_server.voices import (
+    PREVIEW_CLIENTS_MAX,
+    PREVIEW_RATE_LIMIT,
+    PREVIEW_RATE_WINDOW_S,
+    PREVIEW_SAMPLE_RATE,
+    VOICE_MODELS,
+    KeyedRateLimiter,
+    PreviewCache,
+    default_selection,
+    preview_error,
+)
 
 log = logging.getLogger("symphony")
 
@@ -46,6 +56,7 @@ def create_app(
     http_client: httpx.AsyncClient,
 ) -> FastAPI:
     previews = PreviewCache(settings.realtime_url, settings.xai_api_key, settings.preview_cache_dir)
+    preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
 
     @asynccontextmanager
@@ -62,6 +73,21 @@ def create_app(
     async def voice_models() -> ModelsEvent:
         """The picker's registry before any socket is open (the same payload as the `models` event)."""
         return ModelsEvent(models=list(VOICE_MODELS), selection=default_selection(VOICE_MODELS, settings.voice))
+
+    @app.get("/voice-preview")
+    async def voice_preview(request: Request, model: str = "", voice: str = "") -> Response:
+        """A cached ~2 s PCM16 mono sample of `voice` on `model`; same checks as the `voice.preview` event."""
+        refused = preview_error(VOICE_MODELS, model, voice)
+        if refused is not None:
+            return Response(refused, status_code=400, media_type="text/plain")
+        if not preview_limiter.allow(request.client.host if request.client else "unknown"):
+            return Response("too many previews; try again in a few seconds", status_code=429, media_type="text/plain")
+        try:
+            audio = await previews.get(model, voice)
+        except Exception as exc:  # reported to the caller, never fatal to the server
+            log.warning("voice preview %s/%s failed: %s", model, voice, exc)
+            return Response(f"preview failed: {exc}", status_code=502, media_type="text/plain")
+        return Response(audio, media_type=f"audio/L16;rate={PREVIEW_SAMPLE_RATE};channels=1")
 
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
