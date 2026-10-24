@@ -10,10 +10,11 @@
  */
 import { writeFileSync } from "node:fs";
 import { type Page, chromium } from "playwright-core";
-import { MOCK_REGISTRY } from "../src/dev/mockRegistry.ts";
+import { MOCK_REGISTRY } from "../test/fixtures/mockRegistry.ts";
 
 const BASE = process.env.OSMO_URL ?? "http://127.0.0.1:8787";
 const OUT = process.argv[2] ?? "/workspace/osmo-shots-radial2";
+const OUT_PHONE = process.env.PHONE_OUT ?? OUT;
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -62,7 +63,9 @@ async function main() {
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".rp-logo")].every((img) => img.complete));
     await shot(page, "main-2-r1-provider-logos");
     const logos = await page.locator(".rp-logo").evaluateAll((imgs) => imgs.map((img) => (img as HTMLImageElement).naturalWidth > 0));
-    check(`R1 logos loaded from models.dev (${logos.filter(Boolean).length} loaded)`, logos.length > 0 && logos.every(Boolean));
+    check(`R1 logos loaded (${logos.filter(Boolean).length} loaded)`, logos.length > 0 && logos.every(Boolean));
+    const sources = await page.locator(".rp-logo").evaluateAll((imgs) => imgs.map((img) => img.getAttribute("data-source")));
+    check(`R1 logos come from models.dev at runtime first (${sources.join(", ")})`, sources.length > 0 && sources.every((s) => s === "runtime"));
 
     await hoverOption(page, "Providers", "OpenAI");
     await shot(page, "main-3-r2-models");
@@ -93,8 +96,10 @@ async function main() {
     await page.evaluate(() => window.localStorage.clear());
     await page.reload();
     await page.waitForSelector(".dock .rp-orb");
+    const stored = () => page.evaluate(() => window.localStorage.getItem("osmo.voice-pick"));
     await page.locator(".dock .rp-orb").click();
     await page.waitForSelector("text=Nice to meet you, Ada", { timeout: 8000 });
+    check(`session.start's voice.configured saved the applied pick (${await stored()})`, (await stored())?.includes("grok-voice-latest") === true);
     await page.mouse.move(10, 10);
     await pause(500);
 
@@ -115,8 +120,50 @@ async function main() {
     const summary = (await page.locator(".rp-summary").textContent()) ?? "";
     check(`summary follows the switch (${summary})`, summary.includes("grok-voice-3.0") && summary.includes("Sal") && summary.includes("none"));
     check("End button still shown (session connected)", (await page.locator("button.end").count()) === 1);
+    check(`localStorage holds the confirmed pick (${await stored()})`, (await stored()) === JSON.stringify({ model: "grok-voice-3.0", voice: "sal", effort: "none" }));
     check(`browser WebSocket opened exactly once (${sockets.length})`, sockets.length === 1);
     writeFileSync(`${OUT}/ws-open-count.log`, `browser WebSocket opens: ${sockets.length}\n${sockets.join("\n")}\n`);
+    await context.close();
+  }
+
+  // ---------------------------------------------------------------- 2b: models.dev unreachable, bundled fallbacks
+  {
+    const context = await browser.newContext({ viewport: { width: 1024, height: 760 } });
+    const page = await context.newPage();
+    await page.route("https://models.dev/**", (route) => route.abort());
+    await page.route("**/voice-models", (route) =>
+      route.fulfill({ json: { type: "models", models: MOCK_REGISTRY, selection: { model: "grok-voice-latest", voice: "eve" } } }),
+    );
+    await page.goto(BASE);
+    await page.waitForSelector(".dock .rp-orb canvas.orb-canvas");
+    const c = await orbCenter(page);
+    await page.mouse.move(c.x, c.y, { steps: 4 });
+    await page.waitForSelector(".rp-logo");
+    await pause(500);
+    const sources = await page.locator(".rp-logo").evaluateAll((imgs) =>
+      imgs.map((img) => `${img.getAttribute("data-source")}:${(img as HTMLImageElement).naturalWidth > 0}`),
+    );
+    await shot(page, "main-2c-r1-bundled-fallback");
+    check(`models.dev blocked: bundled logos used (${sources.join(", ")})`, sources.length > 0 && sources.every((s) => s === "bundled:true"));
+    await context.close();
+  }
+
+  // ---------------------------------------------------------------- 3: phone, a tap on the orb must not open the dial
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const page = await context.newPage();
+    await page.route("**/voice-models", (route) =>
+      route.fulfill({ json: { type: "models", models: MOCK_REGISTRY, selection: { model: "grok-voice-latest", voice: "eve" } } }),
+    );
+    await page.goto(BASE);
+    await page.waitForSelector(".dock .rp-orb canvas.orb-canvas");
+    await page.tap(".dock .rp-orb");
+    await pause(900);
+    const open = await page.locator(".dock .rp").getAttribute("data-open");
+    const rings = await page.locator("[role=listbox]").count();
+    await page.screenshot({ path: `${OUT_PHONE}/phone-tap-no-dial.png` });
+    check(`phone tap on the orb leaves the dial closed (data-open=${open}, rings=${rings})`, open === "false" && rings === 0);
+    check("phone tap still activates the orb (session starting/connected)", (await page.locator("button.end").count()) === 1);
     await context.close();
   }
 

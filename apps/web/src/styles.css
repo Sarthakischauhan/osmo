@@ -132,15 +132,13 @@ button { font: inherit; color: inherit; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 
-/* /dev/picker */
-.picker-dev { min-height: 100%; background: #0a0a0a; display: grid; grid-template-rows: 60px 1fr auto; }
-.picker-dev header { display: flex; align-items: center; justify-content: space-between; padding: 0 26px; }
-.picker-dev main { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 24px; }
-.picker-commits { margin: 0 auto 24px; padding: 0; list-style: none; font: 11px var(--mono); color: rgba(255, 255, 255, 0.4); max-width: 600px; text-align: center; }
-
 /* Radial picker around the dock orb: the dial overlays the feed above it. While it is closed only
    the orb takes pointer events, so the feed under the (invisible) dial stays clickable. */
-.dock { position: relative; z-index: 2; }
+.dock { position: relative; z-index: 2; overflow-x: clip; }
+/* The dial is wider than a phone: keep the page at the viewport width, centre the dial on the
+   orb and let its sides clip. */
+.app { grid-template-columns: minmax(0, 1fr); }
+.dock .orb-composer { width: 100%; min-width: 0; }
 .dock .rp { margin-top: -268px; margin-bottom: -38px; }
 .dock .rp[data-open="false"] { pointer-events: none; }
 .dock .rp[data-open="false"] .rp-orb { pointer-events: auto; }
