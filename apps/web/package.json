@@ -15,6 +15,7 @@
     "@osmo/osmo-widgets": "workspace:*",
     "@sarchauhan/chat": "0.0.2",
     "@sarchauhan/protocol": "0.0.3",
+    "cuelume": "0.2.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
