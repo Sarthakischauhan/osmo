@@ -1,8 +1,8 @@
 import type { CSSProperties } from "react";
-import type { OrbState } from "./protocol";
-import type { OrbSession } from "./useOrbSession";
+import type { OsmoState } from "./protocol";
+import type { OsmoSession } from "./useOsmoSession";
 
-const CAPTIONS: Record<OrbState, string> = {
+const CAPTIONS: Record<OsmoState, string> = {
   idle: "Tap the orb to talk",
   listening: "Listening · just talk",
   thinking: "Thinking…",
@@ -11,7 +11,7 @@ const CAPTIONS: Record<OrbState, string> = {
 };
 
 export interface OrbComposerProps {
-  session: OrbSession;
+  session: OsmoSession;
   className?: string;
   style?: CSSProperties;
 }
@@ -22,7 +22,7 @@ export interface OrbComposerProps {
  */
 export function OrbComposer({ session, className, style }: OrbComposerProps) {
   const { connection, state, detail, error } = session;
-  const shown: OrbState = connection === "connected" ? state : "idle";
+  const shown: OsmoState = connection === "connected" ? state : "idle";
   const caption =
     connection === "connecting"
       ? "Connecting…"
@@ -39,6 +39,7 @@ export function OrbComposer({ session, className, style }: OrbComposerProps) {
         type="button"
         className="orb"
         data-state={shown}
+        data-connection={connection}
         aria-label={shown === "speaking" ? "Interrupt" : connection === "disconnected" ? "Start talking" : "Orb"}
         onClick={onTap}
       >

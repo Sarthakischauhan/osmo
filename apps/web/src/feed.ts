@@ -1,4 +1,4 @@
-import type { ServerEvent } from "@osmo/orb-composer";
+import type { ServerEvent } from "@osmo/osmo-composer";
 
 /** The canvas feed: what the user said, and each assistant turn's line, tool activity and widgets. */
 export interface Activity {

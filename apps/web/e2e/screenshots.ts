@@ -7,8 +7,8 @@
  */
 import { chromium, type WebSocketRoute } from "playwright-core";
 
-const BASE = process.env.ORB_URL ?? "http://127.0.0.1:4173";
-const OUT = process.argv[2] ?? "/workspace/orb-shots";
+const BASE = process.env.OSMO_URL ?? "http://127.0.0.1:4173";
+const OUT = process.argv[2] ?? "/workspace/osmo-shots";
 const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
 type Json = Record<string, unknown>;
@@ -45,7 +45,7 @@ async function main() {
   await page.screenshot({ path: `${OUT}/01-idle.png` });
 
   await page.click("button.orb");
-  await page.waitForFunction(() => document.querySelector(".status.on") !== null);
+  await page.waitForFunction(() => document.querySelector('.orb[data-connection="connected"]') !== null);
   const ws = socket;
   if (!ws) throw new Error("app never opened /ws");
   send(ws, { type: "state", state: "listening" });

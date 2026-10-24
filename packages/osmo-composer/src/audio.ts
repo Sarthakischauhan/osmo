@@ -2,14 +2,14 @@ import { AUDIO_SAMPLE_RATE } from "./protocol";
 import { SampleBatcher, floatToPcm16, pcm16ToFloat } from "./pcm";
 
 const WORKLET = `
-class OrbMicTap extends AudioWorkletProcessor {
+class OsmoMicTap extends AudioWorkletProcessor {
   process(inputs) {
     const channel = inputs[0] && inputs[0][0];
     if (channel) this.port.postMessage(channel.slice(0));
     return true;
   }
 }
-registerProcessor("orb-mic-tap", OrbMicTap);
+registerProcessor("osmo-mic-tap", OsmoMicTap);
 `;
 
 /** Mic capture at 24 kHz, delivered as 100 ms PCM16 frames. */
@@ -27,7 +27,7 @@ export class MicCapture {
     await this.context.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
     const source = this.context.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.context, "orb-mic-tap");
+    this.node = new AudioWorkletNode(this.context, "osmo-mic-tap");
     const batcher = new SampleBatcher();
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       for (const chunk of batcher.push(event.data)) onFrame(floatToPcm16(chunk));

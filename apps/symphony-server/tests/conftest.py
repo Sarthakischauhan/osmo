@@ -16,7 +16,7 @@ from core_server import build_config
 from fastapi.testclient import TestClient
 from websockets.asyncio.server import ServerConnection, serve
 
-from symphony_server.app import create_app, orb_tools
+from symphony_server.app import create_app, osmo_tools
 from symphony_server.settings import Settings
 
 
@@ -103,7 +103,7 @@ def unreachable(request: httpx.Request) -> httpx.Response:
 
 def make_client(settings: Settings) -> TestClient:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(unreachable))
-    tools = orb_tools(http_client)
+    tools = osmo_tools(http_client)
     config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
     return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client))
 
