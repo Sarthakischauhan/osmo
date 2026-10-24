@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { VoiceModel } from "../src/protocol";
+import { readFileSync } from "node:fs";
+import { type VoiceModel, voiceModelSchema } from "../src/protocol";
 import {
   BANDS,
   FREEZE_AFTER_SNAP_MS,
@@ -17,7 +18,7 @@ import {
   snapOffset,
 } from "../src/radial-picker/geometry";
 import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
-import { focusVisible } from "../src/radial-picker/RadialPicker";
+import { focusVisible, modelRingLabel } from "../src/radial-picker/RadialPicker";
 import {
   type LogoFetch,
   isPlaceholderLogo,
@@ -302,5 +303,26 @@ describe("focusVisible", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("model ring labels", () => {
+  it("shows the short label, else the label", () => {
+    expect(modelRingLabel({ label: "Grok Voice", shortLabel: "Latest" })).toBe("Latest");
+    expect(modelRingLabel({ label: "Grok Voice 3.0", shortLabel: "3.0" })).toBe("3.0");
+    expect(modelRingLabel({ label: "Thinker" })).toBe("Thinker");
+    expect(modelRingLabel({ label: "Thinker", shortLabel: null })).toBe("Thinker");
+  });
+  it("accepts shortLabel on the wire, optional", () => {
+    const base = model("xai", "grok-voice-3.0", ["eve"]);
+    expect(voiceModelSchema.parse({ ...base, shortLabel: "3.0" }).shortLabel).toBe("3.0");
+    expect(voiceModelSchema.parse(base).shortLabel).toBeUndefined();
+  });
+  it("never truncates the model ring text and styles the id tooltip without a border", () => {
+    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+    const rule = (sel: string) => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(".rp-models")).not.toMatch(/ellipsis|max-width|overflow/);
+    expect(rule(".rp-tip")).toMatch(/border: 0/);
+    expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
   });
 });

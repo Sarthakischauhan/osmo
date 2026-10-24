@@ -41,6 +41,10 @@ const [pick, save, choose] = usePersistedPick(session.voiceModels);
 
 `VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "none" | "low" | "medium" | "high"` (xAI documents `reasoning.effort` as `"high"` or `"none"`).
 
+## Model labels
+
+The model ring shows `VoiceModel.shortLabel` (e.g. "Latest", "3.0"), else `label`, untruncated; hovering or keyboard-focusing a model shows its full id in a tooltip.
+
 ## `providerIcons`
 
 Keyed by `VoiceModel.provider`; each entry is `{ label, logo?, fallback? }`. `label` is used in the
