@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+  symphony-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/symphony-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv -p 3.12 .venv
+      - run: uv pip install --no-sources -p .venv -r requirements.txt
+      - name: vendored core_server is unmodified
+        working-directory: .
+        run: |
+          git clone -q https://github.com/Sarthakischauhan/symphony /tmp/symphony
+          git -C /tmp/symphony checkout -q a335957c53009d6c4f82e8176a9abf975b736979
+          diff -r /tmp/symphony/core_server vendor/core_server
+      - run: .venv/bin/mypy
+      - run: .venv/bin/python -m pytest -q
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t osmo .
+      - name: container serves the web app and core_server health
+        run: |
+          # Any provider key satisfies core_server's registry at boot; this one is a dummy that never leaves the runner.
+          docker run -d --name osmo -p 8080:8080 -e XAI_API_KEY=ci-dummy osmo
+          for i in $(seq 1 30); do curl -fsS localhost:8080/api/health && break; sleep 1; done
+          curl -fsS localhost:8080/ | grep -q '<div id="root">'

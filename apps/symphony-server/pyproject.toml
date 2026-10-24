@@ -1,0 +1,40 @@
+[project]
+name = "symphony-server"
+version = "0.1.0"
+description = "Osmo's Symphony server: owns the Grok realtime session, runs tools, validates widgets"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "core-server",
+    "symphony-core",
+    "symphony-harness",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=13.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+symphony-server = "symphony_server.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.8,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+packages = ["symphony_server"]
+mypy_path = "src"

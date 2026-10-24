@@ -1,0 +1,17 @@
+{
+  "name": "osmo",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm --filter @osmo/web build",
+    "dev:server": "cd apps/symphony-server && .venv/bin/python -m symphony_server",
+    "dev:web": "pnpm --filter @osmo/web dev",
+    "start": "cd apps/symphony-server && .venv/bin/python -m symphony_server --host 0.0.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
