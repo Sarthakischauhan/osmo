@@ -3,8 +3,6 @@ import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } fr
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, emptyFeed, reduceFeed } from "./feed";
 
-const MODEL_LABEL = "grok-voice-latest";
-
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
   const onEvent = useCallback((event: ServerEvent) => dispatch(event), []);
@@ -23,10 +21,6 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <strong>Osmo</strong>
-          <span className={`status ${connected ? "on" : ""}`}>
-            <i />
-            {connected ? "connected" : session.connection} · {MODEL_LABEL}
-          </span>
         </div>
         <div className="topbar-right">
           {session.startedAt !== undefined && <Clock since={session.startedAt} />}
@@ -67,9 +61,7 @@ export function App() {
                         ⌕
                       </span>
                       <span className="activity-label">{activity.label}</span>
-                      <span className={`activity-status ${activity.done ? "done" : ""}`}>
-                        {activity.done ? "Done" : "Working"}
-                      </span>
+                      {!activity.done && <span className="activity-status">Working…</span>}
                     </div>
                   ))}
                   {turn.widgets.map((widget) => (
