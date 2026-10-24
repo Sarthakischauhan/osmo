@@ -1,7 +1,7 @@
 import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
-import { FREEZE_AFTER_SNAP_MS, RINGS, type RingKey, clampOffset, offsetFor, nearestSlot, slotAngle, snapOffset } from "./geometry";
+import { FREEZE_AFTER_SNAP_MS, RINGS, type RingKey, ringSpec, clampOffset, offsetFor, nearestSlot, slotAngle, snapOffset } from "./geometry";
 
-export const EFFORTS: readonly Effort[] = ["low", "medium", "high"];
+export const EFFORTS: readonly Effort[] = ["none", "low", "medium", "high"];
 
 export interface ProviderGroup {
   id: string;
@@ -24,7 +24,7 @@ export function effortsOf(model: VoiceModel | undefined): Effort[] {
 /** The selection after committing `model`: its default voice, and the current effort if it still applies. */
 export function pickModel(model: VoiceModel, current: VoiceSelection): VoiceSelection {
   const efforts = effortsOf(model);
-  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : efforts[0];
+  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : model.capabilities.reasoningEffort?.[0];
   return effort === undefined ? { model: model.id, voice: model.defaultVoice } : { model: model.id, voice: model.defaultVoice, effort };
 }
 
@@ -97,7 +97,7 @@ function openThird(state: PickerState, model: VoiceModel, value: VoiceSelection)
 
 function openModels(state: PickerState, group: ProviderGroup, ctx: Context): PickerState {
   const providerIndex = ctx.groups.findIndex((g) => g.id === group.id);
-  const providerAngle = slotAngle(RINGS.providers, providerIndex - state.offsets.providers);
+  const providerAngle = slotAngle(ringSpec("providers", ctx.groups.length), providerIndex - state.offsets.providers);
   const selected = group.models.findIndex((model) => model.id === ctx.value.model);
   const anchor = Math.max(0, selected);
   const models = offsetFor(RINGS.models, group.models.length, anchor, nearestSlot(RINGS.models, providerAngle));
@@ -108,7 +108,7 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
   switch (action.type) {
     case "open": {
       if (state.depth > 0) return state;
-      const providers = offsetFor(RINGS.providers, action.groups.length, Math.max(0, selectedProvider(action)));
+      const providers = offsetFor(ringSpec("providers", action.groups.length), action.groups.length, Math.max(0, selectedProvider(action)));
       return { ...initialPicker, depth: 1, offsets: { ...initialPicker.offsets, providers } };
     }
     case "close":
@@ -124,12 +124,12 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
       return model ? openThird(state, model, action.value) : state;
     }
     case "scroll": {
-      const ring = RINGS[action.ring];
+      const ring = ringSpec(action.ring, action.count);
       const offset = clampOffset(ring, action.count, state.offsets[action.ring] + action.slots);
       return { ...state, offsets: { ...state.offsets, [action.ring]: offset }, scroll: { ring: action.ring, settledAt: undefined } };
     }
     case "snap": {
-      const offset = snapOffset(RINGS[action.ring], action.count, state.offsets[action.ring]);
+      const offset = snapOffset(ringSpec(action.ring, action.count), action.count, state.offsets[action.ring]);
       return { ...state, offsets: { ...state.offsets, [action.ring]: offset } };
     }
     case "settle":
@@ -140,7 +140,7 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
       return { ...state, scroll: undefined };
     }
     case "reveal": {
-      const ring = RINGS[action.ring];
+      const ring = ringSpec(action.ring, action.count);
       const current = state.offsets[action.ring];
       const lowest = action.index - (ring.visible - 1);
       const target = action.index < current ? action.index : action.index > current + ring.visible - 1 ? lowest : Math.round(current);

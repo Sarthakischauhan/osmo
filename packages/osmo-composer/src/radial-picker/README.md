@@ -35,33 +35,30 @@ const [pick, save] = usePersistedPick(session.voiceModels); // localStorage "osm
 | `onPreviewStop` | `() => void` | — | Hovered/focused voice changed or the dial closed. |
 | `previewing` | `{ model, voice }` | — | Shows the playing indicator on that pill. |
 | `previewDisabled` | `boolean` | `false` | E.g. while the agent is speaking. |
+| `onOrbActivate` | `() => void` | — | Orb click runs this (e.g. start talking); the dial then opens on hover/focus only. |
+| `orbLabel` | `string` | — | Accessible name for the orb's own action, prefixed to the picker label. |
 
-`VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "low" | "medium" | "high"`.
+`VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "none" | "low" | "medium" | "high"` (xAI documents `reasoning.effort` as `"high"` or `"none"`).
 
 ## `providerIcons`
 
-Keyed by `VoiceModel.provider`; each entry is `{ label, icon? }`. `label` is used in the summary
-pill and tooltip; `icon` is a ~20px monochrome glyph in `currentColor`. A provider without an entry
-(or without `icon`) gets a monogram of its label/id.
+Keyed by `VoiceModel.provider`; each entry is `{ label, logo? }`. `label` is used in the summary
+pill and tooltip; `logo` is an image URL loaded at runtime and drawn pure white
+(`filter: brightness(0) invert(1)`). No logo, or one that fails to load, gives a monogram of the label.
 
-| key | label |
-| --- | --- |
-| `xai` | xAI |
-| `openai` | OpenAI |
-| `google` | Google |
-| `anthropic` | Anthropic |
-| `elevenlabs` | ElevenLabs |
-| `deepgram` | Deepgram |
-| `cartesia` | Cartesia |
+Defaults load from `https://models.dev/logos/<slug>.svg` for the slugs models.dev has
+(`xai`, `openai`, `google`, `anthropic`, `mistral`). models.dev answers unknown slugs with a
+generic placeholder (HTTP 200), so `elevenlabs`, `deepgram` and `cartesia` have no URL and show a monogram.
+No SVG is bundled.
 
 ```ts
 import { providerIcons } from "@osmo/osmo-composer";
-const icons = { ...providerIcons, acme: { label: "Acme", icon: <AcmeGlyph /> } };
+const icons = { ...providerIcons, acme: { label: "Acme", logo: "https://cdn.example.com/acme.svg" } };
 ```
 
 ## Behaviour
 
-- Rings (angles CCW from +x): R1 providers r=80, 30–150°, 5 slots × 30°; R2 models r=160, 20–160°, 5 × 35°;
+- Rings (angles CCW from +x): R1 providers r=84, 30–150°, 4 slots × 40° (fewer providers than slots are spread evenly around 90°); R2 models r=160, 20–160°, 5 × 35°;
   R3 voices r=235, 130–170°, 3 × 20° (left); R3 effort r=235, 14–46°, 3 × 16° (right, only levels in `reasoningEffort`, hidden if none).
 - Hover orb → R1, provider → R2, model → R3. Leaving the dial closes it after 250 ms; Escape closes and refocuses the orb.
 - Hit-testing is by radius from the orb centre (R1 56–120, R2 120–198, R3 198–275; R3 side by angle).
@@ -77,3 +74,11 @@ White alphas on `#0A0A0A`, no tint. Pills: idle fill 0.04 / text `#B5B5B5`, hove
 Following Osmo's no-lines rule there are **no borders and no arc tracks**: state is fill plus a soft glow, and arcs are implied
 by spacing. To restore the original spec's lines, add `box-shadow: inset 0 0 0 1px rgba(255,255,255,.12 | .25 | .45)` to the
 idle/hover/selected `.rp-item` rules in `radialPicker.css`.
+
+## In Osmo
+
+The main app passes `picker` to `OrbComposer`, which renders this dial around its `GlassOrb`
+(the canvas orb that follows playback level and turns amber while a choice is pending). The orb keeps
+its tap: start talking, or interrupt while speaking (`onOrbActivate`); the dial opens on hover or focus.
+A commit sends `session.configure`: Symphony applies voice and effort with `session.update` on the
+live Grok session and hot-swaps the upstream connection for a model change, carrying the conversation over.

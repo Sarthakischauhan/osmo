@@ -19,7 +19,8 @@ export interface RingSpec {
 }
 
 export const RINGS: Record<RingKey, RingSpec> = {
-  providers: { key: "providers", radius: 80, low: 30, high: 150, visible: 5, step: 30 },
+  // 44px discs 40° apart at r = 84 leave a ~14px gap between neighbours.
+  providers: { key: "providers", radius: 84, low: 30, high: 150, visible: 4, step: 40 },
   models: { key: "models", radius: 160, low: 20, high: 160, visible: 5, step: 35 },
   voices: { key: "voices", radius: 235, low: 130, high: 170, visible: 3, step: 20 },
   effort: { key: "effort", radius: 235, low: 14, high: 46, visible: 3, step: 16 },
@@ -35,6 +36,18 @@ export const CLOSE_GRACE_MS = 250;
 export const PREVIEW_HOVER_MS = 400;
 /** Wheel/trackpad pixels per slot. */
 export const PX_PER_SLOT = 60;
+
+/**
+ * The ring as laid out for `count` items. Providers with fewer items than slots
+ * are spread evenly around 90° at the ring's spacing instead of bunching at one
+ * end; every other ring keeps its spec.
+ */
+export function ringSpec(key: RingKey, count: number): RingSpec {
+  const ring = RINGS[key];
+  if (key !== "providers" || count <= 0 || count >= ring.visible) return ring;
+  const half = (ring.step * (count - 1)) / 2;
+  return { ...ring, visible: count, low: 90 - half, high: 90 + half };
+}
 
 export function slotAngle(ring: RingSpec, position: number): number {
   return ring.high - position * ring.step;

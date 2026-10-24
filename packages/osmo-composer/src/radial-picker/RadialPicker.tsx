@@ -5,7 +5,7 @@ import {
   FREEZE_AFTER_SNAP_MS,
   PREVIEW_HOVER_MS,
   PX_PER_SLOT,
-  RINGS,
+  ringSpec,
   type RingKey,
   SNAP_IDLE_MS,
   SNAP_MS,
@@ -17,7 +17,7 @@ import {
   polar,
   slotAngle,
 } from "./geometry";
-import { type ProviderIcon, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
+import { type ProviderIcon, ProviderMark, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
 import { type Context, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
 
 export interface RadialPickerProps {
@@ -28,8 +28,12 @@ export interface RadialPickerProps {
   orbSize?: number;
   /** Provider glyphs and labels keyed by `VoiceModel.provider`; unknown providers get a monogram. */
   providerIcons?: Record<string, ProviderIcon>;
-  /** Orb face; defaults to a neutral glass sphere. */
+  /** Orb face; defaults to a neutral glass sphere. Osmo passes its `GlassOrb`. */
   orb?: ReactNode;
+  /** When set, a click on the orb calls this (e.g. start talking) and the dial opens on hover or focus only. */
+  onOrbActivate?: () => void;
+  /** Accessible name of the orb button when it has its own action. */
+  orbLabel?: string;
   /** Called ~400 ms after a voice pill is hovered or focused; play a short sample. */
   onPreview?: (pick: { model: string; voice: string }) => void;
   /** Called when the hovered/focused voice changes or the dial closes. */
@@ -40,8 +44,8 @@ export interface RadialPickerProps {
   previewDisabled?: boolean;
 }
 
-const EFFORT_LABEL: Record<Effort, string> = { low: "Low", medium: "Med", high: "High" };
-const EFFORT_BARS: Record<Effort, number> = { low: 1, medium: 2, high: 3 };
+const EFFORT_LABEL: Record<Effort, string> = { none: "Off", low: "Low", medium: "Med", high: "High" };
+const EFFORT_BARS: Record<Effort, number> = { none: 0, low: 1, medium: 2, high: 3 };
 /** Dial canvas: R3 radius plus room for half a pill. */
 const REACH = 300;
 const KEY_ORDER: RingKey[] = ["providers", "models", "voices", "effort"];
@@ -75,6 +79,8 @@ export function RadialPicker({
   onPreviewStop,
   previewing,
   previewDisabled = false,
+  onOrbActivate,
+  orbLabel,
 }: RadialPickerProps) {
   const groups = useMemo(() => groupProviders(registry), [registry]);
   const [state, dispatch] = useReducer(reducePicker, initialPicker);
@@ -199,7 +205,7 @@ export function RadialPicker({
         setHover(undefined);
         return;
       }
-      const ring = RINGS[hit.ring];
+      const ring = ringSpec(hit.ring, countsRef.current[hit.ring]);
       hoverItem(hit.ring, itemAt(ring, countsRef.current[hit.ring], current.offsets[hit.ring], hit.angle));
     },
     // scheduleClose / cancelClose only touch refs.
@@ -399,7 +405,7 @@ export function RadialPicker({
     .join(" · ");
 
   const renderRing = (key: RingKey) => {
-    const ring = RINGS[key];
+    const ring = ringSpec(key, counts[key]);
     const offset = offsetOf(key);
     const count = counts[key];
     const selected = selectedIndex(key);
@@ -408,7 +414,7 @@ export function RadialPicker({
       if (key === "providers") {
         const g = groups[index];
         const entry = providerIcon(providerIcons, g?.id ?? "");
-        return { text: entry.label, title: entry.label, node: entry.icon ?? <span className="rp-monogram">{entry.label.slice(0, 1).toUpperCase()}</span> };
+        return { text: entry.label, title: entry.label, node: <ProviderMark entry={entry} /> };
       }
       if (key === "models") {
         const m = group?.models[index];
@@ -529,7 +535,7 @@ export function RadialPicker({
         const dragging = drag.current;
         if (dragging && dragging.id === event.pointerId) {
           const angle = (Math.atan2(cy - point.y, point.x - cx) * 180) / Math.PI;
-          scrollBy(dragging.ring, (angle - dragging.angle) / RINGS[dragging.ring].step);
+          scrollBy(dragging.ring, (angle - dragging.angle) / ringSpec(dragging.ring, countsRef.current[dragging.ring]).step);
           dragging.angle = angle;
           return;
         }
@@ -564,9 +570,12 @@ export function RadialPicker({
         className="rp-orb"
         style={{ left: cx, top: cy, width: orbSize, height: orbSize }}
         aria-expanded={state.depth > 0}
-        aria-label="Change provider, model, voice and reasoning"
+        aria-label={orbLabel === undefined ? PICKER_LABEL : `${orbLabel}. ${PICKER_LABEL}`}
         onFocus={open}
-        onClick={() => (state.depth === 0 ? open() : undefined)}
+        onClick={() => {
+          if (onOrbActivate) onOrbActivate();
+          else if (state.depth === 0) open();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape") close();
         }}
@@ -581,6 +590,8 @@ export function RadialPicker({
     </div>
   );
 }
+
+const PICKER_LABEL = "Change provider, model, voice and reasoning";
 
 const RING_LABELS: Record<RingKey, string> = {
   providers: "Providers",

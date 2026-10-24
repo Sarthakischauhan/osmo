@@ -13,6 +13,7 @@ import {
   offsetFor,
   polar,
   slotAngle,
+  ringSpec,
   snapOffset,
 } from "../src/radial-picker/geometry";
 import { PICK_STORAGE_KEY, defaultPick, restorePick } from "../src/radial-picker/persistence";
@@ -38,7 +39,7 @@ const value = { model: "grok-voice-latest", voice: "eve" };
 
 describe("slot math", () => {
   it("places slots along each arc as specified", () => {
-    expect([0, 1, 2, 3, 4].map((p) => slotAngle(RINGS.providers, p))).toEqual([150, 120, 90, 60, 30]);
+    expect([0, 1, 2, 3].map((p) => slotAngle(RINGS.providers, p))).toEqual([150, 110, 70, 30]);
     expect([0, 1, 2, 3, 4].map((p) => slotAngle(RINGS.models, p))).toEqual([160, 125, 90, 55, 20]);
     expect([0, 1, 2].map((p) => slotAngle(RINGS.voices, p))).toEqual([170, 150, 130]);
     expect([0, 1, 2].map((p) => slotAngle(RINGS.effort, p))).toEqual([46, 30, 14]);
@@ -65,8 +66,18 @@ describe("clamp and snap", () => {
     expect(clampOffset(RINGS.models, 9, 2.3)).toBe(2.3);
   });
   it("lets a short ring slide but not past its items", () => {
-    expect(clampOffset(RINGS.providers, 3, -5)).toBe(-2);
-    expect(clampOffset(RINGS.providers, 3, 1)).toBe(0);
+    expect(clampOffset(RINGS.models, 3, -5)).toBe(-2);
+    expect(clampOffset(RINGS.models, 3, 1)).toBe(0);
+  });
+  it("spreads fewer providers than slots evenly around 90° with real gaps", () => {
+    const three = ringSpec("providers", 3);
+    expect([0, 1, 2].map((p) => slotAngle(three, p))).toEqual([130, 90, 50]);
+    expect(clampOffset(three, 3, -1)).toBe(0);
+    expect(slotAngle(ringSpec("providers", 1), 0)).toBe(90);
+    expect(ringSpec("providers", 7)).toBe(RINGS.providers);
+    // Neighbouring 44px discs don't touch: chord between slots exceeds the disc size.
+    const chord = 2 * RINGS.providers.radius * Math.sin((RINGS.providers.step * Math.PI) / 360);
+    expect(chord - 44).toBeGreaterThan(10);
   });
   it("snaps to the nearest whole slot, clamped", () => {
     expect(snapOffset(RINGS.models, 9, 2.4)).toBe(2);
@@ -76,7 +87,7 @@ describe("clamp and snap", () => {
   it("centres the window on an anchor", () => {
     expect(offsetFor(RINGS.models, 9, 6)).toBe(4);
     expect(offsetFor(RINGS.models, 9, 0)).toBe(0);
-    expect(offsetFor(RINGS.providers, 3, 0)).toBe(-2);
+    expect(offsetFor(RINGS.models, 3, 0)).toBe(-2);
   });
 });
 
