@@ -43,6 +43,7 @@ from symphony_server.protocol import (
     WidgetUpdate,
     client_event_adapter,
 )
+from symphony_server.providers import CredentialStore, with_locks
 from symphony_server.settings import Settings
 from symphony_server.voices import (
     SET_VOICE,
@@ -120,12 +121,18 @@ class HistoryItem:
 
 class OsmoSession:
     def __init__(
-        self, browser: WebSocket, settings: Settings, tools: Mapping[str, Tool], previews: PreviewCache
+        self,
+        browser: WebSocket,
+        settings: Settings,
+        tools: Mapping[str, Tool],
+        previews: PreviewCache,
+        credentials: CredentialStore,
     ) -> None:
         self.browser = browser
         self.previews = previews
+        self.credentials = credentials
         self.preview_tasks: set[asyncio.Task[None]] = set()
-        self.selection = default_selection(VOICE_MODELS, settings.voice)
+        self.selection = default_selection(with_locks(VOICE_MODELS, credentials), settings.voice)
         self.instructions = settings.instructions
         self.settings = settings
         self.tools = tools
@@ -155,7 +162,7 @@ class OsmoSession:
     # ------------------------------------------------------------ browser side
 
     async def run(self) -> None:
-        await self.emit(ModelsEvent(models=list(VOICE_MODELS), selection=self.selection))
+        await self.emit(ModelsEvent(models=list(with_locks(VOICE_MODELS, self.credentials)), selection=self.selection))
         try:
             while True:
                 message = await self.browser.receive()
@@ -236,7 +243,7 @@ class OsmoSession:
         try:
             upstream = await connect(
                 realtime_url_for(self.settings.realtime_url, model),
-                additional_headers={"Authorization": f"Bearer {self.settings.xai_api_key}"},
+                additional_headers={"Authorization": f"Bearer {self.credentials.secret('xai')}"},
                 max_size=None,
             )
         except (OSError, ConnectionClosed) as exc:
@@ -249,11 +256,11 @@ class OsmoSession:
     async def start(self, event: SessionStart) -> None:
         if self.upstream is not None:
             return
-        if not self.settings.xai_api_key:
-            await self.set_state("idle", "XAI_API_KEY is not configured on the server")
+        if not self.credentials.connected("xai"):
+            await self.set_state("idle", "xAI is not connected: add a key or set XAI_API_KEY on the server")
             return
         picked = resolve_selection(
-            VOICE_MODELS, event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
+            with_locks(VOICE_MODELS, self.credentials), event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
         )
         if isinstance(picked, Selection):
             self.selection = picked
@@ -340,7 +347,7 @@ class OsmoSession:
 
         The browser always hears back: `voice.configured` with the applied selection, or with the
         selection still in effect plus `error` when the change was rejected or failed."""
-        picked = resolve_selection(VOICE_MODELS, change, self.selection)
+        picked = resolve_selection(with_locks(VOICE_MODELS, self.credentials), change, self.selection)
         if isinstance(picked, str):
             log.warning("rejected voice change from %s: %s", source, picked)
             await self.emit(VoiceConfigured(selection=self.selection, source=source, error=picked))

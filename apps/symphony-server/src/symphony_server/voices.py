@@ -15,7 +15,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -23,6 +23,9 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from symphony_server import grok_events as grok
+
+if TYPE_CHECKING:
+    from symphony_server.providers import CredentialStore
 
 log = logging.getLogger("symphony.voices")
 
@@ -68,6 +71,8 @@ class VoiceModel(_Wire):
     capabilities: Capabilities
     voices: list[Voice]
     defaultVoice: str
+    # True while the provider has no credential on the server; the picker offers to connect it.
+    locked: bool = False
 
 
 class Selection(_Wire):
@@ -190,6 +195,8 @@ def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], c
     model = find_model(models, model_id)
     if model is None:
         return f"unknown model {model_id!r}; choose one of {', '.join(m.id for m in models)}"
+    if model.locked:
+        return f"{model.id} is locked: connect {model.provider} first"
     model_changed = model.id != current.model
     voice_id = (change.voice or (model.defaultVoice if model_changed else current.voice)).lower()
     voice = next((v for v in model.voices if v.id == voice_id), None)
@@ -223,10 +230,10 @@ class PreviewCache:
     """2 s PCM16 samples per (model, voice), generated once, kept in memory and optionally on disk."""
 
     def __init__(
-        self, realtime_url: str, api_key: str | None, directory: Path | None, max_entries: int = PREVIEW_CACHE_MAX
+        self, realtime_url: str, credentials: CredentialStore, directory: Path | None, max_entries: int = PREVIEW_CACHE_MAX
     ) -> None:
         self.realtime_url = realtime_url
-        self.api_key = api_key
+        self.credentials = credentials
         self.directory = directory
         self.max_entries = max_entries
         # LRU of generated audio; locks only live while a key is being fetched.
@@ -276,13 +283,15 @@ class PreviewCache:
         return audio
 
     async def generate(self, model: str, voice: str) -> bytes:
-        if not self.api_key:
-            raise RuntimeError("XAI_API_KEY is not configured on the server")
+        entry = find_model(VOICE_MODELS, model)
+        api_key = self.credentials.secret(entry.provider) if entry is not None else None
+        if not api_key:
+            raise RuntimeError(f"{entry.provider if entry else model} is not connected on the server")
         audio = bytearray()
         async with asyncio.timeout(PREVIEW_TIMEOUT_S):
             async with connect(
                 realtime_url_for(self.realtime_url, model),
-                additional_headers={"Authorization": f"Bearer {self.api_key}"},
+                additional_headers={"Authorization": f"Bearer {api_key}"},
                 max_size=None,
             ) as upstream:
                 setup: list[grok.GrokClientEvent] = [

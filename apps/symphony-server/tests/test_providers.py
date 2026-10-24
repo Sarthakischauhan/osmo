@@ -1,0 +1,212 @@
+"""Provider credentials: key validation, OAuth (PKCE + state), locking, and that secrets never leak."""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import logging
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+import httpx
+import pytest
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+
+from conftest import make_client
+from symphony_server.providers import PROVIDERS
+from symphony_server.settings import Settings
+
+GOOD_KEY = "sk-good-0123456789-secret"
+BAD_KEY = "sk-bad-0123456789-secret"
+OAUTH_KEY = "sk-or-v1-oauth-minted-secret"
+OAUTH_CODE = "auth-code-123"
+
+
+class FakeProviders:
+    """Answers the providers' validation and OAuth token endpoints; records every request."""
+
+    def __init__(self) -> None:
+        self.requests: list[httpx.Request] = []
+        self.challenge = ""
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET" and request.url.path in ("/v1/models", "/api/v1/key"):
+            ok = request.headers.get("Authorization") == f"Bearer {GOOD_KEY}"
+            return httpx.Response(200, json={"data": []}) if ok else httpx.Response(401, json={"error": "invalid key"})
+        if request.method == "POST" and str(request.url) == "https://openrouter.ai/api/v1/auth/keys":
+            body = json.loads(request.content)
+            digest = hashlib.sha256(body["code_verifier"].encode()).digest()
+            matches = base64.urlsafe_b64encode(digest).rstrip(b"=").decode() == self.challenge
+            if body["code"] == OAUTH_CODE and matches and body["code_challenge_method"] == "S256":
+                return httpx.Response(200, json={"key": OAUTH_KEY})
+            return httpx.Response(403, json={"error": "Invalid code or code_verifier"})
+        raise AssertionError(f"unexpected call to {request.url}")
+
+
+@pytest.fixture
+def fake() -> FakeProviders:
+    return FakeProviders()
+
+
+def settings(tmp_path: Path, xai_key: str | None = None) -> Settings:
+    return Settings(xai_api_key=xai_key, realtime_url="ws://127.0.0.1:9/unused", credentials_file=tmp_path / "creds.enc")
+
+
+def connected(client_get: httpx.Response) -> dict[str, bool]:
+    return {p["id"]: p["connected"] for p in client_get.json()["providers"]}
+
+
+def test_providers_lists_auth_kinds_and_openrouter_alone_offers_oauth(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        body = client.get("/providers").json()
+    kinds = {p["id"]: p["authKinds"] for p in body["providers"]}
+    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"]}
+    assert all(p["connected"] is False for p in body["providers"])
+    assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected"}
+
+
+def test_key_validation_failure_stores_nothing(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        response = client.post("/providers/openai/key", json={"key": BAD_KEY})
+        assert response.status_code == 400
+        assert "rejected" in response.json()["detail"]
+        assert connected(client.get("/providers"))["openai"] is False
+    assert [str(r.url) for r in fake.requests] == ["https://api.openai.com/v1/models"]
+    assert not (tmp_path / "creds.enc").exists()
+
+
+def test_valid_key_connects_unlocks_models_and_delete_disconnects(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        models = client.get("/voice-models").json()["models"]
+        assert models and all(m["locked"] is True for m in models)
+        assert client.post("/providers/xai/key", json={"key": GOOD_KEY}).status_code == 204
+        assert connected(client.get("/providers"))["xai"] is True
+        assert all(m["locked"] is False for m in client.get("/voice-models").json()["models"])
+        with client.websocket_connect("/ws") as ws:
+            event = json.loads(ws.receive_text())
+            assert event["type"] == "models" and all(m["locked"] is False for m in event["models"])
+        assert client.delete("/providers/xai").status_code == 204
+        assert connected(client.get("/providers"))["xai"] is False
+        with client.websocket_connect("/ws") as ws:
+            event = json.loads(ws.receive_text())
+            assert all(m["locked"] is True for m in event["models"])
+
+
+def test_env_key_connects_xai_without_touching_the_file(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path, xai_key="env-key-secret"), fake) as client:
+        assert connected(client.get("/providers"))["xai"] is True
+        assert all(m["locked"] is False for m in client.get("/voice-models").json()["models"])
+    assert not (tmp_path / "creds.enc").exists()
+
+
+def test_unknown_provider_is_404(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        assert client.post("/providers/nope/key", json={"key": GOOD_KEY}).status_code == 404
+        assert client.delete("/providers/nope").status_code == 404
+
+
+def start_oauth(client: TestClient, fake: FakeProviders) -> dict[str, str]:
+    response = client.get("/providers/openrouter/oauth/start", follow_redirects=False)
+    assert response.status_code == 302
+    location = urlsplit(response.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == "https://openrouter.ai/auth"
+    query = {k: v[0] for k, v in parse_qs(location.query).items()}
+    assert query["code_challenge_method"] == "S256" and query["state"]
+    assert urlsplit(query["callback_url"]).path == "/providers/openrouter/oauth/callback"
+    fake.challenge = query["code_challenge"]
+    return query
+
+
+def test_oauth_pkce_round_trip_stores_the_minted_key(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        query = start_oauth(client, fake)
+        done = client.get(
+            "/providers/openrouter/oauth/callback", params={"code": OAUTH_CODE, "state": query["state"]}, follow_redirects=False
+        )
+        assert done.status_code == 303 and done.headers["location"] == "/#connected=openrouter"
+        assert connected(client.get("/providers"))["openrouter"] is True
+        # The state is single-use.
+        again = client.get("/providers/openrouter/oauth/callback", params={"code": OAUTH_CODE, "state": query["state"]})
+        assert again.status_code == 400
+
+
+def test_oauth_state_mismatch_is_rejected_before_any_token_exchange(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        start_oauth(client, fake)
+        response = client.get("/providers/openrouter/oauth/callback", params={"code": OAUTH_CODE, "state": "forged"})
+        assert response.status_code == 400
+        assert "state mismatch" in response.json()["detail"]
+        assert connected(client.get("/providers"))["openrouter"] is False
+    assert not any(r.method == "POST" for r in fake.requests)
+
+
+def test_oauth_is_refused_for_api_key_only_providers(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        for spec in PROVIDERS:
+            if spec.oauth is None:
+                response = client.get(f"/providers/{spec.id}/oauth/start", follow_redirects=False)
+                assert response.status_code == 400
+
+
+def test_secrets_never_appear_in_responses_or_logs(
+    tmp_path: Path, fake: FakeProviders, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    bodies: list[str] = []
+    with make_client(settings(tmp_path), fake) as client:
+        for response in (
+            client.post("/providers/openai/key", json={"key": BAD_KEY}),
+            client.post("/providers/xai/key", json={"key": GOOD_KEY}),
+            client.post("/providers/openai/key", json={"key": GOOD_KEY}),
+            client.get("/providers"),
+            client.get("/voice-models"),
+        ):
+            bodies.append(response.text + json.dumps(dict(response.headers)))
+        query = start_oauth(client, fake)
+        for response in (
+            client.get("/providers/openrouter/oauth/callback", params={"code": OAUTH_CODE, "state": query["state"]}, follow_redirects=False),
+            client.get("/providers"),
+            client.post("/providers/openrouter/key", json={}),
+        ):
+            bodies.append(response.text + json.dumps(dict(response.headers)))
+        with client.websocket_connect("/ws") as ws:
+            bodies.append(ws.receive_text())
+    everything = "\n".join(bodies) + "\n" + caplog.text
+    for secret in (GOOD_KEY, BAD_KEY, OAUTH_KEY):
+        assert secret not in everything
+    assert "xai connected with an API key" in caplog.text
+
+
+def test_credentials_are_encrypted_at_rest_and_survive_a_restart(tmp_path: Path, fake: FakeProviders) -> None:
+    path = tmp_path / "creds.enc"
+    with make_client(settings(tmp_path), fake) as client:
+        assert client.post("/providers/xai/key", json={"key": GOOD_KEY}).status_code == 204
+    stored = path.read_bytes()
+    assert GOOD_KEY.encode() not in stored and b"xai" not in stored and b"api_key" not in stored
+    keyfile = tmp_path / "creds.enc.key"
+    assert keyfile.is_file() and keyfile.stat().st_mode & 0o077 == 0
+    with make_client(settings(tmp_path), fake) as client:
+        assert connected(client.get("/providers"))["xai"] is True
+
+
+def test_explicit_key_from_env_is_used_and_a_wrong_key_cannot_read_the_file(tmp_path: Path, fake: FakeProviders) -> None:
+    key = Fernet.generate_key().decode()
+    with make_client(Settings(xai_api_key=None, credentials_file=tmp_path / "c.enc", credentials_key=key), fake) as client:
+        assert client.post("/providers/xai/key", json={"key": GOOD_KEY}).status_code == 204
+    assert not (tmp_path / "c.enc.key").exists()
+    assert GOOD_KEY.encode() in Fernet(key.encode()).decrypt((tmp_path / "c.enc").read_bytes())
+    other = Fernet.generate_key().decode()
+    with make_client(Settings(xai_api_key=None, credentials_file=tmp_path / "c.enc", credentials_key=other), fake) as client:
+        assert connected(client.get("/providers"))["xai"] is False
+
+
+def test_locked_models_cannot_be_selected(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        with client.websocket_connect("/ws") as ws:
+            json.loads(ws.receive_text())
+            ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "eve"}))
+            event = json.loads(ws.receive_text())
+            assert event["type"] == "voice.configured" and "locked" in event["error"]

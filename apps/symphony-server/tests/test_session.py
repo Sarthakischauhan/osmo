@@ -235,7 +235,7 @@ def test_missing_key_is_reported_not_faked(grok: FakeGrok) -> None:
         with client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({"type": "session.start"}))
             state = next_event(ws, "state")
-            assert state == {"type": "state", "state": "idle", "detail": "XAI_API_KEY is not configured on the server"}
+            assert state == {"type": "state", "state": "idle", "detail": "xAI is not connected: add a key or set XAI_API_KEY on the server"}
 
 
 def test_core_server_routes_are_mounted(client: TestClient) -> None:

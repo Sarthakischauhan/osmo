@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 from symphony_server.protocol import ModelsEvent
+from symphony_server.providers import CredentialStore, create_provider_router, with_locks
 from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
@@ -55,7 +56,12 @@ def create_app(
     tools: dict[str, Tool],
     http_client: httpx.AsyncClient,
 ) -> FastAPI:
-    previews = PreviewCache(settings.realtime_url, settings.xai_api_key, settings.preview_cache_dir)
+    credentials = CredentialStore(
+        settings.credentials_file,
+        settings.credentials_key,
+        env={"XAI_API_KEY": settings.xai_api_key} if settings.xai_api_key else {},
+    )
+    previews = PreviewCache(settings.realtime_url, credentials, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
 
@@ -68,11 +74,13 @@ def create_app(
     app = FastAPI(title="symphony-server", lifespan=lifespan)
     install_middlewares(app, core_config, prefix="/api")
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
+    app.include_router(create_provider_router(credentials, http_client))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:
         """The picker's registry before any socket is open (the same payload as the `models` event)."""
-        return ModelsEvent(models=list(VOICE_MODELS), selection=default_selection(VOICE_MODELS, settings.voice))
+        models = with_locks(VOICE_MODELS, credentials)
+        return ModelsEvent(models=list(models), selection=default_selection(models, settings.voice))
 
     @app.get("/voice-preview")
     async def voice_preview(request: Request, model: str = "", voice: str = "") -> Response:
@@ -92,7 +100,7 @@ def create_app(
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await OsmoSession(websocket, settings, tools, previews).run()
+        await OsmoSession(websocket, settings, tools, previews, credentials).run()
 
     if settings.static_dir is not None and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")

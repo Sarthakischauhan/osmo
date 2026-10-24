@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_REALTIME_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
+DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -32,6 +33,9 @@ class Settings:
     instructions: str = DEFAULT_INSTRUCTIONS
     static_dir: Path | None = None
     preview_cache_dir: Path | None = None
+    # Encrypted provider credentials (providers.py); None keeps them in memory only.
+    credentials_file: Path | None = None
+    credentials_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -43,4 +47,6 @@ class Settings:
             voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,
             preview_cache_dir=Path(previews) if previews else None,
+            credentials_file=Path(os.getenv("OSMO_CREDENTIALS_FILE") or DEFAULT_CREDENTIALS_FILE).expanduser(),
+            credentials_key=os.getenv("OSMO_CREDENTIALS_KEY") or None,
         )

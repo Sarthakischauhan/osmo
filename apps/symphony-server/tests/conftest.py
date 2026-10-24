@@ -6,7 +6,7 @@ import asyncio
 import json
 import queue
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
@@ -107,8 +107,11 @@ def unreachable(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"unexpected network call to {request.url}")
 
 
-def make_client(settings: Settings) -> TestClient:
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(unreachable))
+def make_client(
+    settings: Settings, handler: Callable[[httpx.Request], httpx.Response] = unreachable
+) -> TestClient:
+    """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     tools = osmo_tools(http_client)
     config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
     return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client))
