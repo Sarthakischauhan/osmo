@@ -2,14 +2,22 @@ import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
 import type { AgentPart } from "@sarchauhan/protocol";
-import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { OrbComposer, type ServerEvent, orbMode, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
+import { Cues } from "./cues";
+import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
 
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
-  const onEvent = useCallback((event: ServerEvent) => dispatch(event), []);
+  const speaking = useRef(false);
+  const cues = useRef<Cues | null>(null);
+  cues.current ??= new Cues(() => speaking.current);
+  const onEvent = useCallback((event: ServerEvent) => {
+    dispatch(event);
+    cues.current?.onServerEvent(event);
+  }, []);
   const session = useOsmoSession({ url: sameOriginSocketUrl(window.location), onEvent });
+  speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,10 +32,32 @@ export function App() {
       if (response.widgetId === undefined || response.actionId === undefined || typeof response.value !== "string") return;
       const id = response.widgetId;
       setAnswered((previous) => new Set(previous).add(id));
+      cues.current?.onConfirm();
       sendWidgetAction(id, response.actionId, response.value);
     },
     [sendWidgetAction],
   );
+
+  // Autoplay rules: cues stay silent until the first real gesture unlocks audio.
+  useEffect(() => {
+    const unlock = () => void cues.current?.gesture();
+    document.addEventListener("pointerdown", unlock, true);
+    document.addEventListener("keydown", unlock, true);
+    return () => {
+      document.removeEventListener("pointerdown", unlock, true);
+      document.removeEventListener("keydown", unlock, true);
+    };
+  }, []);
+  useEffect(() => cues.current?.onConnection(session.connection), [session.connection]);
+  const pending = connected ? pendingChoice(feed, answered) : undefined;
+  const amber = orbMode(session.connection, session.state, pending !== undefined) === "awaiting";
+  useEffect(() => cues.current?.onAmber(amber ? pending : undefined), [amber, pending]);
+  const onFeedChange = useCallback((event: ChangeEvent<HTMLElement>) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "radio" && target.closest(".chat-question")) {
+      cues.current?.onOptionPick();
+    }
+  }, []);
 
   return (
     <div className="app">
@@ -46,7 +76,7 @@ export function App() {
       </header>
 
       <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-        <main className="canvas chat-root" data-theme="dark">
+        <main className="canvas chat-root" data-theme="dark" onChange={onFeedChange}>
           <div className="feed">
             {feed.turns.length === 0 && (
               <div className="empty">
@@ -76,7 +106,7 @@ export function App() {
       </WidgetProvider>
 
       <footer className="dock">
-        <OrbComposer session={session} awaitingChoice={connected && pendingChoice(feed, answered) !== undefined} />
+        <OrbComposer session={session} awaitingChoice={pending !== undefined} />
       </footer>
     </div>
   );
