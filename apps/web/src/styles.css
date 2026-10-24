@@ -123,22 +123,42 @@ button { font: inherit; color: inherit; }
 
 .dock { padding: 18px 0 22px; background: linear-gradient(to top, var(--bg) 60%, transparent); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.orb { position: relative; width: 64px; height: 64px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }
+/* Orb states. Colours are registered custom properties so the gradient itself cross-fades between states. */
+@property --orb-hi { syntax: "<color>"; inherits: true; initial-value: #dfe3ff; }
+@property --orb-mid { syntax: "<color>"; inherits: true; initial-value: #a5b4fc; }
+@property --orb-lo { syntax: "<color>"; inherits: true; initial-value: #4338ca; }
+@property --orb-glow { syntax: "<color>"; inherits: true; initial-value: rgba(129, 140, 248, .55); }
+.orb { position: relative; width: 64px; height: 64px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%;
+  --orb-hi: #ffe7b0; --orb-mid: #fbbf24; --orb-lo: #b45309; --orb-glow: rgba(251, 191, 36, .5);
+  transition: --orb-hi .6s ease, --orb-mid .6s ease, --orb-lo .6s ease, --orb-glow .6s ease; }
 .orb:focus-visible { outline: none; box-shadow: 0 0 0 10px rgba(165, 180, 252, .14); }
-.orb[data-connection="connecting"] .orb-sphere { animation: breathe 1s ease-in-out infinite; }
-.orb-sphere { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 38% 30%, #ffffff 0%, #dfe3ff 18%, #a5b4fc 52%, #6366f1 88%, #4338ca 100%); box-shadow: inset -6px -8px 16px rgba(67, 56, 202, .55), inset 4px 6px 10px rgba(255, 255, 255, .5); transition: transform .3s ease, filter .3s ease; }
-.orb-halo { position: absolute; inset: -6px -40px -6px 30px; border-radius: 40%; background: linear-gradient(90deg, rgba(129, 140, 248, .55), rgba(99, 102, 241, 0)); filter: blur(10px); opacity: 0; transition: opacity .3s ease; }
-.orb[data-state="idle"] .orb-sphere { filter: saturate(.55) brightness(.85); }
+.orb-sphere { position: absolute; inset: 0; border-radius: 50%;
+  background: radial-gradient(circle at 38% 30%, #ffffff 0%, var(--orb-hi) 18%, var(--orb-mid) 55%, var(--orb-lo) 100%);
+  box-shadow: inset -6px -8px 16px rgba(0, 0, 0, .28), inset 4px 6px 10px rgba(255, 255, 255, .5), 0 0 28px -6px var(--orb-glow);
+  transition: transform .4s ease, filter .4s ease; }
+.orb-halo, .orb-halo::after { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, var(--orb-glow) 30%, transparent 70%); opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+.orb-halo::after { content: ""; }
+/* Waiting for input (idle and listening): amber. Idle is the resting version, listening breathes. */
+.orb[data-state="idle"] .orb-sphere { filter: saturate(.8) brightness(.92); }
 .orb[data-state="listening"] .orb-sphere { animation: breathe 2.6s ease-in-out infinite; }
-.orb[data-state="thinking"] .orb-sphere, .orb[data-state="working"] .orb-sphere { animation: think 1.1s ease-in-out infinite; }
-.orb[data-state="working"] .orb-halo { opacity: .5; animation: sweep 1.4s linear infinite; }
-.orb[data-state="speaking"] .orb-halo { opacity: 1; animation: pulse .5s ease-in-out infinite alternate; }
-.orb[data-state="speaking"] .orb-sphere { transform: scale(1.04); }
+.orb[data-state="listening"] .orb-halo { opacity: .45; animation: breathe 2.6s ease-in-out infinite; }
+/* Connecting: cool slate-indigo with a quick breath, so it never reads as ready. */
+.orb[data-connection="connecting"] { --orb-hi: #c7d2fe; --orb-mid: #818cf8; --orb-lo: #312e81; --orb-glow: rgba(129, 140, 248, .35); }
+.orb[data-connection="connecting"] .orb-sphere { filter: saturate(.6); animation: breathe 1s ease-in-out infinite; }
+/* Thinking / working: lighter, icy lavender with a soft shimmer. */
+.orb[data-state="thinking"], .orb[data-state="working"] { --orb-hi: #ffffff; --orb-mid: #ddd6fe; --orb-lo: #a78bfa; --orb-glow: rgba(221, 214, 254, .6); }
+.orb[data-state="thinking"] .orb-sphere, .orb[data-state="working"] .orb-sphere { animation: shimmer 1.8s ease-in-out infinite; }
+.orb[data-state="thinking"] .orb-halo, .orb[data-state="working"] .orb-halo { opacity: .5; animation: breathe 1.8s ease-in-out infinite; }
+/* Speaking: deep violet, the sphere pulses and soft glow waves roll outward. */
+.orb[data-state="speaking"] { --orb-hi: #e0e7ff; --orb-mid: #818cf8; --orb-lo: #4338ca; --orb-glow: rgba(129, 140, 248, .6); }
+.orb[data-state="speaking"] .orb-sphere { animation: speak .9s ease-in-out infinite; }
+.orb[data-state="speaking"] .orb-halo { opacity: 1; animation: wave 1.8s ease-out infinite; }
+.orb[data-state="speaking"] .orb-halo::after { opacity: 1; animation: wave 1.8s ease-out .9s infinite; }
 .orb-caption { margin: 0; font-size: 11px; color: var(--muted); }
 
 @keyframes breathe { 50% { transform: scale(1.05); } }
-@keyframes think { 50% { transform: scale(.94); filter: brightness(1.15); } }
-@keyframes pulse { from { transform: scaleX(.85); } to { transform: scaleX(1.1); } }
-@keyframes sweep { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+@keyframes shimmer { 0%, 100% { transform: scale(.97); filter: brightness(1); } 50% { transform: scale(1); filter: brightness(1.12) hue-rotate(-12deg); } }
+@keyframes speak { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.07); } 50% { transform: scale(1.02); } 75% { transform: scale(1.09); } }
+@keyframes wave { from { transform: scale(1); opacity: .7; } to { transform: scale(2.1); opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } .orb, .orb-sphere, .orb-halo { transition: none !important; } .orb[data-state="speaking"] .orb-halo { opacity: .5; } }
