@@ -60,6 +60,16 @@ export class PcmPlayer {
     this.analyser.connect(context.destination);
   }
 
+  private readonly samples = new Float32Array(256);
+
+  /** Output loudness right now, 0..1 (RMS of what is playing, scaled so speech lands mid-range). */
+  level(): number {
+    this.analyser.getFloatTimeDomainData(this.samples);
+    let sum = 0;
+    for (const sample of this.samples) sum += sample * sample;
+    return Math.min(1, Math.sqrt(sum / this.samples.length) * 4);
+  }
+
   get playing(): boolean {
     return this.sources.size > 0;
   }

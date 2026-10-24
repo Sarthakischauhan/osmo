@@ -22,6 +22,8 @@ export interface OsmoSession {
   end: () => void;
   interrupt: () => void;
   sendWidgetAction: (id: string, action: string, value?: string) => void;
+  /** Assistant output level 0..1, read straight off the playback analyser; poll it from rAF. */
+  outputLevel: () => number;
 }
 
 interface Runtime {
@@ -114,6 +116,8 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     runtime.current?.client.send({ type: "widget.action", id, action, value });
   }, []);
 
+  const outputLevel = useCallback(() => runtime.current?.player.level() ?? 0, []);
+
   useEffect(() => teardown, [teardown]);
 
   return {
@@ -126,5 +130,6 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     end,
     interrupt,
     sendWidgetAction,
+    outputLevel,
   };
 }
