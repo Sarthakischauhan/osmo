@@ -20,9 +20,18 @@ def test_chart_description_names_series_and_points() -> None:
         {"type": "options", "props": {"prompt": "p", "choices": []}},
         {"type": "chart", "props": {"kind": "line", "series": [{"name": "s", "points": [{"x": "a", "y": float("inf")}]}]}},
         {"type": "html", "props": {"html": ""}},
+        {"type": "html", "props": {"html": "<p>x</p>", "title": ""}},
+        {"type": "html", "props": {"html": "<p>x</p>", "title": "t" * 81}},
         {"type": "iframe", "props": {"src": "https://example.com"}},
     ],
 )
 def test_bad_widgets_are_rejected(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         widget_adapter.validate_python(payload)
+
+
+def test_html_widget_title_is_optional_and_described() -> None:
+    titled = widget_adapter.validate_python({"type": "html", "props": {"html": "<p>x</p>", "title": "Tip calculator"}})
+    assert describe_widget(titled) == 'interactive html widget "Tip calculator"'
+    untitled = widget_adapter.validate_python({"type": "html", "props": {"html": "<p>x</p>"}})
+    assert describe_widget(untitled) == "interactive html widget"
