@@ -66,6 +66,11 @@ export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
           ? withAssistant(feed, finishActivities)
           : feed;
       }
+    case "models":
+    case "voice.configured":
+    case "voice.preview":
+      // Voice picker events; the feed has nothing to show for them.
+      return feed;
   }
 }
 

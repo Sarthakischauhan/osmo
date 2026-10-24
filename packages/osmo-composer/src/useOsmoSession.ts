@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
-import { AUDIO_SAMPLE_RATE, BARGE_IN, type OsmoState, type ServerEvent } from "./protocol";
+import { AUDIO_SAMPLE_RATE, BARGE_IN, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
 
 export interface OsmoSessionOptions {
   url: string;
   voice?: string;
+  /** Voice model and reasoning effort to start with (the picker's value). */
+  model?: string;
+  effort?: Effort;
   onEvent?: (event: ServerEvent) => void;
 }
 
@@ -22,6 +25,17 @@ export interface OsmoSession {
   end: () => void;
   interrupt: () => void;
   sendWidgetAction: (id: string, action: string, value?: string) => void;
+  /** Symphony's voice model registry (`models` event); empty until connected. */
+  voiceModels: VoiceModel[];
+  /** The session's model/voice/effort as Symphony last confirmed it (picker commit or `set_voice`). */
+  selection: VoiceSelection | undefined;
+  /** Send `session.configure` for a picker commit. */
+  configure: (selection: VoiceSelection) => void;
+  /** Ask Symphony for a ~2 s sample of a voice and play it; replaces any preview playing. */
+  previewVoice: (pick: { model: string; voice: string }) => void;
+  stopPreview: () => void;
+  /** The voice whose preview is playing. */
+  previewing: { model: string; voice: string } | undefined;
   /** Assistant output level 0..1, read straight off the playback analyser; poll it from rAF. */
   outputLevel: () => number;
 }
@@ -31,9 +45,16 @@ interface Runtime {
   context: AudioContext;
   mic: MicCapture;
   player: PcmPlayer;
+  preview: PcmPlayer;
 }
 
-export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): OsmoSession {
+export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessionOptions): OsmoSession {
+  const [voiceModels, setVoiceModels] = useState<VoiceModel[]>([]);
+  const [selection, setSelection] = useState<VoiceSelection | undefined>();
+  const [previewing, setPreviewing] = useState<{ model: string; voice: string } | undefined>();
+  const previewRequest = useRef<{ id: string; model: string; voice: string } | undefined>();
+  const previewCount = useRef(0);
+  const speakingRef = useRef(false);
   const [connection, setConnection] = useState<OsmoConnection>("disconnected");
   const [serverState, setServerState] = useState<OsmoState>("idle");
   const [detail, setDetail] = useState<string | undefined>();
@@ -50,6 +71,7 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     if (!current) return;
     current.mic.stop();
     current.player.flush();
+    current.preview.flush();
     current.client.close();
     void current.context.close();
   }, []);
@@ -60,12 +82,26 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     setConnection("connecting");
     const context = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE });
     const player = new PcmPlayer(context, () => setPlaying(false));
+    const preview = new PcmPlayer(context, () => setPreviewing(undefined));
     const client = new OsmoClient(url, {
       onAudio: (frame) => {
         player.enqueue(frame);
         setPlaying(true);
       },
       onEvent: (event) => {
+        if (event.type === "models") {
+          setVoiceModels(event.models);
+          setSelection(event.selection);
+        } else if (event.type === "voice.configured") {
+          setSelection(event.selection);
+        } else if (event.type === "voice.preview") {
+          const wanted = previewRequest.current;
+          if (wanted?.id === event.requestId && event.audio !== undefined && !speakingRef.current) {
+            preview.flush();
+            preview.enqueue(base64ToBuffer(event.audio));
+            setPreviewing({ model: wanted.model, voice: wanted.voice });
+          }
+        }
         if (event.type === "state") {
           if (event.detail === BARGE_IN) player.flush();
           setServerState(event.state);
@@ -81,11 +117,11 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
       },
     });
     const mic = new MicCapture(context);
-    runtime.current = { client, context, mic, player };
+    runtime.current = { client, context, mic, player, preview };
     try {
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
-      client.send({ type: "session.start", voice });
+      client.send({ type: "session.start", voice, model, effort });
       await mic.start((frame) => client.sendAudio(frame));
       setConnection("connected");
       setStartedAt(Date.now());
@@ -94,7 +130,7 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
       teardown();
       setConnection("disconnected");
     }
-  }, [teardown, url, voice]);
+  }, [teardown, url, voice, model, effort]);
 
   const end = useCallback(() => {
     runtime.current?.client.send({ type: "session.end" });
@@ -116,13 +152,39 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     runtime.current?.client.send({ type: "widget.action", id, action, value });
   }, []);
 
+  const configure = useCallback((next: VoiceSelection) => {
+    runtime.current?.client.send({ type: "session.configure", ...next });
+  }, []);
+
+  const stopPreview = useCallback(() => {
+    previewRequest.current = undefined;
+    runtime.current?.preview.flush();
+  }, []);
+
+  const previewVoice = useCallback((pick: { model: string; voice: string }) => {
+    const current = runtime.current;
+    if (!current || speakingRef.current) return;
+    current.preview.flush();
+    previewCount.current += 1;
+    const id = `p${previewCount.current}`;
+    previewRequest.current = { id, ...pick };
+    current.client.send({ type: "voice.preview", requestId: id, ...pick });
+  }, []);
+
   const outputLevel = useCallback(() => runtime.current?.player.level() ?? 0, []);
 
   useEffect(() => teardown, [teardown]);
 
+  const shownState: OsmoState = playing ? "speaking" : serverState;
+  speakingRef.current = shownState === "speaking";
+  // Never talk over the agent: a preview stops as soon as it speaks.
+  useEffect(() => {
+    if (shownState === "speaking") stopPreview();
+  }, [shownState, stopPreview]);
+
   return {
     connection,
-    state: playing ? "speaking" : serverState,
+    state: shownState,
     detail,
     error,
     startedAt,
@@ -130,6 +192,19 @@ export function useOsmoSession({ url, voice, onEvent }: OsmoSessionOptions): Osm
     end,
     interrupt,
     sendWidgetAction,
+    voiceModels,
+    selection,
+    configure,
+    previewVoice,
+    stopPreview,
+    previewing,
     outputLevel,
   };
+}
+
+function base64ToBuffer(data: string): ArrayBuffer {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
 }
