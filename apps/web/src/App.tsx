@@ -2,7 +2,18 @@ import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
 import type { AgentPart } from "@sarchauhan/protocol";
-import { OrbComposer, type ServerEvent, orbMode, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
+import {
+  OrbComposer,
+  type ServerEvent,
+  type VoiceModel,
+  type VoiceSelection,
+  orbMode,
+  serverEventSchema,
+  sameOriginSocketUrl,
+  useOsmoSession,
+  usePersistedPick,
+} from "@osmo/osmo-composer";
+import "@osmo/osmo-composer/radial-picker.css";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
@@ -12,11 +23,48 @@ export function App() {
   const speaking = useRef(false);
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
+  const savePick = useRef<(next: VoiceSelection) => void>();
   const onEvent = useCallback((event: ServerEvent) => {
     dispatch(event);
     cues.current?.onServerEvent(event);
+    // A voice command (`set_voice`) moved the session: the picker value and summary follow it.
+    if (event.type === "voice.configured" && event.source === "tool") savePick.current?.(event.selection);
   }, []);
-  const session = useOsmoSession({ url: sameOriginSocketUrl(window.location), onEvent });
+  const [registry, setRegistry] = useState<VoiceModel[]>([]);
+  const [pick, save] = usePersistedPick(registry);
+  savePick.current = save;
+  const session = useOsmoSession({
+    url: sameOriginSocketUrl(window.location),
+    model: pick?.model,
+    voice: pick?.voice,
+    effort: pick?.effort,
+    onEvent,
+  });
+  if (session.voiceModels !== registry && session.voiceModels.length > 0) setRegistry(session.voiceModels);
+  // The registry before any socket is open, so the picker works around the idle orb too.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/voice-models", { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : undefined))
+      .then((body: unknown) => {
+        const parsed = serverEventSchema.safeParse(body);
+        if (parsed.success && parsed.data.type === "models") {
+          const models = parsed.data.models;
+          setRegistry((current) => (current.length > 0 ? current : models));
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+  const { configure } = session;
+  const onPick = useCallback(
+    (next: VoiceSelection) => {
+      save(next);
+      // Applied to the live session: voice/effort via session.update, a model change by hot-swap.
+      configure(next);
+    },
+    [save, configure],
+  );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -137,7 +185,23 @@ export function App() {
       </WidgetProvider>
 
       <footer className="dock">
-        <OrbComposer session={session} awaitingChoice={pending !== undefined} />
+        <OrbComposer
+          session={session}
+          awaitingChoice={pending !== undefined}
+          picker={
+            pick && registry.length > 0
+              ? {
+                  registry,
+                  value: pick,
+                  onChange: onPick,
+                  onPreview: session.previewVoice,
+                  onPreviewStop: session.stopPreview,
+                  previewing: session.previewing,
+                  previewDisabled: session.state === "speaking",
+                }
+              : undefined
+          }
+        />
       </footer>
     </div>
   );

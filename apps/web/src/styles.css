@@ -137,3 +137,21 @@ button { font: inherit; color: inherit; }
 .picker-dev header { display: flex; align-items: center; justify-content: space-between; padding: 0 26px; }
 .picker-dev main { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 24px; }
 .picker-commits { margin: 0 auto 24px; padding: 0; list-style: none; font: 11px var(--mono); color: rgba(255, 255, 255, 0.4); max-width: 600px; text-align: center; }
+
+/* Radial picker around the dock orb: the dial overlays the feed above it. While it is closed only
+   the orb takes pointer events, so the feed under the (invisible) dial stays clickable. */
+.dock { position: relative; z-index: 2; }
+.dock .rp { margin-top: -268px; margin-bottom: -38px; }
+.dock .rp[data-open="false"] { pointer-events: none; }
+.dock .rp[data-open="false"] .rp-orb { pointer-events: auto; }
+.dock .rp[data-open="false"] .rp-summary { opacity: 0; }
+.dock .rp[data-open="true"]::before {
+  content: "";
+  position: absolute;
+  inset: -40px -120px -20px;
+  background: radial-gradient(closest-side at 50% 300px, rgba(10, 10, 10, 0.92), rgba(10, 10, 10, 0.7) 75%, transparent);
+  pointer-events: none;
+  z-index: -1;
+}
+/* While the dial is open its summary pill sits where the caption is. */
+.dock .orb-composer:has(.rp[data-open="true"]) .orb-caption { visibility: hidden; }
