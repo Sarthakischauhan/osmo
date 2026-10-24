@@ -1,8 +1,8 @@
-"""One Orb session: bridges the browser WebSocket and the Grok realtime WebSocket.
+"""One Osmo session: bridges the browser WebSocket and the Grok realtime WebSocket.
 
 Symphony owns the upstream connection and the API key, runs tools between the
 two, validates widgets, and translates events both ways. The browser only
-ever sees the Orb wire protocol (protocol.py).
+ever sees the Osmo wire protocol (protocol.py).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from websockets.exceptions import ConnectionClosed
 from symphony_server import grok_events as grok
 from symphony_server.protocol import (
     Interrupt,
-    OrbState,
+    OsmoState,
     RenderedWidget,
     ServerEvent,
     SessionEnd,
@@ -75,14 +75,14 @@ def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
     ]
 
 
-class OrbSession:
+class OsmoSession:
     def __init__(self, browser: WebSocket, settings: Settings, tools: Mapping[str, Tool]) -> None:
         self.browser = browser
         self.settings = settings
         self.tools = tools
         self.upstream: ClientConnection | None = None
         self.pump: asyncio.Task[None] | None = None
-        self.state: OrbState = "idle"
+        self.state: OsmoState = "idle"
         self.state_detail: str | None = None
         self.widgets: dict[str, Widget] = {}
         self.widget_count = 0
@@ -140,7 +140,7 @@ class OrbSession:
         except (WebSocketDisconnect, RuntimeError):
             log.info("browser gone while sending %s", event.type)
 
-    async def set_state(self, state: OrbState, detail: str | None = None) -> None:
+    async def set_state(self, state: OsmoState, detail: str | None = None) -> None:
         if state == self.state and detail == self.state_detail:
             return
         self.state, self.state_detail = state, detail

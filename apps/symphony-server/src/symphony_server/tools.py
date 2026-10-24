@@ -180,7 +180,7 @@ class StockTool(Tool):
         response = await self.client.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
             params={"range": span, "interval": "1d"},
-            headers={"User-Agent": "Mozilla/5.0 (orb symphony-server)"},
+            headers={"User-Agent": "Mozilla/5.0 (osmo symphony-server)"},
         )
         response.raise_for_status()
         results = _ChartResponse.model_validate(response.json()).chart.result
