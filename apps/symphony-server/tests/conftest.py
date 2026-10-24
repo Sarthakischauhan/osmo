@@ -26,6 +26,9 @@ class FakeGrok:
     def __init__(self) -> None:
         self.received: queue.Queue[str | bytes] = queue.Queue()
         self.headers: queue.Queue[str] = queue.Queue()
+        # Request path (with `?model=`) of each upstream connection, and the path of each one that closed.
+        self.paths: queue.Queue[str] = queue.Queue()
+        self.closed: queue.Queue[str] = queue.Queue()
         self.loop = asyncio.new_event_loop()
         self.outbox: asyncio.Queue[str | bytes] | None = None
         self.port = 0
@@ -40,6 +43,8 @@ class FakeGrok:
 
         async def handler(conn: ServerConnection) -> None:
             self.headers.put(conn.request.headers.get("Authorization", "") if conn.request else "")
+            path = conn.request.path if conn.request else ""
+            self.paths.put(path)
             outbox = self.outbox
             assert outbox is not None
 
@@ -53,6 +58,7 @@ class FakeGrok:
                     self.received.put(message)
             finally:
                 pusher.cancel()
+                self.closed.put(path)
 
         async def main() -> None:
             server = await serve(handler, "127.0.0.1", 0)

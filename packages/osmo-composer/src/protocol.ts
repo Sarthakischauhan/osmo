@@ -15,11 +15,47 @@ export const BARGE_IN = "barge-in";
 export const osmoStateSchema = z.enum(["idle", "listening", "thinking", "speaking", "working"]);
 export type OsmoState = z.infer<typeof osmoStateSchema>;
 
+export const effortSchema = z.enum(["none", "low", "medium", "high"]);
+export type Effort = z.infer<typeof effortSchema>;
+
+/** One voice model in Symphony's registry (the `models` event); mirrors symphony_server/voices.py. */
+export const voiceModelSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  label: z.string(),
+  capabilities: z.object({
+    tools: z.boolean(),
+    interrupt: z.boolean(),
+    customVoices: z.boolean(),
+    reasoningEffort: z.array(effortSchema).optional(),
+  }),
+  voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
+  defaultVoice: z.string(),
+});
+export type VoiceModel = z.infer<typeof voiceModelSchema>;
+
+/** The session's model, voice and reasoning effort. */
+export const voiceSelectionSchema = z.object({
+  model: z.string().min(1),
+  voice: z.string().min(1),
+  effort: effortSchema.optional(),
+});
+export type VoiceSelection = z.infer<typeof voiceSelectionSchema>;
+
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
     voice: z.string().min(1).optional(),
     instructions: z.string().optional(),
+    model: z.string().min(1).optional(),
+    effort: effortSchema.optional(),
+  }),
+  z.object({ type: z.literal("session.configure") }).merge(voiceSelectionSchema),
+  z.object({
+    type: z.literal("voice.preview"),
+    requestId: z.string().min(1),
+    model: z.string().min(1),
+    voice: z.string().min(1),
   }),
   z.object({ type: z.literal("session.end") }),
   z.object({ type: z.literal("interrupt") }),
@@ -50,6 +86,23 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("widget.update"),
     id: z.string(),
     patch: z.record(z.unknown()),
+  }),
+  z.object({ type: z.literal("models"), models: z.array(voiceModelSchema), selection: voiceSelectionSchema }),
+  // `error` set: the change was rejected or failed and `selection` is what is still in effect.
+  z.object({
+    type: z.literal("voice.configured"),
+    selection: voiceSelectionSchema,
+    source: z.enum(["client", "tool"]),
+    error: z.string().optional(),
+  }),
+  // Answer to a `voice.preview` request: base64 PCM16 (24 kHz mono, ~2 s) or an error.
+  z.object({
+    type: z.literal("voice.preview"),
+    requestId: z.string(),
+    model: z.string(),
+    voice: z.string(),
+    audio: z.string().optional(),
+    error: z.string().optional(),
   }),
 ]);
 export type ServerEvent = z.infer<typeof serverEventSchema>;

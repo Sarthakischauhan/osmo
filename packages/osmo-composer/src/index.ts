@@ -4,5 +4,7 @@ export { MicCapture, PcmPlayer } from "./audio";
 export { useOsmoSession } from "./useOsmoSession";
 export type { OsmoConnection, OsmoSession, OsmoSessionOptions } from "./useOsmoSession";
 export { OrbComposer } from "./OrbComposer";
+export { GlassOrb, ORB_CANVAS, type GlassOrbProps } from "./GlassOrb";
 export type { OrbComposerProps } from "./OrbComposer";
 export { PRESETS, orbMode, type OrbMode } from "./orbVisual";
+export * from "./radial-picker";

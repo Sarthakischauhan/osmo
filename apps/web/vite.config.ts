@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/ws": { target: process.env.SYMPHONY_URL ?? "ws://127.0.0.1:8787", ws: true },
+      "/voice-models": { target: process.env.SYMPHONY_HTTP_URL ?? "http://127.0.0.1:8787" },
       "/api": { target: process.env.SYMPHONY_HTTP_URL ?? "http://127.0.0.1:8787" },
     },
   },

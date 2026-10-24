@@ -136,12 +136,19 @@ class TurnDetection(_Outgoing):
     type: Literal["server_vad"] = "server_vad"
 
 
+class Reasoning(_Outgoing):
+    """`reasoning.effort` on session.update (docs.x.ai voice agent guide, Session Parameters)."""
+
+    effort: Literal["none", "low", "medium", "high"]
+
+
 class SessionConfig(_Outgoing):
     voice: str
     instructions: str
     turn_detection: TurnDetection = TurnDetection()
     audio: AudioConfig = AudioConfig()
     tools: list[dict[str, Any]]
+    reasoning: Reasoning | None = None
 
 
 class SessionUpdate(_Outgoing):
@@ -160,6 +167,19 @@ class UserMessageItem(_Outgoing):
     content: list[InputText]
 
 
+class OutputText(_Outgoing):
+    type: Literal["output_text"] = "output_text"
+    text: str
+
+
+class AssistantMessageItem(_Outgoing):
+    """An earlier assistant turn, replayed into a new upstream session on a model hot-swap."""
+
+    type: Literal["message"] = "message"
+    role: Literal["assistant"] = "assistant"
+    content: list[OutputText]
+
+
 class FunctionCallOutputItem(_Outgoing):
     type: Literal["function_call_output"] = "function_call_output"
     call_id: str
@@ -168,7 +188,7 @@ class FunctionCallOutputItem(_Outgoing):
 
 class ConversationItemCreate(_Outgoing):
     type: Literal["conversation.item.create"] = "conversation.item.create"
-    item: Union[UserMessageItem, FunctionCallOutputItem]
+    item: Union[UserMessageItem, AssistantMessageItem, FunctionCallOutputItem]
 
 
 class ResponseCreate(_Outgoing):

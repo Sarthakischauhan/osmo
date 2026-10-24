@@ -131,3 +131,25 @@ button { font: inherit; color: inherit; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* Radial picker around the dock orb: the dial overlays the feed above it. While it is closed only
+   the orb takes pointer events, so the feed under the (invisible) dial stays clickable. */
+.dock { position: relative; z-index: 2; overflow-x: clip; }
+/* The dial is wider than a phone: keep the page at the viewport width, centre the dial on the
+   orb and let its sides clip. */
+.app { grid-template-columns: minmax(0, 1fr); }
+.dock .orb-composer { width: 100%; min-width: 0; }
+.dock .rp { margin-top: -268px; margin-bottom: -38px; }
+.dock .rp[data-open="false"] { pointer-events: none; }
+.dock .rp[data-open="false"] .rp-orb { pointer-events: auto; }
+.dock .rp[data-open="false"] .rp-summary { opacity: 0; }
+.dock .rp[data-open="true"]::before {
+  content: "";
+  position: absolute;
+  inset: -40px -120px -20px;
+  background: radial-gradient(closest-side at 50% 300px, rgba(10, 10, 10, 0.92), rgba(10, 10, 10, 0.7) 75%, transparent);
+  pointer-events: none;
+  z-index: -1;
+}
+/* While the dial is open its summary pill sits where the caption is. */
+.dock .orb-composer:has(.rp[data-open="true"]) .orb-caption { visibility: hidden; }
