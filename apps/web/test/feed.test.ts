@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyFeed, reduceFeed } from "../src/feed";
+import { emptyFeed, pendingChoice, reduceFeed } from "../src/feed";
 
 describe("reduceFeed", () => {
   it("groups assistant text, activity and widgets into one turn after the user turn", () => {
@@ -52,5 +52,32 @@ describe("reduceFeed", () => {
     expect(feed.turns[0]).toBe(first);
     const same = reduceFeed(feed, { type: "widget.update", id: "missing", patch: { title: "x" } });
     expect(same).toBe(feed);
+  });
+});
+
+describe("pendingChoice", () => {
+  const options = { prompt: "Pick", choices: [{ id: "a", label: "A" }, { id: "b", label: "B" }] };
+
+  it("is the newest untapped options widget with no user turn after it", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "dinner?" });
+    feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w1-x", type: "options", props: options } });
+    expect(pendingChoice(feed, new Set())).toBe("w1-x");
+    expect(pendingChoice(feed, new Set(["w1-x"]))).toBeUndefined();
+  });
+
+  it("clears when the user answers by voice", () => {
+    let feed = reduceFeed(emptyFeed, { type: "widget.render", widget: { id: "w1-x", type: "options", props: options } });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "the second one" });
+    expect(pendingChoice(feed, new Set())).toBeUndefined();
+  });
+
+  it("counts cards only when they have buttons, and ignores plain widgets", () => {
+    let feed = reduceFeed(emptyFeed, { type: "widget.render", widget: { id: "c1", type: "card", props: { title: "t", body: "b" } } });
+    expect(pendingChoice(feed, new Set())).toBeUndefined();
+    feed = reduceFeed(feed, {
+      type: "widget.render",
+      widget: { id: "c2", type: "card", props: { title: "t", body: "b", actions: [{ id: "ok", label: "OK" }] } },
+    });
+    expect(pendingChoice(feed, new Set())).toBe("c2");
   });
 });

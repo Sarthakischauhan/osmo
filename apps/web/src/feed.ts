@@ -1,4 +1,5 @@
 import type { ServerEvent } from "@osmo/osmo-composer";
+import { isActionableWidget } from "@osmo/osmo-widgets";
 
 /** The canvas feed: what the user said, and each assistant turn's line, tool activity and widgets. */
 export interface Activity {
@@ -91,4 +92,24 @@ function updateWidget(feed: Feed, id: string, patch: Record<string, unknown>): F
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? { ...value } : {};
+}
+
+/**
+ * The id of the widget the user still owes an answer to, if any: the newest actionable widget
+ * (options, or a card with buttons) that was not tapped and has no spoken user turn after it.
+ * Answering by voice counts, because the next user turn is that answer.
+ */
+export function pendingChoice(feed: Feed, answered: ReadonlySet<string>): string | undefined {
+  for (let t = feed.turns.length - 1; t >= 0; t--) {
+    const turn = feed.turns[t];
+    if (!turn) continue;
+    if (turn.role === "user") return undefined;
+    for (let w = turn.widgets.length - 1; w >= 0; w--) {
+      const widget = turn.widgets[w];
+      if (widget && isActionableWidget(widget.type, widget.props)) {
+        return answered.has(widget.id) ? undefined : widget.id;
+      }
+    }
+  }
+  return undefined;
 }

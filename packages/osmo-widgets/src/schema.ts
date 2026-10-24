@@ -100,3 +100,11 @@ export function describeWidget(widget: Widget): string {
       return widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
   }
 }
+
+/** True when a widget is waiting on the user to choose: any options list, or a card with buttons. */
+export function isActionableWidget(type: string, props: unknown): boolean {
+  const parsed = widgetSchema.safeParse({ type, props });
+  if (!parsed.success) return false;
+  if (parsed.data.type === "options") return true;
+  return parsed.data.type === "card" && (parsed.data.props.actions?.length ?? 0) > 0;
+}
