@@ -2,7 +2,7 @@
  * Renders the real web app against a scripted Symphony socket (no server, no
  * key) and saves screenshots comparable with the design mock.
  *
- *   pnpm --filter @osmo/web build && pnpm --filter @osmo/web preview --port 4173 &
+ *   bun run --filter @osmo/web build && bun run --filter @osmo/web preview --port 4173 &
  *   node apps/web/e2e/screenshots.ts [outDir]
  */
 import { chromium, type WebSocketRoute } from "playwright-core";

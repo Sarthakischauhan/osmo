@@ -4,7 +4,7 @@ Thanks for contributing to Osmo. The project pairs Symphony's durable agent harn
 
 ## Prerequisites
 
-- Node.js and pnpm (the repository pins pnpm in `package.json`)
+- [Bun](https://bun.sh/) and [uv](https://docs.astral.sh/uv/)
 - Python 3.11 or newer and [uv](https://docs.astral.sh/uv/)
 - An `XAI_API_KEY` for live voice sessions (tests do not require one)
 
@@ -13,26 +13,17 @@ Thanks for contributing to Osmo. The project pairs Symphony's durable agent harn
 From the repository root:
 
 ```sh
-pnpm install
-cd apps/symphony-server
-uv venv -p 3.12 .venv
-uv pip install --no-sources -p .venv -r requirements.txt
+make install
 ```
 
 The `--no-sources` option preserves the vendored `core_server`'s upstream workspace metadata.
 
 ## Run locally
 
-Start the server from `apps/symphony-server`:
+Start the Python server from the repository root with `make dev-server` (set `XAI_API_KEY` in the environment). It listens on `127.0.0.1:8787` by default. In a separate terminal, start the web client with `make dev-web` (or `make dev`):
 
 ```sh
-XAI_API_KEY=... .venv/bin/python -m symphony_server
-```
-
-It listens on `127.0.0.1:8787` by default. In a separate terminal, from the repository root, start the web client:
-
-```sh
-pnpm dev:web
+make dev-web
 ```
 
 Vite serves the client on port `5173` and proxies `/ws` and `/api` to the local server. You can override the proxy targets with `SYMPHONY_URL` (WebSocket) and `SYMPHONY_HTTP_URL` (HTTP).
@@ -42,8 +33,8 @@ Vite serves the client on port `5173` and proxies `/ws` and `/api` to the local 
 Run JavaScript workspace checks from the root:
 
 ```sh
-pnpm typecheck
-pnpm test
+make typecheck
+make test
 ```
 
 Run Python server checks from `apps/symphony-server`:

@@ -57,4 +57,12 @@ The protocol is the boundary between the harness and the experience. Symphony is
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, development, and test instructions.
+## Development
+
+Install Bun and [uv](https://docs.astral.sh/uv/), then from the repository root:
+
+```sh
+make install
+```
+
+Set `XAI_API_KEY` in your environment for live voice sessions. Run the web client and Python server in separate terminals with `make dev-web` and `make dev-server`. Use `make typecheck`, `make test`, and `make build` for frontend checks and production build; `make server-check` and `make server-test` run Python checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
