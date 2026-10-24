@@ -4,7 +4,7 @@ import "@sarchauhan/chat/styles.css";
 import type { AgentPart } from "@sarchauhan/protocol";
 import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type Feed, type Turn, emptyFeed, reduceFeed } from "./feed";
+import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
 
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
@@ -18,10 +18,13 @@ export function App() {
 
   const connected = session.connection === "connected";
   const { sendWidgetAction } = session;
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
     async (response: WidgetResponse) => {
       if (response.widgetId === undefined || response.actionId === undefined || typeof response.value !== "string") return;
-      sendWidgetAction(response.widgetId, response.actionId, response.value);
+      const id = response.widgetId;
+      setAnswered((previous) => new Set(previous).add(id));
+      sendWidgetAction(id, response.actionId, response.value);
     },
     [sendWidgetAction],
   );
@@ -73,7 +76,7 @@ export function App() {
       </WidgetProvider>
 
       <footer className="dock">
-        <OrbComposer session={session} />
+        <OrbComposer session={session} awaitingChoice={connected && pendingChoice(feed, answered) !== undefined} />
       </footer>
     </div>
   );
