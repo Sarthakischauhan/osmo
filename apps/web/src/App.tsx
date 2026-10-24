@@ -1,4 +1,4 @@
-import { WidgetView } from "@osmo/chat-sdk-widgets";
+import { WidgetView } from "@osmo/osmo-widgets";
 import { OrbComposer, type ServerEvent, sameOriginSocketUrl, useOsmoSession } from "@osmo/osmo-composer";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, emptyFeed, reduceFeed } from "./feed";
