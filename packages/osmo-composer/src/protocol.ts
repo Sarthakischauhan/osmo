@@ -15,7 +15,7 @@ export const BARGE_IN = "barge-in";
 export const osmoStateSchema = z.enum(["idle", "listening", "thinking", "speaking", "working"]);
 export type OsmoState = z.infer<typeof osmoStateSchema>;
 
-export const effortSchema = z.enum(["low", "medium", "high"]);
+export const effortSchema = z.enum(["none", "low", "medium", "high"]);
 export type Effort = z.infer<typeof effortSchema>;
 
 /** One voice model in Symphony's registry (the `models` event); mirrors symphony_server/voices.py. */
