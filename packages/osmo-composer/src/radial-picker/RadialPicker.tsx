@@ -1,5 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
-import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
+import type { VoiceModel, VoiceSelection } from "../protocol";
 import {
   optionTokenVars,
   CLOSE_GRACE_MS,
@@ -19,8 +19,21 @@ import {
   slotAngle,
 } from "./geometry";
 import { RadialOption } from "./option";
-import { type ProviderIcon, ProviderMark, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
-import { type Context, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
+import { type ProviderIcon, providerIcons as defaultIcons } from "./providerIcons";
+import {
+  type OptionLabel,
+  PICKER_LABEL,
+  RING_LABELS,
+  effortLabel,
+  modelLabel,
+  pickSummary,
+  providerLabel,
+  voiceLabel,
+} from "./ringLabels";
+import { useReducedMotion } from "./useReducedMotion";
+
+export { modelRingLabel } from "./ringLabels";
+import { type Context, type PickerProvider, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
 
 export interface RadialPickerProps {
   registry: VoiceModel[];
@@ -44,12 +57,12 @@ export interface RadialPickerProps {
   previewing?: { model: string; voice: string };
   /** No previews right now (e.g. the agent is speaking). */
   previewDisabled?: boolean;
-  /** A locked provider (see `VoiceModel.locked`) was committed: offer to connect it. */
+  /** Every provider the server knows (`GET /providers`); those without voice models show locked. */
+  providers?: readonly PickerProvider[];
+  /** A locked provider (not connected, or no voice models yet) was committed: offer to connect it. */
   onLockedProvider?: (provider: string) => void;
 }
 
-const EFFORT_LABEL: Record<Effort, string> = { none: "Off", low: "Low", medium: "Med", high: "High" };
-const EFFORT_BARS: Record<Effort, number> = { none: 0, low: 1, medium: 2, high: 3 };
 /** Dial canvas: R3 radius plus room for half a pill. */
 const REACH = 300;
 const KEY_ORDER: RingKey[] = ["providers", "models", "voices", "effort"];
@@ -61,16 +74,6 @@ interface Glide {
   start: number;
 }
 
-function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReduced(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return reduced;
-}
 
 export function RadialPicker({
   registry,
@@ -85,9 +88,10 @@ export function RadialPicker({
   previewDisabled = false,
   onOrbActivate,
   orbLabel,
+  providers,
   onLockedProvider,
 }: RadialPickerProps) {
-  const groups = useMemo(() => groupProviders(registry), [registry]);
+  const groups = useMemo(() => groupProviders(registry, providers), [registry, providers]);
   const [state, dispatch] = useReducer(reducePicker, initialPicker);
   const reduced = useReducedMotion();
   const [glide, setGlide] = useState<{ ring: RingKey; value: number } | undefined>();
@@ -402,15 +406,7 @@ export function RadialPicker({
 
   // ---------------------------------------------------------------- render
 
-  const valueModel = registry.find((m) => m.id === value.model);
-  const summary = [
-    valueModel ? providerIcon(providerIcons, valueModel.provider).label : undefined,
-    value.model,
-    valueModel?.voices.find((v) => v.id === value.voice)?.label ?? value.voice,
-    value.effort,
-  ]
-    .filter((part) => part !== undefined)
-    .join(" · ");
+  const summary = pickSummary(registry, value, providerIcons);
 
   const renderRing = (key: RingKey) => {
     const ring = ringSpec(key, counts[key]);
@@ -418,53 +414,14 @@ export function RadialPicker({
     const count = counts[key];
     const selected = selectedIndex(key);
     const markers = moreMarkers(ring, count, offset);
-    const labelFor = (index: number): { text: string; title: string; node: ReactNode; tip?: string } => {
-      if (key === "providers") {
-        const g = groups[index];
-        const entry = providerIcon(providerIcons, g?.id ?? "");
-        const title = g?.locked ? `${entry.label} · not connected` : entry.label;
-        return { text: entry.label, title, node: <ProviderMark entry={entry} /> };
-      }
-      if (key === "models") {
-        const m = group?.models[index];
-        const text = m ? modelRingLabel(m) : "";
-        return { text, title: m?.id ?? "", node: text, tip: m?.id };
-      }
+    const labelFor = (index: number): OptionLabel => {
+      if (key === "providers") return providerLabel(groups[index], providerIcons);
+      if (key === "models") return modelLabel(group?.models[index]);
       if (key === "voices") {
         const v = pathModel?.voices[index];
-        const playing = previewing !== undefined && previewing.model === pathModel?.id && previewing.voice === v?.id;
-        return {
-          text: v?.label ?? "",
-          title: v ? `${v.label} · ${v.traits.join(", ")}` : "",
-          node: (
-            <>
-              {v?.label}
-              {playing && (
-                <span className="rp-playing" aria-label="previewing">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              )}
-            </>
-          ),
-        };
+        return voiceLabel(v, previewing !== undefined && previewing.model === pathModel?.id && previewing.voice === v?.id);
       }
-      const level = efforts[index] ?? "low";
-      return {
-        text: EFFORT_LABEL[level],
-        title: `Reasoning effort: ${level}`,
-        node: (
-          <>
-            {EFFORT_LABEL[level]}
-            <span className="rp-meter" aria-hidden>
-              {[1, 2, 3].map((bar) => (
-                <i key={bar} data-on={bar <= EFFORT_BARS[level]} />
-              ))}
-            </span>
-          </>
-        ),
-      };
+      return effortLabel(efforts[index] ?? "low");
     };
     const items: ReactNode[] = [];
     for (let index = 0; index < count; index++) {
@@ -608,21 +565,7 @@ export function RadialPicker({
   );
 }
 
-const PICKER_LABEL = "Change provider, model, voice and reasoning";
-
-const RING_LABELS: Record<RingKey, string> = {
-  providers: "Providers",
-  models: "Models",
-  voices: "Voices",
-  effort: "Reasoning effort",
-};
-
 /** Whether `element` has keyboard (`:focus-visible`) focus; false where the selector is unsupported. */
-/** The model ring's text: the registry's short label, else its label. */
-export function modelRingLabel(model: Pick<VoiceModel, "label" | "shortLabel">): string {
-  return model.shortLabel ?? model.label;
-}
-
 export function focusVisible(element: Element): boolean {
   try {
     return element.matches(":focus-visible");

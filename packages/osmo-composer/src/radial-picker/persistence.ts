@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { type VoiceModel, type VoiceSelection, voiceSelectionSchema } from "../protocol";
 import { effortsOf, pickModel } from "./reducer";
 
-export const PICK_STORAGE_KEY = "osmo.voice-pick";
+/** v2: picks saved under "osmo.voice-pick" before c47dfbb hold the old first-listed default
+ *  ("none" for xAI), saved on the first `voice.configured` as if chosen; they are not read. */
+export const PICK_STORAGE_KEY = "osmo.voice-pick.v2";
 
 /** The registry's default pick: the first model with its default voice. */
 export function defaultPick(registry: readonly VoiceModel[]): VoiceSelection | undefined {

@@ -3,18 +3,39 @@ import { FREEZE_AFTER_SNAP_MS, RINGS, type RingKey, ringSpec, clampOffset, offse
 
 export const EFFORTS: readonly Effort[] = ["none", "low", "medium", "high"];
 
-export interface ProviderGroup {
+/** A provider the server knows (`GET /providers`), whether or not it serves voice models. */
+export interface PickerProvider {
   id: string;
-  models: VoiceModel[];
-  /** Every model of this provider is locked (not connected on the server). */
-  locked: boolean;
+  label: string;
 }
 
-/** Registry grouped by `provider`, in first-seen order. */
-export function groupProviders(registry: readonly VoiceModel[]): ProviderGroup[] {
-  const groups = new Map<string, VoiceModel[]>();
-  for (const model of registry) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
-  return [...groups].map(([id, models]) => ({ id, models, locked: models.every((model) => model.locked === true) }));
+/** Why a provider chip is locked. */
+export type LockReason = "not connected" | "No voice models yet";
+
+export interface ProviderGroup {
+  id: string;
+  /** The server's label, for providers the icon table does not know. */
+  label?: string;
+  models: VoiceModel[];
+  /** Nothing to pick: every model is locked (not connected), or the provider has no voice models. */
+  locked: boolean;
+  reason?: LockReason;
+}
+
+/** Registry grouped by `provider`, in first-seen order, then every other known provider as a
+ *  locked chip: only some providers have realtime voice models, and the rest stay visible. */
+export function groupProviders(registry: readonly VoiceModel[], providers: readonly PickerProvider[] = []): ProviderGroup[] {
+  const byId = new Map<string, VoiceModel[]>();
+  for (const model of registry) byId.set(model.provider, [...(byId.get(model.provider) ?? []), model]);
+  const label = (id: string) => providers.find((p) => p.id === id)?.label;
+  const withModels = [...byId].map(([id, models]): ProviderGroup => {
+    const locked = models.every((model) => model.locked === true);
+    return { id, label: label(id), models, locked, reason: locked ? "not connected" : undefined };
+  });
+  const withoutModels = providers
+    .filter((p) => !byId.has(p.id))
+    .map((p): ProviderGroup => ({ id: p.id, label: p.label, models: [], locked: true, reason: "No voice models yet" }));
+  return [...withModels, ...withoutModels];
 }
 
 /** Effort levels a model offers, in low → high order. */

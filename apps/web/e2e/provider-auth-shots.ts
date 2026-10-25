@@ -3,7 +3,8 @@
  *
  *   OSMO_URL=http://127.0.0.1:8787 node --experimental-strip-types apps/web/e2e/provider-auth-shots.ts <outDir>
  *
- * `/voice-models` and `/providers` are served from fixtures (OpenAI, OpenRouter and Vercel AI Gateway not connected) and
+ * `/voice-models` serves the server's real shape (only xAI has realtime voice models) and `/providers` lists all four
+ * (OpenAI, OpenRouter and Vercel AI Gateway not connected), so the ring must still show every provider and
  * `POST /providers/openai/key` answers like a provider that rejects the key, so no real key is needed.
  * Keyboard only: Tab to the ring, Enter on a locked provider, Tab through the dialog, Escape to close.
  */
@@ -36,7 +37,7 @@ async function main() {
   const context = await browser.newContext({ viewport: { width: 1024, height: 760 } });
   const page = await context.newPage();
   await page.route("**/voice-models", (route) =>
-    route.fulfill({ json: { type: "models", models: LOCKED_REGISTRY, selection: { model: "grok-voice-latest", voice: "eve" } } }),
+    route.fulfill({ json: { type: "models", models: LOCKED_REGISTRY.filter((model) => model.provider === "xai"), selection: { model: "grok-voice-latest", voice: "eve" } } }),
   );
   await page.route("**/providers", (route) => route.fulfill({ json: { providers: PROVIDERS } }));
   await page.route("**/providers/openai/key", (route) => route.fulfill({ status: 400, json: { detail: "OpenAI rejected this key" } }));
@@ -51,12 +52,14 @@ async function main() {
   await page.waitForSelector('[role=listbox][aria-label="Providers"]');
   const locked = page.locator('[role=option][data-locked="true"]');
   await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>(".rp-logo")].every((img) => img.complete));
-  const openai = page.locator('[role=option][aria-label="OpenAI · not connected"]');
+  const openai = page.locator('[role=option][aria-label="OpenAI · No voice models yet"]');
   const box = await openai.boundingBox();
   if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
   await pause(450);
   await page.screenshot({ path: `${OUT}/auth-3-locked-provider-ring.png`, clip: { x: c.x - 320, y: c.y - 330, width: 640, height: 420 } });
-  check(`locked providers are marked (${await locked.count()} visible)`, (await locked.count()) >= 1);
+  check(`locked providers are marked (${await locked.count()} visible)`, (await locked.count()) === 3);
+  const chips = await page.locator('[role=listbox][aria-label="Providers"] [role=option]').evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")));
+  check(`the ring shows every provider from GET /providers: ${chips.join(" | ")}`, chips.length === 4);
   check("hovering a locked provider keeps its models ring closed", (await page.locator('[role=listbox][aria-label="Models"]').count()) === 0);
 
   // Keyboard: focus the providers ring, move to OpenAI, Enter opens the dialog.
@@ -91,7 +94,8 @@ async function main() {
   await pause(600);
   await page.locator(".dock .rp-orb").focus();
   await page.keyboard.press("Tab");
-  const providers = LOCKED_REGISTRY.map((m) => m.provider).filter((p, i, all) => all.indexOf(p) === i);
+  // Ring order: providers with voice models first, then the rest in GET /providers order.
+  const providers = PROVIDERS.map((p) => p.id);
   for (let i = 0; i < providers.indexOf("openrouter"); i++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Enter");
   await dialog.waitFor();

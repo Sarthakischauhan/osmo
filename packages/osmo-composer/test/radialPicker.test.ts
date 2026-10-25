@@ -192,6 +192,27 @@ describe("reducer", () => {
     const r2 = reducePicker(opened, { type: "hoverProvider", provider: other, now: 0, groups: locked, value });
     expect(reducePicker(r2, { type: "hoverProvider", provider: "openai", now: 0, groups: locked, value })).toMatchObject({ depth: 1, provider: undefined });
   });
+  it("shows every known provider: those without voice models are locked with a reason", () => {
+    const xai = [model("xai", "grok-voice-latest", ["eve"], ["none", "high"])];
+    const known = [
+      { id: "xai", label: "xAI" },
+      { id: "openai", label: "OpenAI" },
+      { id: "vercel", label: "Vercel AI Gateway" },
+      { id: "openrouter", label: "OpenRouter" },
+    ];
+    const ring = groupProviders(xai, known);
+    expect(ring.map((g) => [g.id, g.locked, g.reason ?? null])).toEqual([
+      ["xai", false, null],
+      ["openai", true, "No voice models yet"],
+      ["vercel", true, "No voice models yet"],
+      ["openrouter", true, "No voice models yet"],
+    ]);
+    expect(ring.find((g) => g.id === "vercel")?.label).toBe("Vercel AI Gateway");
+    const unconnected = groupProviders(xai.map((m) => ({ ...m, locked: true })), known);
+    expect(unconnected[0]).toMatchObject({ id: "xai", locked: true, reason: "not connected" });
+    const opened = reducePicker(initialPicker, { type: "open", groups: ring, value });
+    expect(reducePicker(opened, { type: "hoverProvider", provider: "openai", now: 0, groups: ring, value }).depth).toBe(1);
+  });
   it("reveals a keyboard-focused item by scrolling the least", () => {
     const s = { ...open, offsets: { ...open.offsets, models: 0 } };
     expect(reducePicker(s, { type: "reveal", ring: "models", index: 6, count: 9 }).offsets.models).toBe(2);
@@ -220,7 +241,13 @@ describe("selection rules", () => {
 });
 
 describe("persistence", () => {
-  it("uses the key osmo.voice-pick", () => expect(PICK_STORAGE_KEY).toBe("osmo.voice-pick"));
+  it("uses the key osmo.voice-pick.v2, so picks saved under the old 'none' default are not read", () =>
+    expect(PICK_STORAGE_KEY).toBe("osmo.voice-pick.v2"));
+  it("defaults xAI's realtime models to high effort, as the server's default_selection does", () => {
+    const xai = [model("xai", "grok-voice-latest", ["eve"], ["none", "high"]), model("xai", "grok-voice-3.0", ["eve"], ["none", "high"])];
+    expect(defaultPick(xai)).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+    expect(restorePick(null, xai)?.effort).toBe("high");
+  });
   it("restores a saved pick that still exists", () => {
     expect(restorePick(JSON.stringify({ model: "deep", voice: "v3", effort: "low" }), REGISTRY)).toEqual({ model: "deep", voice: "v3", effort: "low" });
   });

@@ -16,7 +16,7 @@ import {
 import "@osmo/osmo-composer/radial-picker.css";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { ConnectProviderDialog, type ProviderInfo, providersResponseSchema } from "./ConnectProvider";
+import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction, providersResponseSchema } from "./ConnectProvider";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
@@ -85,9 +85,9 @@ export function App() {
   }, [refresh]);
   const onLockedProvider = useCallback(
     (id: string) => {
-      const provider = providers.find((p) => p.id === id);
-      if (provider) setConnecting(provider);
-      else toast(`Osmo cannot connect ${id} yet`);
+      const action = lockedProviderAction(providers, id);
+      if (action.kind === "connect") setConnecting(action.provider);
+      else toast(action.message);
     },
     [providers],
   );
@@ -240,6 +240,7 @@ export function App() {
                   onPreviewStop: session.stopPreview,
                   previewing: session.previewing,
                   previewDisabled: session.state !== "idle" && session.state !== "listening",
+                  providers,
                   onLockedProvider,
                 }
               : undefined

@@ -160,13 +160,19 @@ export type Hit =
 export function hitTest(cx: number, cy: number, x: number, y: number): Hit {
   const dx = x - cx;
   const dy = cy - y;
-  const r = Math.hypot(dx, dy);
+  const r = pointerRadius(dx, dy);
   if (r < BANDS.orb) return { ring: "orb" };
   const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
   if (angle < 0 || r >= BANDS.r3) return { ring: "none" };
   if (r < BANDS.r1) return { ring: "providers", angle };
   if (r < BANDS.r2) return { ring: "models", angle };
   return angle > 90 ? { ring: "voices", angle } : { ring: "effort", angle };
+}
+
+/** Pointer distance from the centre, rounded to 1/1000 px so a point on a band edge (e.g. one
+ * built with `polar`, whose sin/cos lose the last bit) lands in the band it is on, not inside. */
+function pointerRadius(dx: number, dy: number): number {
+  return Math.round(Math.hypot(dx, dy) * 1000) / 1000;
 }
 
 /** Item index under an angle for a ring at `offset`, or undefined if between/outside items. */

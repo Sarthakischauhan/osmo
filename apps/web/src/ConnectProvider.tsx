@@ -18,6 +18,17 @@ export const providerInfoSchema = z.object({
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
 export const providersResponseSchema = z.object({ providers: z.array(providerInfoSchema) });
 
+/** What tapping a locked provider chip does: connect an unconnected provider, or explain why a
+ *  connected one (or one the server does not know) has nothing to pick. */
+export type LockedProviderAction = { kind: "connect"; provider: ProviderInfo } | { kind: "explain"; message: string };
+
+export function lockedProviderAction(providers: readonly ProviderInfo[], id: string): LockedProviderAction {
+  const provider = providers.find((p) => p.id === id);
+  if (provider === undefined) return { kind: "explain", message: `Osmo cannot connect ${id} yet` };
+  if (provider.connected) return { kind: "explain", message: `${provider.label} is connected; it has no voice models yet` };
+  return { kind: "connect", provider };
+}
+
 const keyFormSchema = z.object({ key: z.string().trim().min(1, "Paste an API key") });
 type KeyForm = z.infer<typeof keyFormSchema>;
 const errorSchema = z.object({ detail: z.string() });
