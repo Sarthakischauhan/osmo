@@ -6,9 +6,14 @@ import argparse
 import logging
 import os
 
+import certifi
+from dotenv import load_dotenv
+
+# This Python build has no system CA bundle. Set the current Mozilla bundle before HTTP clients import.
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
 import httpx
 import uvicorn
-from dotenv import load_dotenv
 
 from symphony_server.app import create_app, osmo_core_config, osmo_tools
 from symphony_server.settings import Settings

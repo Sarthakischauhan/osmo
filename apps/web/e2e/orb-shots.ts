@@ -1,7 +1,7 @@
 /**
  * Orb state and widget-update screenshots against a scripted socket (no server, no key).
  *
- *   pnpm --filter @osmo/web build && pnpm --filter @osmo/web preview --port 4173 &
+ *   bun run --filter @osmo/web build && bun run --filter @osmo/web preview --port 4173 &
  *   node --experimental-strip-types apps/web/e2e/orb-shots.ts <outDir> [orb|update] [prefix]
  */
 import { chromium, type Page, type WebSocketRoute } from "playwright-core";

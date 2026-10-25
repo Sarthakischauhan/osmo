@@ -1,11 +1,10 @@
 # One container: symphony-server (Python) serving the built web app and /ws.
-FROM node:22-slim AS web
+FROM oven/bun:1.3.2 AS web
 WORKDIR /repo
-RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json bun.lock tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/web ./apps/web
-RUN pnpm install --frozen-lockfile && pnpm --filter @osmo/web build
+RUN bun install --frozen-lockfile && bun run --filter @osmo/web build
 
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
