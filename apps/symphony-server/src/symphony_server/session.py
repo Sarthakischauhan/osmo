@@ -11,8 +11,8 @@ import asyncio
 import base64
 import json
 import logging
-import secrets
 import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -134,7 +134,6 @@ class OsmoSession:
         self.state: OsmoState = "idle"
         self.state_detail: str | None = None
         self.widgets: dict[str, Widget] = {}
-        self.widget_count = 0
         # Assistant audio is dropped from barge-in until the next response starts.
         self.muted = False
         self.response_active = False
@@ -530,10 +529,9 @@ class OsmoSession:
             widget = widget_adapter.validate_python({"type": args.get("type"), "props": args.get("props")})
         except ValidationError as exc:
             return {"shown": None, "error": f"invalid widget, nothing shown: {compact_errors(exc)}"}
-        self.widget_count += 1
-        # Ids must be unique across sessions too: the browser keeps earlier widgets on screen when a
-        # new session starts, so a per-session counter alone would collide with them.
-        widget_id = f"w{self.widget_count}-{secrets.token_hex(4)}"
+        # A fresh uuid per render: unique within and across sessions (the browser keeps earlier
+        # widgets on screen when a new session starts), so an update can only reach its own widget.
+        widget_id = f"w-{uuid.uuid4().hex}"
         self.widgets[widget_id] = widget
         await self.emit(
             WidgetRender(widget=RenderedWidget(id=widget_id, type=widget.type, props=widget_props(widget)))

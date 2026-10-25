@@ -17,6 +17,20 @@ describe("reduceFeed", () => {
     expect(turn.widgets.map((w) => w.id)).toEqual(["w1"]);
   });
 
+  it("two widgets rendered in a row: an update for the second leaves the first untouched", () => {
+    const weather = { id: "w-1111", type: "card", props: { title: "Palo Alto weather", body: "72°" } };
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Weather and TSLA?" });
+    feed = reduceFeed(feed, { type: "widget.render", widget: weather });
+    feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w-2222", type: "card", props: { title: "TSLA", body: "Loading" } } });
+    const before = feed.turns[1];
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Pulling the price." });
+    feed = reduceFeed(feed, { type: "widget.update", id: "w-2222", patch: { title: "TSLA $251" } });
+    const turn = feed.turns[1];
+    if (turn?.role !== "assistant" || before?.role !== "assistant") throw new Error("expected an assistant turn");
+    expect(turn.widgets).toEqual([weather, { id: "w-2222", type: "card", props: { title: "TSLA $251", body: "Loading" } }]);
+    expect(turn.widgets[0]).toBe(before.widgets[0]);
+  });
+
   it("applies widget.update patches in place", () => {
     let feed = reduceFeed(emptyFeed, { type: "widget.render", widget: { id: "w1", type: "card", props: { title: "a", body: "b" } } });
     feed = reduceFeed(feed, { type: "widget.update", id: "w1", patch: { title: "z" } });

@@ -78,7 +78,7 @@ def test_render_widget_validates_pushes_and_reports_shown(client: TestClient, gr
         call(grok, "render_widget", WEATHER_CARD, "c1")
         render = next_event(ws, "widget.render")
         widget_id = render["widget"]["id"]
-        assert re.fullmatch(r"w1-[0-9a-f]{8}", widget_id)
+        assert re.fullmatch(r"w-[0-9a-f]{32}", widget_id)
         assert render["widget"] == {"id": widget_id, "type": "card", "props": WEATHER_CARD["props"]}
 
         output = grok.next_of("conversation.item.create")["item"]
@@ -154,6 +154,36 @@ def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeG
             "patch": {"title": "Only the new one"},
         }
         assert json.loads(grok.next_of("conversation.item.create")["item"]["output"])["id"] == second
+
+
+def test_two_renders_in_one_response_then_update_second_leaves_first_unchanged(
+    client: TestClient, grok: FakeGrok
+) -> None:
+    stock = {"type": "card", "props": {"title": "TSLA", "body": "Loading"}}
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        call(grok, "render_widget", WEATHER_CARD, "r1")
+        call(grok, "render_widget", stock, "r2")
+        first = next_event(ws, "widget.render")["widget"]
+        second = next_event(ws, "widget.render")["widget"]
+        assert json.loads(grok.next_of("conversation.item.create")["item"]["output"])["id"] == first["id"]
+        assert json.loads(grok.next_of("conversation.item.create")["item"]["output"])["id"] == second["id"]
+        assert first["id"] != second["id"]
+        assert second["props"]["title"] == "TSLA"
+
+        call(grok, "update_widget", {"id": second["id"], "patch": {"title": "TSLA $251"}}, "u1")
+        assert next_event(ws, "widget.update") == {"type": "widget.update", "id": second["id"], "patch": {"title": "TSLA $251"}}
+        assert json.loads(grok.next_of("conversation.item.create")["item"]["output"]) == {
+            "shown": 'updated card "TSLA $251"',
+            "id": second["id"],
+        }
+
+        # An empty patch reports the stored widget as is: the first card kept its own title.
+        call(grok, "update_widget", {"id": first["id"], "patch": {}}, "u2")
+        assert json.loads(grok.next_of("conversation.item.create")["item"]["output"]) == {
+            "shown": f'updated card "{WEATHER_CARD["props"]["title"]}"',
+            "id": first["id"],
+        }
 
 
 def test_widget_ids_never_repeat_across_sessions(client: TestClient, grok: FakeGrok) -> None:
