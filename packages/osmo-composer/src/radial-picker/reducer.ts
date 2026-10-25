@@ -23,10 +23,11 @@ export function effortsOf(model: VoiceModel | undefined): Effort[] {
   return EFFORTS.filter((level) => allowed.includes(level));
 }
 
-/** The selection after committing `model`: its default voice, and the current effort if it still applies. */
+/** The selection after committing `model`: its default voice, and the current effort if it still applies,
+ *  else "medium" or the highest level it offers (the server's default_effort rule). */
 export function pickModel(model: VoiceModel, current: VoiceSelection): VoiceSelection {
   const efforts = effortsOf(model);
-  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : model.capabilities.reasoningEffort?.[0];
+  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : efforts.at(-1);
   return effort === undefined ? { model: model.id, voice: model.defaultVoice } : { model: model.id, voice: model.defaultVoice, effort };
 }
 

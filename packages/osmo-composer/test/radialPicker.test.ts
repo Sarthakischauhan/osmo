@@ -209,6 +209,10 @@ describe("selection rules", () => {
     if (!grok) throw new Error("fixture");
     expect(pickModel(grok, { model: "deep", voice: "v1", effort: "high" })).toEqual({ model: "grok-voice-latest", voice: "eve" });
   });
+  it("without medium, a new model starts at its highest effort, however the registry lists them", () => {
+    const xai = model("xai", "grok-voice-latest", ["eve"], ["none", "high"]);
+    expect(pickModel(xai, { model: "x", voice: "v" })).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+  });
   it("orders efforts low → high and hides them when absent", () => {
     expect(effortsOf(REGISTRY.find((m) => m.id === "m4"))).toEqual(["low", "high"]);
     expect(effortsOf(REGISTRY[0])).toEqual([]);
