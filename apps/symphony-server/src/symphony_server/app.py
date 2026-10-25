@@ -35,7 +35,6 @@ from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
-from symphony_server.upstream_log import UpstreamLog
 from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.web_search import WebSearchTool
 from symphony_server.voices import (
@@ -104,7 +103,6 @@ def create_app(
     previews = PreviewCache(access, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
-    upstream_log = UpstreamLog(settings.debug_upstream_file) if settings.debug_upstream_file is not None else None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -149,7 +147,6 @@ def create_app(
             board=board,
             previews=previews,
             default_voice=settings.voice,
-            upstream_log=upstream_log,
         )
         await bridge.run()
 

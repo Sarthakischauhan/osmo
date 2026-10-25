@@ -55,7 +55,6 @@ from symphony_server.protocol import (
     client_event_adapter,
     widget_event_adapter,
 )
-from symphony_server.upstream_log import UpstreamLog
 from symphony_server.voices import (
     OSMO_VOICE,
     PREVIEW_RATE_LIMIT,
@@ -107,11 +106,10 @@ class VoiceBridge:
         board: WidgetBoard,
         previews: PreviewCache,
         default_voice: str,
-        upstream_log: UpstreamLog | None = None,
     ) -> None:
         self.browser, self.core_config, self.backend = browser, core_config, backend
         self.access, self.board, self.previews = access, board, previews
-        self.default_voice, self.upstream_log = default_voice, upstream_log
+        self.default_voice = default_voice
         # Every run of this browser socket shares it, so the harness keeps one conversation.
         self.session_id = f"osmo-{secrets.token_hex(8)}"
         self.voice: VoiceSession | None = None
@@ -238,9 +236,8 @@ class VoiceBridge:
         model = self.model()
         if not self.access.connect(model.provider):
             return False
-        observer = self.upstream_log.record if self.upstream_log is not None else None
         try:
-            voice = await self.access.voices.open(core_model_id(model), self.voice_config(), observer)
+            voice = await self.access.voices.open(core_model_id(model), self.voice_config())
         except (OSError, WebSocketException) as exc:
             log.error("could not open the voice session on %s: %s", model.id, exc)
             return False
