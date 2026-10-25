@@ -60,6 +60,20 @@ class FunctionCallArgumentsDone(_Incoming):
     arguments: str
 
 
+class OutputItem(_Incoming):
+    type: str
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+
+
+class OutputItemDone(_Incoming):
+    """Carries a finished `function_call` item; the OpenAI-compatible twin of arguments.done."""
+
+    type: Literal["response.output_item.done"]
+    item: OutputItem
+
+
 class ResponseDone(_Incoming):
     type: Literal["response.done"]
 
@@ -83,6 +97,7 @@ GrokServerEvent = Annotated[
         OutputAudioTranscriptDelta,
         OutputAudioDelta,
         FunctionCallArgumentsDone,
+        OutputItemDone,
         ResponseDone,
         ErrorEvent,
     ],
@@ -100,6 +115,7 @@ HANDLED_SERVER_EVENTS = frozenset(
         "response.output_audio_transcript.delta",
         "response.output_audio.delta",
         "response.function_call_arguments.done",
+        "response.output_item.done",
         "response.done",
         "error",
     }

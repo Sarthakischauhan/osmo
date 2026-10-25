@@ -20,7 +20,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 # Tools
 - set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): pick from the catalog by traits, then confirm in one short line.
-- get_weather for forecasts, get_stock_history for tickers, web_search for anything current (places, news, facts).
+- Forecasts, stock prices and anything current (places, news, facts) come from your tools; call them, never answer those from memory.
 """
 
 
