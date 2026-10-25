@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from conftest import make_client
+from conftest import VOICE_LIMITS, make_client
 from fakes import FAKE_CONFIG, FakeInfisical, FakeSecretStore
 from symphony_server.file_store import FileSecretStore
 from symphony_server.infisical_client import InfisicalConfig
@@ -104,7 +104,7 @@ def test_infisical_outage_is_a_502_and_leaks_nothing(caplog: pytest.LogCaptureFi
     store = InfisicalSecretStore(backend, FAKE_CONFIG)
     store.put(DEFAULT_OWNER, auth("xai"))
     backend.fail = True
-    with make_client(Settings(xai_base_url="http://127.0.0.1:9/v1"), secret_store=store) as client:
+    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url="http://127.0.0.1:9/v1"), secret_store=store) as client:
         response = client.delete("/providers/xai")
         assert response.status_code == 502
         assert "connected" in client.get("/providers").text

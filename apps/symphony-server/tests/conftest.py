@@ -19,7 +19,10 @@ from symphony_server.app import create_app
 from core_ai.voice import VoiceRegistry
 from symphony_server.file_store import FileSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
-from symphony_server.settings import Settings
+from symphony_server.settings import VOICE_CONTEXT_LIMITS_ENV, Settings
+
+# Hermetic per-model context windows (xAI documents none; the server requires them configured).
+VOICE_LIMITS = {"grok:grok-voice-latest": 32000, "grok:grok-voice-3.0": 32000}
 
 
 class FakeGrok:
@@ -50,14 +53,17 @@ class FakeGrok:
             outbox = self.outbox
             assert outbox is not None
 
+            requests: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
             async def push() -> None:
                 while True:
-                    await conn.send(await outbox.get())
+                    await conn.send(await echo_metadata(await outbox.get(), requests))
 
             pusher = asyncio.create_task(push())
             try:
                 async for message in conn:
                     self.received.put(message)
+                    record_request(message, requests)
             finally:
                 pusher.cancel()
                 self.closed.put(path)
@@ -101,6 +107,41 @@ class FakeGrok:
                 return message
 
 
+# How long the fake waits for a pending `response.create` before treating a pushed
+# `response.created` as a server-VAD response (null metadata).
+REQUEST_WAIT_S = 0.2
+
+
+def record_request(message: str | bytes, requests: asyncio.Queue[dict[str, Any]]) -> None:
+    """Queue the metadata of each `response.create` the client sends, as xAI does."""
+    if isinstance(message, str):
+        event = json.loads(message)
+        if event["type"] == "response.create":
+            requests.put_nowait(event.get("response", {}).get("metadata"))
+
+
+async def echo_metadata(payload: str | bytes, requests: asyncio.Queue[dict[str, Any]]) -> str | bytes:
+    """Echo the oldest pending request's metadata on a test-pushed `response.created`
+    (docs.x.ai: response.create metadata is returned on response.created/done; server-VAD
+    responses carry null metadata)."""
+    if isinstance(payload, bytes):
+        return payload
+    event = json.loads(payload)
+    if event["type"] != "response.created" or "metadata" in event["response"]:
+        return payload
+    try:
+        event["response"]["metadata"] = await asyncio.wait_for(requests.get(), REQUEST_WAIT_S)
+    except TimeoutError:
+        event["response"]["metadata"] = None
+    return json.dumps(event)
+
+
+@pytest.fixture(autouse=True)
+def voice_limits_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings.from_env requires OSMO_VOICE_CONTEXT_LIMITS; tests get VOICE_LIMITS."""
+    monkeypatch.setenv(VOICE_CONTEXT_LIMITS_ENV, ",".join(f"{k}={v}" for k, v in VOICE_LIMITS.items()))
+
+
 @pytest.fixture
 def grok() -> FakeGrok:
     return FakeGrok()
@@ -130,5 +171,5 @@ def xai_key_store(key: str = "test-key") -> SecretStore:
 
 @pytest.fixture
 def client(grok: FakeGrok) -> Iterator[TestClient]:
-    with make_client(Settings(xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
+    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
         yield test_client

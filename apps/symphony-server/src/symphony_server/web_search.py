@@ -79,7 +79,6 @@ class WebSearchTool(Tool):
                 },
                 "required": ["query"],
             },
-            category="search",
         )
         self.client, self.api_key = client, api_key
 

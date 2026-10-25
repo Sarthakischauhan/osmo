@@ -7,7 +7,7 @@ import logging
 import pytest
 from infisical_sdk.infisical_requests import APIError
 
-from conftest import make_client
+from conftest import VOICE_LIMITS, make_client
 from fakes import FAKE_CONFIG, FakeClock, FakeInfisical
 from symphony_server.infisical_store import InfisicalSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStoreError
@@ -79,7 +79,7 @@ def test_a_second_401_is_raised(caplog: pytest.LogCaptureFixture) -> None:
 def test_a_second_401_on_write_is_a_502_without_leaks(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     backend, _, store = stocked()
-    with make_client(Settings(xai_base_url="http://127.0.0.1:9/v1"), secret_store=store) as client:
+    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url="http://127.0.0.1:9/v1"), secret_store=store) as client:
         assert client.get("/providers").status_code == 200
         backend.unauthorized = 2
         response = client.delete("/providers/openai")

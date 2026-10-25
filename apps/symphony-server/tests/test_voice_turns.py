@@ -5,27 +5,27 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
-from dataclasses import replace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import FakeGrok, make_client, xai_key_store
-from core_ai import ModelCatalog
-from core_ai.voice import VOICE_MODELS, VoiceRegistry
+from conftest import VOICE_LIMITS, FakeGrok, make_client, xai_key_store
+from core_ai.voice import VoiceRegistry
 from core_harness.context.compact import COMPACTED_CONTEXT_MARK
 from symphony_server.settings import Settings
 from test_session import DINNER, answer, next_event, render, say, start, wait_listening
 
 SMALL_LIMIT = 300
-SMALL_MODEL = replace(VOICE_MODELS[0], id="grok-voice-mini", context_limit=SMALL_LIMIT)
+# The real grok-voice-3.0, configured with a small window so switching to it must compact.
+SMALL_MODEL = "grok-voice-3.0"
 
 
 @pytest.fixture
 def small_client(grok: FakeGrok) -> Iterator[TestClient]:
-    voices = VoiceRegistry(ModelCatalog((*VOICE_MODELS, SMALL_MODEL)))
-    settings = Settings(xai_base_url=grok.base_url)
+    limits = {**VOICE_LIMITS, f"grok:{SMALL_MODEL}": SMALL_LIMIT}
+    voices = VoiceRegistry(limits)
+    settings = Settings(voice_context_limits=limits, xai_base_url=grok.base_url)
     with make_client(settings, secret_store=xai_key_store(), voices=voices) as test_client:
         yield test_client
 
@@ -49,8 +49,8 @@ def test_switching_to_a_smaller_model_compacts_history_to_its_budget(small_clien
         # The latest tool result stays whole (KeepSystemRecentCompactor protects it); the long
         # turns before it are what the smaller window drops.
         widget_id = render(ws, grok, DINNER, "h1")
-        ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-mini", "voice": "eve"}))
-        assert next_event(ws, "voice.configured")["selection"]["model"] == "grok-voice-mini"
+        ws.send_text(json.dumps({"type": "session.configure", "model": SMALL_MODEL, "voice": "eve"}))
+        assert next_event(ws, "voice.configured")["selection"]["model"] == SMALL_MODEL
         grok.next_of("session.update")
 
         ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))

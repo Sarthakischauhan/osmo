@@ -80,7 +80,6 @@ class RenderWidgetTool(Tool):
             name="render_widget",
             description="Show a widget on the user's canvas. Returns what is now shown.",
             parameters=RENDER_WIDGET_PARAMETERS,
-            category="osmo",
         )
         self.board = board
 
@@ -98,7 +97,6 @@ class UpdateWidgetTool(Tool):
             name="update_widget",
             description="Change props of a widget already on the canvas.",
             parameters=UPDATE_WIDGET_PARAMETERS,
-            category="osmo",
         )
         self.board = board
 
@@ -138,7 +136,6 @@ class CreateImageTool(Tool):
                 },
                 "required": ["prompt"],
             },
-            category="image",
         )
         self.registry, self.board, self.model_id = registry, board, model_id
 

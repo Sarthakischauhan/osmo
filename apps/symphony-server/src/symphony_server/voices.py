@@ -17,8 +17,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from core_ai import ModelInfo
-from core_ai.voice import AudioDelta, VoiceClosed, VoiceConfig, VoiceRegistry, VoiceSession
+from core_ai.voice import AudioDelta, VoiceModelSpec, VoiceClosed, VoiceConfig, VoiceRegistry, VoiceSession
 from core_harness import EventSink, Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -99,12 +98,12 @@ LATEST = "latest"
 
 def voice_models(voices: VoiceRegistry) -> tuple[VoiceModel, ...]:
     """The picker's models: every realtime model in the core_ai voice registry, latest first.
-    Voices and reasoning efforts come from each model's ModelInfo."""
-    realtime = [m for m in voices.models() if m.api == "realtime" and m.provider in OSMO_PROVIDERS]
-    return tuple(voice_model(m) for m in sorted(realtime, key=lambda m: (not m.id.endswith(LATEST), m.id)))
+    Voices and reasoning efforts come from each model's VoiceModelSpec."""
+    specs = [m.spec for m in voices.models() if m.spec.provider in OSMO_PROVIDERS]
+    return tuple(voice_model(m) for m in sorted(specs, key=lambda m: (not m.id.endswith(LATEST), m.id)))
 
 
-def voice_model(info: ModelInfo) -> VoiceModel:
+def voice_model(info: VoiceModelSpec) -> VoiceModel:
     family, version = info.id.rsplit("-", 1)
     name = family.replace("-", " ").title()
     return VoiceModel(
@@ -116,7 +115,7 @@ def voice_model(info: ModelInfo) -> VoiceModel:
             {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts) or None}
         ),
         voices=[Voice(id=v.id, label=v.label, traits=list(v.traits)) for v in info.voices],
-        defaultVoice=info.default_voice or info.voices[0].id,
+        defaultVoice=info.default_voice,
     )
 
 
@@ -145,17 +144,17 @@ class SetVoiceTool(Tool):
             name=SET_VOICE,
             description=set_voice_description(voice_models(access.voices)),
             parameters=SET_VOICE_PARAMETERS,
-            category="osmo",
         )
         self.access = access
 
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
-        error = voice_change_error(self.access.models(), args)
-        if error is not None:
+        change = parse_voice_change(args)
+        error = change if isinstance(change, str) else voice_change_error(self.access.models(), change)
+        if isinstance(change, str) or error is not None:
             return json.dumps({"error": error})
-        change = SetVoiceArgs.model_validate(args).model_dump(exclude_none=True)
-        await sink.emit(OSMO_VOICE, change)
-        return json.dumps({"configured": change, "say": "Confirm the switch in one short line."})
+        configured = change.model_dump(exclude_none=True)
+        await sink.emit(OSMO_VOICE, configured)
+        return json.dumps({"configured": configured, "say": "Confirm the switch in one short line."})
 
 
 def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
@@ -219,12 +218,16 @@ class KeyedRateLimiter:
         return limiter.allow()
 
 
-def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], current: Selection) -> Selection | str:
-    """Apply a partial change to `current`; returns the new selection or an error for the model."""
+def parse_voice_change(args: Mapping[str, Any]) -> SetVoiceArgs | str:
+    """A `set_voice` call's raw arguments as a typed change, or why they are invalid."""
     try:
-        change = SetVoiceArgs.model_validate(dict(args))
+        return SetVoiceArgs.model_validate(dict(args))
     except ValidationError as exc:
         return "invalid arguments: " + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()[:3])
+
+
+def resolve_selection(models: tuple[VoiceModel, ...], change: SetVoiceArgs, current: Selection) -> Selection | str:
+    """Apply a partial change to `current`; returns the new selection or an error for the model."""
     model_id = change.model or current.model
     model = find_model(models, model_id)
     if model is None:
@@ -245,11 +248,11 @@ def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], c
     return Selection(model=model.id, voice=voice.id, effort=effort)
 
 
-def voice_change_error(models: tuple[VoiceModel, ...], args: Mapping[str, Any]) -> str | None:
-    """Why a `set_voice` call could not apply on any model's defaults, or None. The tool has no
+def voice_change_error(models: tuple[VoiceModel, ...], change: SetVoiceArgs) -> str | None:
+    """Why a `set_voice` change could not apply on any model's defaults, or None. The tool has no
     session in hand, so it checks here and the bridge resolves the change against its selection."""
     outcomes = [
-        resolve_selection(models, args, Selection(model=m.id, voice=m.defaultVoice, effort=None)) for m in models
+        resolve_selection(models, change, Selection(model=m.id, voice=m.defaultVoice, effort=None)) for m in models
     ]
     if any(isinstance(outcome, Selection) for outcome in outcomes):
         return None
@@ -268,7 +271,8 @@ def default_selection(models: tuple[VoiceModel, ...], voice: str) -> Selection:
     # Computed here too, so a locked first model (which `resolve_selection` refuses) still gets a valid effort.
     effort = default_effort(allowed) if allowed else None
     base = Selection(model=model.id, voice=model.defaultVoice, effort=effort)
-    picked = resolve_selection(models, {"voice": voice} if any(v.id == voice for v in model.voices) else {}, base)
+    change = SetVoiceArgs(voice=voice) if any(v.id == voice for v in model.voices) else SetVoiceArgs()
+    picked = resolve_selection(models, change, base)
     return picked if isinstance(picked, Selection) else base
 
 

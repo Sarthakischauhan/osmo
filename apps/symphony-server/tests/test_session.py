@@ -7,7 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
-from conftest import FakeGrok, make_client
+from conftest import VOICE_LIMITS, FakeGrok, make_client
 from symphony_server.settings import Settings
 
 WEATHER_CARD = {
@@ -152,12 +152,23 @@ def test_a_model_switch_replays_the_harness_history(client: TestClient, grok: Fa
         grok.next_of("session.update")
 
         ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
-        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(3)]
-        assert [(item["role"], item["content"][0]["text"]) for item in replayed] == [
+        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(5)]
+        assert [replayed_entry(item) for item in replayed] == [
             ("user", "show me"),
+            ("function_call", "render_widget"),
+            ("function_call_output", "h1"),
             ("assistant", "Done."),
             ("user", f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"),
         ]
+
+
+def replayed_entry(item: dict[str, Any]) -> tuple[str, str]:
+    """A replayed item as (role or tool item type, text / tool name / call id)."""
+    if item["type"] == "function_call":
+        return "function_call", item["name"]
+    if item["type"] == "function_call_output":
+        return "function_call_output", item["call_id"]
+    return item["role"], item["content"][0]["text"]
 
 
 def test_invalid_widget_never_reaches_canvas(client: TestClient, grok: FakeGrok) -> None:
@@ -286,7 +297,7 @@ def test_empty_transcript_cancels_instead_of_running_a_turn(client: TestClient, 
 
 
 def test_missing_key_is_reported_not_faked(grok: FakeGrok) -> None:
-    with make_client(Settings(xai_base_url=grok.base_url)) as client:
+    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url=grok.base_url)) as client:
         with client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({"type": "session.start"}))
             state = next_event(ws, "state")

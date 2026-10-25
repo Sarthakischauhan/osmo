@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from conftest import VOICE_LIMITS
 import asyncio
 import json
 
@@ -37,8 +38,8 @@ class DrawingRegistry(ModelRegistry):
 
 
 def tool_names(categories: str | None) -> set[str]:
-    access = ModelAccess(ModelRegistry(), VoiceRegistry(), CredentialStore(FileSecretStore(None)), "http://unused/v1")
-    settings = Settings(tool_categories=tool_categories(categories))
+    access = ModelAccess(ModelRegistry(), VoiceRegistry(VOICE_LIMITS), CredentialStore(FileSecretStore(None)), "http://unused/v1")
+    settings = Settings(voice_context_limits=VOICE_LIMITS, tool_categories=tool_categories(categories))
     return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, WidgetBoard())}
 
 

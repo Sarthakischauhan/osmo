@@ -16,6 +16,7 @@ from core_ai import ModelRegistry
 from core_ai.voice import VoiceRegistry
 from core_harness import Tool
 from core_server import (
+    RunContext,
     InProcessRunBackend,
     RunExecutor,
     ServerConfig,
@@ -33,9 +34,11 @@ from symphony_server.protocol import ModelsEvent
 from symphony_server.providers import CredentialStore, create_provider_router
 from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
-from symphony_server.settings import Settings
+from symphony_server.settings import TOOL_CATEGORIES, Settings
 from symphony_server.tools import StockTool, WeatherTool
 from symphony_server.voice_bridge import VoiceBridge
+from symphony_server.voice_router import VoiceRunLink
+from symphony_server.voice_turns import VoiceLinks
 from symphony_server.web_search import WebSearchTool
 from symphony_server.voices import (
     PREVIEW_CLIENTS_MAX,
@@ -64,27 +67,28 @@ def osmo_tools(settings: Settings, client: httpx.AsyncClient, access: ModelAcces
         WeatherTool(client),
         StockTool(client),
     ]
-    return [tool for tool in tools if tool.category in settings.tool_categories]
+    return [tool for tool in tools if TOOL_CATEGORIES[tool.name] in settings.tool_categories]
 
 
-def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool]) -> ServerConfig:
-    """core_server config for every run: Osmo's prompt and tools on the shared registry, history in memory."""
+def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool], links: VoiceLinks) -> ServerConfig:
+    """core_server config for every run: Osmo's prompt and tools on the shared registry, history in memory,
+    and a VoiceRunLink addon handing each run its session's voice link so voice models answer on it."""
+
+    def voice_link(context: RunContext) -> VoiceRunLink:
+        return VoiceRunLink(links.get(context.session_id))
+
     return build_config(
         registry=access.registry,
         model_id=core_model_id(access.models()[0]),
         system_prompt=settings.instructions,
         tools=tools,
         persistence=MemoryPersistence(),
-        context_limits=voice_context_limits(access.voices),
+        # Each voice model's configured window (Settings.voice_context_limits), by run model id:
+        # core_server's KeepSystemRecentCompactor compacts a run's history against the window of
+        # the model that run is on, so the first turn after a switch compacts to its budget.
+        context_limits={model.full_id: model.context_limit for model in access.voices.models()},
+        addon_factories=[voice_link],
     )
-
-
-def voice_context_limits(voices: VoiceRegistry) -> dict[str, int]:
-    """Each voice model's window, from its ModelInfo, keyed by the run's model id. The harness
-    compacts a run's history (core_server's KeepSystemRecentCompactor) against the window of the
-    model that run is on, so the first turn after a switch to a smaller model compacts to its
-    budget; the full history stays in MemoryPersistence until then."""
-    return {m.full_id: m.context_limit for m in voices.catalog.list() if m.context_limit is not None}
 
 
 def create_app(
@@ -96,10 +100,11 @@ def create_app(
     voices: VoiceRegistry | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(secret_store or open_secret_store(settings))
-    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(), credentials, settings.xai_base_url)
+    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(settings.voice_context_limits), credentials, settings.xai_base_url)
     access.connect("xai")
     board = WidgetBoard()
-    core_config = osmo_core_config(settings, access, osmo_tools(settings, http_client, access, board))
+    links = VoiceLinks()
+    core_config = osmo_core_config(settings, access, osmo_tools(settings, http_client, access, board), links)
     previews = PreviewCache(access, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
@@ -145,6 +150,7 @@ def create_app(
             backend=backend,
             access=access,
             board=board,
+            links=links,
             previews=previews,
             default_voice=settings.voice,
         )

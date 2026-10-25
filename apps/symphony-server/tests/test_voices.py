@@ -11,13 +11,15 @@ from fastapi.testclient import TestClient
 
 from core_ai.voice import VoiceRegistry
 
-from conftest import FakeGrok
+from conftest import VOICE_LIMITS, FakeGrok
 from symphony_server.voices import (
     PREVIEW_BYTES,
     Capabilities,
     Selection,
     Voice,
     VoiceModel,
+    SetVoiceArgs,
+    parse_voice_change,
     resolve_selection,
     voice_models,
 )
@@ -45,30 +47,30 @@ CURRENT = Selection(model="grok-voice-latest", voice="eve")
 
 
 def test_voice_only_change_keeps_model() -> None:
-    assert resolve_selection(MODELS, {"voice": "Sal"}, CURRENT) == Selection(model="grok-voice-latest", voice="sal")
+    assert resolve_selection(MODELS, SetVoiceArgs(voice="Sal"), CURRENT) == Selection(model="grok-voice-latest", voice="sal")
 
 
 def test_model_change_takes_default_voice_and_an_allowed_effort() -> None:
     # Without "medium" on offer the default is the model's last (highest) listed effort.
-    assert resolve_selection(MODELS, {"model": "thinker"}, CURRENT) == Selection(model="thinker", voice="rex", effort="high")
-    picked = resolve_selection(MODELS, {"model": "thinker", "voice": "nova", "effort": "high"}, CURRENT)
+    assert resolve_selection(MODELS, SetVoiceArgs(model="thinker"), CURRENT) == Selection(model="thinker", voice="rex", effort="high")
+    picked = resolve_selection(MODELS, SetVoiceArgs(model="thinker", voice="nova", effort="high"), CURRENT)
     assert picked == Selection(model="thinker", voice="nova", effort="high")
 
 
 def test_rejects_unknown_ids_unsupported_effort_and_extra_keys() -> None:
-    assert "unknown model" in str(resolve_selection(MODELS, {"model": "nope"}, CURRENT))
-    assert "unknown voice" in str(resolve_selection(MODELS, {"voice": "nova"}, CURRENT))
-    assert "does not support" in str(resolve_selection(MODELS, {"effort": "high"}, CURRENT))
-    assert "does not support" in str(resolve_selection(MODELS, {"model": "thinker", "effort": "medium"}, CURRENT))
-    assert "invalid arguments" in str(resolve_selection(MODELS, {"speed": 2}, CURRENT))
-    assert "invalid arguments" in str(resolve_selection(MODELS, {"effort": "max"}, CURRENT))
+    assert "unknown model" in str(resolve_selection(MODELS, SetVoiceArgs(model="nope"), CURRENT))
+    assert "unknown voice" in str(resolve_selection(MODELS, SetVoiceArgs(voice="nova"), CURRENT))
+    assert "does not support" in str(resolve_selection(MODELS, SetVoiceArgs(effort="high"), CURRENT))
+    assert "does not support" in str(resolve_selection(MODELS, SetVoiceArgs(model="thinker", effort="medium"), CURRENT))
+    assert "invalid arguments" in str(parse_voice_change({"speed": 2}))
+    assert "invalid arguments" in str(parse_voice_change({"effort": "max"}))
 
 
 def test_models_event_on_connect(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         event = next_event(ws, "models")
         assert event["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
-        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models(VoiceRegistry())[0].voices]
+        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models(VoiceRegistry(VOICE_LIMITS))[0].voices]
 
 
 def frames_until(grok: FakeGrok, *types: str) -> list[dict[str, Any]]:
@@ -189,7 +191,7 @@ def test_voice_models_endpoint_serves_the_registry_before_any_socket(client: Tes
 
 
 def test_model_ring_short_labels_are_distinct_and_served(client: TestClient) -> None:
-    shorts = [m.shortLabel for m in voice_models(VoiceRegistry())]
+    shorts = [m.shortLabel for m in voice_models(VoiceRegistry(VOICE_LIMITS))]
     assert shorts == ["Latest", "3.0"]
     assert len(set(shorts)) == len(shorts)
     served = client.get("/voice-models").json()["models"]

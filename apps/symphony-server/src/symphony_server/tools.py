@@ -76,7 +76,6 @@ class WeatherTool(Tool):
                 },
                 "required": ["location"],
             },
-            category="osmo",
         )
         self.client = client
 
@@ -167,7 +166,6 @@ class StockTool(Tool):
                 },
                 "required": ["symbol"],
             },
-            category="osmo",
         )
         self.client = client
 

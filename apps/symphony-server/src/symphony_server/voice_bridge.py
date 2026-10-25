@@ -1,23 +1,19 @@
 """One Osmo voice session: the browser socket on one side, a core_ai voice session and
 core_server harness runs on the other.
 
-The voice session is audio in and out only. Every user turn (a finished spoken
-utterance or a widget tap) is a harness run on this bridge's session id, so the
-harness owns history (MemoryPersistence), tools and the model call; the run's
-model call reaches the open voice session through its core_harness voice link
-(`voice_links`, keyed by this bridge's session id). The bridge owns turns: it
-records what the session heard on the link and decides which run answers.
-The bridge follows each run's events and turns them into Osmo wire events.
+The voice session is audio in and out only. Every user turn (a finished utterance or a
+widget tap) is a harness run on this bridge's session id, so the harness owns history, tools
+and the model call; the run reaches the open voice session through its `VoiceLink` (osmo's
+`VoiceLinks`, handed to each run by a `VoiceRunLink` addon). The bridge records what the
+session heard on the link, decides which run answers, and maps run events to wire events.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import secrets
-import time
-from collections.abc import Coroutine, Mapping
+from collections.abc import Coroutine
 from typing import Any, Literal
 
 from core_ai.voice import (
@@ -30,9 +26,9 @@ from core_ai.voice import (
     VoiceEvent,
     VoiceSession,
 )
-from core_harness import ControlPlaneEvent, VoiceLink, voice_links
+from core_harness import ControlPlaneEvent
 from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRequest, RunSubmission, ServerConfig
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
@@ -50,27 +46,24 @@ from symphony_server.protocol import (
     TranscriptDelta,
     VoiceConfigured,
     VoicePreviewRequest,
-    VoicePreviewResult,
     WidgetAction,
     client_event_adapter,
     widget_event_adapter,
 )
+from symphony_server.session_previews import SessionPreviews
+from symphony_server.voice_turns import VoiceLink, VoiceLinks
+from symphony_server.turn_events import RunFailedPayload, TextDeltaPayload, ToolStartedPayload, action_text, activity_label
 from symphony_server.voices import (
     OSMO_VOICE,
-    PREVIEW_RATE_LIMIT,
-    PREVIEW_RATE_WINDOW_S,
-    PREVIEW_SECONDS,
     PreviewCache,
-    RateLimiter,
     Selection,
+    SetVoiceArgs,
     VoiceModel,
     core_model_id,
     default_selection,
     find_model,
-    preview_error,
     resolve_selection,
 )
-from symphony_server.widgets import OptionsWidget, Widget
 
 log = logging.getLogger("symphony.voice")
 
@@ -78,21 +71,6 @@ log = logging.getLogger("symphony.voice")
 BARGE_IN = "barge-in"
 # A picker model switch waits this long for the current turn to finish.
 SWAP_WAIT_S = 15.0
-# Voice previews are played only while the assistant is quiet.
-PREVIEW_STATES: tuple[OsmoState, ...] = ("idle", "listening")
-
-
-class TextDeltaPayload(BaseModel):
-    delta: str
-
-
-class ToolStartedPayload(BaseModel):
-    tool_name: str
-    arguments: dict[str, Any] = {}
-
-
-class RunFailedPayload(BaseModel):
-    message: str = "run failed"
 
 
 class VoiceBridge:
@@ -104,11 +82,13 @@ class VoiceBridge:
         backend: InProcessRunBackend,
         access: ModelAccess,
         board: WidgetBoard,
+        links: VoiceLinks,
         previews: PreviewCache,
         default_voice: str,
     ) -> None:
         self.browser, self.core_config, self.backend = browser, core_config, backend
-        self.access, self.board, self.previews = access, board, previews
+        self.access, self.board, self.links = access, board, links
+        self.previews = SessionPreviews(access, previews)
         self.default_voice = default_voice
         # Every run of this browser socket shares it, so the harness keeps one conversation.
         self.session_id = f"osmo-{secrets.token_hex(8)}"
@@ -124,10 +104,6 @@ class VoiceBridge:
         self.swap_after_turn = False
         self.configure_lock = asyncio.Lock()
         self.tasks: set[asyncio.Task[None]] = set()
-        self.preview_limiter = RateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S)
-        # Mic audio is not forwarded until this monotonic time, so a preview playing on the
-        # speakers is not heard as the user talking.
-        self.mic_paused_until = 0.0
 
     # ------------------------------------------------------------ browser side
 
@@ -158,7 +134,7 @@ class VoiceBridge:
         task.add_done_callback(self.tasks.discard)
 
     async def forward_audio(self, pcm: bytes) -> None:
-        if self.voice is None or time.monotonic() < self.mic_paused_until:
+        if self.voice is None or self.previews.mic_paused():
             return
         try:
             await self.voice.send_audio(pcm)
@@ -182,7 +158,7 @@ class VoiceBridge:
             await self.widget_action(event)
         elif isinstance(event, SessionConfigure):
             # Beside the receive loop: a model switch may wait for the current turn to end.
-            self.spawn(self.configure_from_client(event.model_dump(exclude={"type"}, exclude_none=True)))
+            self.spawn(self.configure_from_client(SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)))
         elif isinstance(event, VoicePreviewRequest):
             self.spawn(self.preview(event))
 
@@ -206,9 +182,8 @@ class VoiceBridge:
         if not self.access.connect("xai"):
             await self.set_state("idle", "xAI is not connected: add a key in Providers")
             return
-        picked = resolve_selection(
-            self.access.models(), event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
-        )
+        change = SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)
+        picked = resolve_selection(self.access.models(), change, self.selection)
         if isinstance(picked, Selection):
             self.selection = picked
         if not await self.open_voice():
@@ -242,7 +217,7 @@ class VoiceBridge:
             log.error("could not open the voice session on %s: %s", model.id, exc)
             return False
         self.voice = voice
-        self.link = voice_links.open(self.session_id, core_model_id(model), voice)
+        self.link = self.links.open(self.session_id, core_model_id(model), voice)
         log.info("voice session open (model %s)", model.id)
         self.spawn(self.pump(voice))
         return True
@@ -254,7 +229,7 @@ class VoiceBridge:
         if not await self.open_voice():
             return False
         if old_link is not None:
-            voice_links.close(self.session_id, old_link)
+            self.links.close(self.session_id, old_link)
         if old is not None:
             await old.aclose()
         return True
@@ -264,7 +239,7 @@ class VoiceBridge:
         link, self.link = self.link, None
         await self.cancel_run()
         if link is not None:
-            voice_links.close(self.session_id, link)
+            self.links.close(self.session_id, link)
         if voice is not None:
             await voice.aclose()
 
@@ -343,7 +318,7 @@ class VoiceBridge:
         elif event.event_type == OSMO_WIDGET:
             await self.emit(widget_event_adapter.validate_python(event.payload))
         elif event.event_type == OSMO_VOICE:
-            await self.configure(event.payload, "tool")
+            await self.configure(SetVoiceArgs.model_validate(event.payload), "tool")
         elif event.event_type == "run_failed":
             log.warning("turn failed: %s", RunFailedPayload.model_validate(event.payload).message)
 
@@ -373,11 +348,11 @@ class VoiceBridge:
 
     # ------------------------------------------------------------ model, voice and effort
 
-    async def configure_from_client(self, change: Mapping[str, Any]) -> None:
+    async def configure_from_client(self, change: SetVoiceArgs) -> None:
         """A picker commit. A model switch waits for the current turn to finish (never
         cancelling it), then swaps and tells the browser the session is listening."""
         async with self.configure_lock:
-            swapping = self.voice is not None and change.get("model", self.selection.model) != self.selection.model
+            swapping = self.voice is not None and (change.model or self.selection.model) != self.selection.model
             if swapping:
                 try:
                     async with asyncio.timeout(SWAP_WAIT_S):
@@ -389,7 +364,7 @@ class VoiceBridge:
             if isinstance(outcome, Selection) and self.voice is not before:
                 await self.set_state("listening")
 
-    async def configure(self, change: Mapping[str, Any], source: Literal["client", "tool"]) -> Selection | str:
+    async def configure(self, change: SetVoiceArgs, source: Literal["client", "tool"]) -> Selection | str:
         """The one path for picker commits and `set_voice`: validate, apply, tell the browser.
         The browser always hears back with the applied selection, or the one still in effect plus `error`."""
         picked = resolve_selection(self.access.models(), change, self.selection)
@@ -416,57 +391,8 @@ class VoiceBridge:
         return picked
 
     async def apply_swap(self, source: Literal["client", "tool"]) -> None:
-        if await self.swap():
-            await self.emit(VoiceConfigured(selection=self.selection, source=source))
-            return
-        error = f"could not open {self.selection.model}"
+        error = None if await self.swap() else f"could not open {self.selection.model}"
         await self.emit(VoiceConfigured(selection=self.selection, source=source, error=error))
 
     async def preview(self, request: VoicePreviewRequest) -> None:
-        refused = preview_error(self.access.models(), request.model, request.voice)
-        if refused is None and self.state not in PREVIEW_STATES:
-            refused = f"previews play only while idle or listening (now {self.state})"
-        if refused is None and not self.preview_limiter.allow():
-            refused = "too many previews; try again in a few seconds"
-        if refused is not None:
-            await self.emit(VoicePreviewResult(requestId=request.requestId, model=request.model, voice=request.voice, error=refused))
-            return
-        try:
-            audio = await self.previews.get(request.model, request.voice)
-        except Exception as exc:  # a failed preview is reported to the pill, never fatal to the session
-            log.warning("voice preview %s/%s failed: %s", request.model, request.voice, exc)
-            await self.emit(VoicePreviewResult(requestId=request.requestId, model=request.model, voice=request.voice, error=str(exc)))
-            return
-        await self.emit(
-            VoicePreviewResult(
-                requestId=request.requestId,
-                model=request.model,
-                voice=request.voice,
-                audio=base64.b64encode(audio).decode("ascii"),
-            )
-        )
-        # The browser plays it now; keep its speakers out of the mic for that long.
-        self.mic_paused_until = time.monotonic() + PREVIEW_SECONDS
-
-
-def action_text(action: WidgetAction, widget: Widget) -> str:
-    """A widget tap, phrased as the user turn it stands in for."""
-    picked = action.value or ""
-    if isinstance(widget, OptionsWidget):
-        for index, choice in enumerate(widget.props.choices):
-            if choice.id == picked:
-                picked = f"option {index + 1}, {choice.label}"
-    detail = f" -> {picked}" if picked else ""
-    return f"[Tapped on screen] {widget.type} widget {action.id}: {action.action}{detail}"
-
-
-def activity_label(name: str, args: Mapping[str, Any]) -> str:
-    if name == "get_weather":
-        return f"Checking weather · {args.get('location', '')}"
-    if name == "get_stock_history":
-        return f"Fetching prices · {str(args.get('symbol', '')).upper()}"
-    if name == "web_search":
-        return f"Searching the web · {args.get('query', '')}"
-    if name == "create_image":
-        return "Drawing a picture"
-    return f"Running {name}"
+        await self.emit(await self.previews.play(request, self.state))
