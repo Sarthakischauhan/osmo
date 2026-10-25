@@ -19,10 +19,9 @@ from symphony_server.app import create_app
 from core_ai.voice import VoiceRegistry
 from symphony_server.file_store import FileSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
-from symphony_server.settings import VOICE_CONTEXT_LIMITS_ENV, Settings
+from symphony_server.settings import Settings
 
 # Hermetic per-model context windows (xAI documents none; the server requires them configured).
-VOICE_LIMITS = {"grok:grok-voice-latest": 32000, "grok:grok-voice-3.0": 32000}
 
 
 class FakeGrok:
@@ -136,12 +135,6 @@ async def echo_metadata(payload: str | bytes, requests: asyncio.Queue[dict[str, 
     return json.dumps(event)
 
 
-@pytest.fixture(autouse=True)
-def voice_limits_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Settings.from_env requires OSMO_VOICE_CONTEXT_LIMITS; tests get VOICE_LIMITS."""
-    monkeypatch.setenv(VOICE_CONTEXT_LIMITS_ENV, ",".join(f"{k}={v}" for k, v in VOICE_LIMITS.items()))
-
-
 @pytest.fixture
 def grok() -> FakeGrok:
     return FakeGrok()
@@ -171,5 +164,5 @@ def xai_key_store(key: str = "test-key") -> SecretStore:
 
 @pytest.fixture
 def client(grok: FakeGrok) -> Iterator[TestClient]:
-    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
+    with make_client(Settings(xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
         yield test_client

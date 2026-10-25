@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, get_args
@@ -47,14 +46,8 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
 }
 
 
-VOICE_CONTEXT_LIMITS_ENV = "OSMO_VOICE_CONTEXT_LIMITS"
-
-
 @dataclass(frozen=True)
 class Settings:
-    # Required: each voice model's context window in tokens, by core_ai id. xAI documents none
-    # for its realtime models, so it is configured, never guessed (OSMO_VOICE_CONTEXT_LIMITS).
-    voice_context_limits: Mapping[str, int]
     # xAI's REST base; core_ai derives the realtime WebSocket from it.
     xai_base_url: str = DEFAULT_XAI_BASE_URL
     voice: str = "eve"
@@ -78,7 +71,6 @@ class Settings:
         static = os.getenv("OSMO_STATIC_DIR")
         previews = os.getenv("OSMO_PREVIEW_CACHE_DIR")
         return cls(
-            voice_context_limits=voice_context_limits(os.getenv(VOICE_CONTEXT_LIMITS_ENV)),
             xai_base_url=os.getenv("XAI_BASE_URL", DEFAULT_XAI_BASE_URL),
             voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,
@@ -91,24 +83,6 @@ class Settings:
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
         )
-
-
-def voice_context_limits(value: str | None) -> dict[str, int]:
-    """OSMO_VOICE_CONTEXT_LIMITS: comma-separated ``model_id=tokens``, e.g.
-    ``grok:grok-voice-latest=N,grok:grok-voice-3.0=N``. Required; VoiceRegistry checks that
-    every voice model has one."""
-    if not value:
-        raise ValueError(
-            f"{VOICE_CONTEXT_LIMITS_ENV} is required: set each voice model's context window in tokens, "
-            "e.g. grok:grok-voice-latest=N,grok:grok-voice-3.0=N (xAI publishes no default)"
-        )
-    limits: dict[str, int] = {}
-    for entry in (part.strip() for part in value.split(",") if part.strip()):
-        model_id, sep, tokens = entry.rpartition("=")
-        if not sep or not model_id or not tokens.isdigit() or int(tokens) <= 0:
-            raise ValueError(f"{VOICE_CONTEXT_LIMITS_ENV}: {entry!r} is not model_id=<positive tokens>")
-        limits[model_id] = int(tokens)
-    return limits
 
 
 def tool_categories(value: str | None) -> tuple[ToolCategory, ...]:

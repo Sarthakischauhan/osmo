@@ -83,12 +83,15 @@ def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool],
         system_prompt=settings.instructions,
         tools=tools,
         persistence=MemoryPersistence(),
-        # Each voice model's configured window (Settings.voice_context_limits), by run model id:
-        # core_server's KeepSystemRecentCompactor compacts a run's history against the window of
-        # the model that run is on, so the first turn after a switch compacts to its budget.
-        context_limits={model.full_id: model.context_limit for model in access.voices.models()},
+        context_limits=voice_context_limits(access.voices),
         addon_factories=[voice_link],
     )
+
+
+def voice_context_limits(voices: VoiceRegistry) -> dict[str, int]:
+    """Known voice-model windows by run model id. core_server's KeepSystemRecentCompactor trims a
+    run's history to its model's window; a model without one (xAI documents none) is not trimmed."""
+    return {model.full_id: model.context_limit for model in voices.models() if model.context_limit is not None}
 
 
 def create_app(
@@ -100,7 +103,7 @@ def create_app(
     voices: VoiceRegistry | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(secret_store or open_secret_store(settings))
-    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(settings.voice_context_limits), credentials, settings.xai_base_url)
+    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(), credentials, settings.xai_base_url)
     access.connect("xai")
     board = WidgetBoard()
     links = VoiceLinks()

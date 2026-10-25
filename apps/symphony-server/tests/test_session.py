@@ -7,7 +7,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
-from conftest import VOICE_LIMITS, FakeGrok, make_client
+from conftest import FakeGrok, make_client
 from symphony_server.settings import Settings
 
 WEATHER_CARD = {
@@ -297,7 +297,7 @@ def test_empty_transcript_cancels_instead_of_running_a_turn(client: TestClient, 
 
 
 def test_missing_key_is_reported_not_faked(grok: FakeGrok) -> None:
-    with make_client(Settings(voice_context_limits=VOICE_LIMITS, xai_base_url=grok.base_url)) as client:
+    with make_client(Settings(xai_base_url=grok.base_url)) as client:
         with client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({"type": "session.start"}))
             state = next_event(ws, "state")

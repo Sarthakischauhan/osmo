@@ -6,8 +6,8 @@
 # line with a version pin then. symphony-core / symphony-harness are pinned to
 # the head of Symphony PR #166 (feat/core-ai-voice: realtime voice in core_ai.voice only). REPIN to the merge commit on main once #166 merges.
 # The vendored core_server is still byte-identical to a335957 (CI checks it).
-symphony-core @ git+https://github.com/Sarthakischauhan/symphony@8ad9247c037066acf8dfb8c97864a07e0a1f5e59#subdirectory=core_ai
-symphony-harness @ git+https://github.com/Sarthakischauhan/symphony@8ad9247c037066acf8dfb8c97864a07e0a1f5e59#subdirectory=core_harness
+symphony-core @ git+https://github.com/Sarthakischauhan/symphony@b28162345e1b3185ae98ac3c55a0acd6c6b3ca76#subdirectory=core_ai
+symphony-harness @ git+https://github.com/Sarthakischauhan/symphony@b28162345e1b3185ae98ac3c55a0acd6c6b3ca76#subdirectory=core_harness
 core-server @ file:../../vendor/core_server
 # Infisical SDK for OSMO_SECRET_STORE=infisical, pinned to the version the store is tested against.
 infisicalsdk==1.0.18
