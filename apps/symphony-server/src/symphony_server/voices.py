@@ -1,32 +1,30 @@
 """Voice model registry, the `set_voice` contract, and cached 2 s voice previews.
 
-The registry is what the browser's radial picker shows (sent as the `models`
-event) and what `set_voice` / `session.configure` are validated against, so
-the picker, the voice command and the server can never disagree.
+The picker's models are the core_ai registry's realtime models (sent as the
+`models` event); `set_voice` and `session.configure` are validated against the
+same list, so the picker, the voice command and the server can never disagree.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
+import json
 import logging
+import secrets
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-import httpx
+from core_ai import ModelInfo, ModelRegistry
+from core_ai.voice import AudioDelta, VoiceClosed, VoiceConfig, VoiceSession
+from core_harness import EventSink, Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed
-
-from symphony_server import grok_events as grok
 
 if TYPE_CHECKING:
-    from symphony_server.providers import CredentialStore
+    from symphony_server.model_access import ModelAccess
 
 log = logging.getLogger("symphony.voices")
 
@@ -34,11 +32,15 @@ log = logging.getLogger("symphony.voices")
 Effort = Literal["none", "low", "medium", "high"]
 
 SET_VOICE = "set_voice"
+# Sink event carrying a checked `set_voice` change (SetVoiceArgs) for the voice bridge.
+OSMO_VOICE = "osmo.voice"
 PREVIEW_LINE = "Hi, this is how I sound. Nice to meet you."
 PREVIEW_SAMPLE_RATE = 24000
 PREVIEW_SECONDS = 2.0
 PREVIEW_BYTES = int(PREVIEW_SAMPLE_RATE * PREVIEW_SECONDS) * 2
 PREVIEW_TIMEOUT_S = 8.0
+# After the preview response has ended, stop reading once no audio arrives for this long.
+PREVIEW_DRAIN_S = 0.3
 # Previews kept in memory (LRU); disk copies are not bounded by this.
 PREVIEW_CACHE_MAX = 32
 # Each browser socket / HTTP client may request this many previews per window.
@@ -90,66 +92,39 @@ class SetVoiceArgs(_Wire):
     effort: Effort | None = None
 
 
-# xAI's built-in voices, exactly as documented. IDs and tone descriptions come from the voice table at
-# https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices (accents from the same
-# table); labels are the `name` values in the `GET /v1/tts/voices` example response at
-# https://docs.x.ai/developers/rest-api-reference/inference/voice#text-to-speech---list-voices (aurora and
-# liora are not in that example, so their labels are their ids capitalised). Per
-# https://docs.x.ai/developers/model-capabilities/audio/voice-agent#available-voices the same roster works
-# for the Speech to Speech (realtime) API. This is the fallback; `VoiceCatalog` fetches the live list.
-DOCUMENTED_VOICES: tuple[Voice, ...] = (
-    Voice(id="eve", label="Eve", traits=["energetic", "upbeat", "British accent"]),
-    Voice(id="ara", label="Ara", traits=["warm", "friendly"]),
-    Voice(id="sal", label="Sal", traits=["smooth", "balanced"]),
-    Voice(id="leo", label="Leo", traits=["authoritative", "strong", "British accent"]),
-    Voice(id="rex", label="Rex", traits=["confident", "clear"]),
-    Voice(id="carina", label="Carina", traits=["soft", "empathetic", "soothing"]),
-    Voice(id="zagan", label="Zagan", traits=["powerful", "dramatic", "unmistakable"]),
-    Voice(id="helix", label="Helix", traits=["bold", "dynamic", "adrenaline-fueled"]),
-    Voice(id="orion", label="Orion", traits=["rich", "cinematic", "resonant"]),
-    Voice(id="luna", label="Luna", traits=["gentle", "patient", "deeply nurturing"]),
-    Voice(id="iris", label="Iris", traits=["friendly", "upbeat", "naturally charming"]),
-    Voice(id="altair", label="Altair", traits=["elegant", "refined", "effortlessly premium"]),
-    Voice(id="zenith", label="Zenith", traits=["sharp", "focused", "driven"]),
-    Voice(id="perseus", label="Perseus", traits=["strong", "confident", "trustworthy"]),
-    Voice(id="helios", label="Helios", traits=["upbeat", "energetic", "endlessly versatile"]),
-    Voice(id="lux", label="Lux", traits=["grounded", "calm", "quietly wise"]),
-    Voice(id="kepler", label="Kepler", traits=["inventive", "forward-thinking", "charismatic"]),
-    Voice(id="rigel", label="Rigel", traits=["precise", "professional", "calmly confident", "Australian accent"]),
-    Voice(id="cosmo", label="Cosmo", traits=["bright", "curious", "easy to follow"]),
-    Voice(id="celeste", label="Celeste", traits=["compassionate", "confident", "reassuring"]),
-    Voice(id="ursa", label="Ursa", traits=["friendly", "warm", "steadfast"]),
-    Voice(id="sirius", label="Sirius", traits=["quick-witted", "clever", "playful"]),
-    Voice(id="lumen", label="Lumen", traits=["warm", "articulate", "engaging"]),
-    Voice(id="castor", label="Castor", traits=["charismatic", "down-to-earth", "easygoing"]),
-    Voice(id="naksh", label="Naksh", traits=["warm", "thoughtful", "wise", "Indian accent"]),
-    Voice(id="atlas", label="Atlas", traits=["confident", "commanding", "reassuring"]),
-    Voice(id="aurora", label="Aurora", traits=["serene", "steady", "radiant"]),
-    Voice(id="liora", label="Liora", traits=["calm", "grounded", "luminous"]),
-)
-GROK_VOICES = list(DOCUMENTED_VOICES)
-GROK_CAPABILITIES = Capabilities(tools=True, interrupt=True, customVoices=False, reasoningEffort=["high", "none"])
+# The core_ai provider namespace serving each Osmo provider id, and back.
+CORE_NAMESPACES: dict[str, str] = {"xai": "grok"}
+OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in CORE_NAMESPACES.items()}
+LATEST = "latest"
 
-VOICE_MODELS: tuple[VoiceModel, ...] = (
-    VoiceModel(
-        id="grok-voice-latest",
-        provider="xai",
-        label="Grok Voice",
-        shortLabel="Latest",
-        capabilities=GROK_CAPABILITIES,
-        voices=GROK_VOICES,
-        defaultVoice="eve",
-    ),
-    VoiceModel(
-        id="grok-voice-3.0",
-        provider="xai",
-        label="Grok Voice 3.0",
-        shortLabel="3.0",
-        capabilities=GROK_CAPABILITIES,
-        voices=GROK_VOICES,
-        defaultVoice="eve",
-    ),
-)
+
+def voice_models(registry: ModelRegistry) -> tuple[VoiceModel, ...]:
+    """The picker's models: every realtime model in the core_ai registry, latest first.
+    Voices and reasoning efforts come from each model's ModelInfo."""
+    realtime = [m for m in registry.models() if m.api == "realtime" and m.provider in OSMO_PROVIDERS]
+    return tuple(voice_model(m) for m in sorted(realtime, key=lambda m: (not m.id.endswith(LATEST), m.id)))
+
+
+def voice_model(info: ModelInfo) -> VoiceModel:
+    family, version = info.id.rsplit("-", 1)
+    name = family.replace("-", " ").title()
+    return VoiceModel(
+        id=info.id,
+        provider=OSMO_PROVIDERS[info.provider],
+        label=name if version == LATEST else f"{name} {version}",
+        shortLabel=version.capitalize() if version == LATEST else version,
+        capabilities=Capabilities.model_validate(
+            {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts) or None}
+        ),
+        voices=[Voice(id=v.id, label=v.label, traits=list(v.traits)) for v in info.voices],
+        defaultVoice=info.default_voice or info.voices[0].id,
+    )
+
+
+def core_model_id(model: VoiceModel) -> str:
+    """The core_ai registry id (`namespace:model`) behind a picker model."""
+    return f"{CORE_NAMESPACES[model.provider]}:{model.id}"
+
 
 SET_VOICE_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -160,6 +135,28 @@ SET_VOICE_PARAMETERS: dict[str, Any] = {
     },
     "additionalProperties": False,
 }
+
+
+class SetVoiceTool(Tool):
+    """Checks a voice change against the catalog and hands it to the voice bridge as an
+    `osmo.voice` sink event; the bridge applies it to the live session."""
+
+    def __init__(self, access: ModelAccess) -> None:
+        super().__init__(
+            name=SET_VOICE,
+            description=set_voice_description(voice_models(access.registry)),
+            parameters=SET_VOICE_PARAMETERS,
+            category="osmo",
+        )
+        self.access = access
+
+    async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        error = voice_change_error(self.access.models(), args)
+        if error is not None:
+            return json.dumps({"error": error})
+        change = SetVoiceArgs.model_validate(args).model_dump(exclude_none=True)
+        await sink.emit(OSMO_VOICE, change)
+        return json.dumps({"configured": change, "say": "Confirm the switch in one short line."})
 
 
 def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
@@ -173,77 +170,6 @@ def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
         "Switch the voice, voice model or reasoning effort when the user asks (e.g. 'a deeper voice'). "
         "Choose ids only from this catalog, then confirm in one short line.\n" + "\n".join(lines)
     )
-
-
-# Documented at https://docs.x.ai/developers/rest-api-reference/inference/voice#text-to-speech---list-voices
-XAI_VOICES_URL = "https://api.x.ai/v1/tts/voices"
-VOICE_CATALOG_TTL_S = 3600.0
-VOICE_CATALOG_RETRY_S = 60.0
-
-
-class ListedVoice(BaseModel):
-    voice_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    language: str | None = None
-
-
-class ListedVoices(BaseModel):
-    voices: list[ListedVoice]
-
-
-def voices_from_listing(listing: ListedVoices) -> list[Voice]:
-    """The live roster with labels from xAI; traits only where the docs' voice table describes the id."""
-    documented = {v.id: v for v in DOCUMENTED_VOICES}
-    voices: list[Voice] = []
-    for listed in listing.voices:
-        voice_id = listed.voice_id.lower()
-        if any(v.id == voice_id for v in voices):
-            continue
-        known = documented.get(voice_id)
-        voices.append(Voice(id=voice_id, label=listed.name, traits=known.traits if known else []))
-    return voices
-
-
-class VoiceCatalog:
-    """xAI's built-in voices: `GET /v1/tts/voices` with the server's xAI key, cached for an hour;
-    the documented static roster until a fetch succeeds or when it fails."""
-
-    def __init__(
-        self,
-        client: httpx.AsyncClient,
-        credentials: CredentialStore,
-        url: str = XAI_VOICES_URL,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self.client, self.credentials, self.url, self.clock = client, credentials, url, clock
-        self.models: tuple[VoiceModel, ...] = VOICE_MODELS
-        self.next_fetch = 0.0
-        self.lock = asyncio.Lock()
-
-    async def refresh(self) -> tuple[VoiceModel, ...]:
-        key = self.credentials.secret("xai")
-        if not key or self.clock() < self.next_fetch:
-            return self.models
-        async with self.lock:
-            if self.clock() < self.next_fetch:
-                return self.models
-            voices = await self.fetch(key)
-            self.next_fetch = self.clock() + (VOICE_CATALOG_TTL_S if voices else VOICE_CATALOG_RETRY_S)
-            if voices:
-                self.models = tuple(
-                    m.model_copy(update={"voices": voices}) if m.provider == "xai" and any(v.id == m.defaultVoice for v in voices) else m
-                    for m in VOICE_MODELS
-                )
-        return self.models
-
-    async def fetch(self, key: str) -> list[Voice]:
-        try:
-            response = await self.client.get(self.url, headers={"Authorization": f"Bearer {key}"}, timeout=5.0)
-            response.raise_for_status()
-            return voices_from_listing(ListedVoices.model_validate_json(response.content))
-        except (httpx.HTTPError, ValidationError) as exc:
-            log.warning("voice list unavailable, using the documented roster: %s", type(exc).__name__)
-            return []
 
 
 def find_model(models: tuple[VoiceModel, ...], model_id: str) -> VoiceModel | None:
@@ -316,8 +242,24 @@ def resolve_selection(models: tuple[VoiceModel, ...], args: Mapping[str, Any], c
         return f"{model.id} does not support reasoning effort {change.effort!r}"
     effort = change.effort if change.effort is not None else (current.effort if current.effort in allowed else None)
     if effort is None and allowed:
-        effort = "medium" if "medium" in allowed else allowed[0]
+        effort = default_effort(allowed)
     return Selection(model=model.id, voice=voice.id, effort=effort)
+
+
+def voice_change_error(models: tuple[VoiceModel, ...], args: Mapping[str, Any]) -> str | None:
+    """Why a `set_voice` call could not apply on any model's defaults, or None. The tool has no
+    session in hand, so it checks here and the bridge resolves the change against its selection."""
+    outcomes = [
+        resolve_selection(models, args, Selection(model=m.id, voice=m.defaultVoice, effort=None)) for m in models
+    ]
+    if any(isinstance(outcome, Selection) for outcome in outcomes):
+        return None
+    return next((outcome for outcome in outcomes if isinstance(outcome, str)), "no voice models are available")
+
+
+def default_effort(allowed: list[Effort]) -> Effort:
+    """Medium where offered, else the highest effort (efforts are listed lowest first; xAI defaults to high)."""
+    return "medium" if "medium" in allowed else allowed[-1]
 
 
 def default_selection(models: tuple[VoiceModel, ...], voice: str) -> Selection:
@@ -325,17 +267,10 @@ def default_selection(models: tuple[VoiceModel, ...], voice: str) -> Selection:
     model = models[0]
     allowed = model.capabilities.reasoningEffort or []
     # Computed here too, so a locked first model (which `resolve_selection` refuses) still gets a valid effort.
-    effort: Effort | None = ("medium" if "medium" in allowed else allowed[0]) if allowed else None
+    effort = default_effort(allowed) if allowed else None
     base = Selection(model=model.id, voice=model.defaultVoice, effort=effort)
     picked = resolve_selection(models, {"voice": voice} if any(v.id == voice for v in model.voices) else {}, base)
     return picked if isinstance(picked, Selection) else base
-
-
-def realtime_url_for(base: str, model: str) -> str:
-    """The realtime endpoint with `?model=` set to `model`."""
-    parts = urlsplit(base)
-    query = [(k, v) for k, v in parse_qsl(parts.query) if k != "model"] + [("model", model)]
-    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 class PreviewCache:
@@ -343,15 +278,11 @@ class PreviewCache:
 
     def __init__(
         self,
-        realtime_url: str,
-        credentials: CredentialStore,
+        access: ModelAccess,
         directory: Path | None,
         max_entries: int = PREVIEW_CACHE_MAX,
-        catalog: VoiceCatalog | None = None,
     ) -> None:
-        self.realtime_url = realtime_url
-        self.catalog = catalog
-        self.credentials = credentials
+        self.access = access
         self.directory = directory
         self.max_entries = max_entries
         # LRU of generated audio; locks only live while a key is being fetched.
@@ -360,7 +291,7 @@ class PreviewCache:
         self.waiters: dict[tuple[str, str], int] = {}
 
     def models(self) -> tuple[VoiceModel, ...]:
-        return self.catalog.models if self.catalog is not None else VOICE_MODELS
+        return voice_models(self.access.registry)
 
     def disk_path(self, model: str, voice: str) -> Path | None:
         if self.directory is None:
@@ -404,55 +335,49 @@ class PreviewCache:
         return audio
 
     async def generate(self, model: str, voice: str) -> bytes:
+        """Open a short-lived voice session on the registry and keep the first ~2 s it speaks."""
         entry = find_model(self.models(), model)
-        api_key = self.credentials.secret(entry.provider) if entry is not None else None
-        if not api_key:
+        if entry is None or not self.access.connect(entry.provider):
             raise RuntimeError(f"{entry.provider if entry else model} is not connected on the server")
+        config = VoiceConfig(voice=voice, instructions="Read the user's line aloud, exactly, once.", turn_detection="manual")
+        session_id = f"preview-{secrets.token_hex(6)}"
         audio = bytearray()
         async with asyncio.timeout(PREVIEW_TIMEOUT_S):
-            async with connect(
-                realtime_url_for(self.realtime_url, model),
-                additional_headers={"Authorization": f"Bearer {api_key}"},
-                max_size=None,
-            ) as upstream:
-                setup: list[grok.GrokClientEvent] = [
-                    grok.SessionUpdate(
-                        session=grok.SessionConfig(
-                            voice=voice, instructions="Read the user's line aloud, exactly, once.", tools=[]
-                        )
-                    ),
-                    grok.ConversationItemCreate(item=grok.UserMessageItem(content=[grok.InputText(text=PREVIEW_LINE)])),
-                    grok.ResponseCreate(),
-                ]
-                for event in setup:
-                    await upstream.send(event.model_dump_json(exclude_none=True))
-                try:
-                    async for message in upstream:
-                        if isinstance(message, bytes):
-                            audio.extend(message)
-                        else:
-                            kind, chunk = preview_frame(message)
-                            if kind == "done":
-                                break
-                            audio.extend(chunk)
-                        if len(audio) >= PREVIEW_BYTES:
-                            break
-                except ConnectionClosed:
-                    log.info("preview upstream closed early")
+            session = await self.access.registry.open_voice(core_model_id(entry), config, session_id=session_id)
+            try:
+                await session.add_message("user", PREVIEW_LINE)
+                await session.respond()
+                audio = await preview_audio(session)
+            finally:
+                await self.access.registry.close_voice(session_id, session)
         if not audio:
             raise RuntimeError("the voice model returned no audio")
         return bytes(audio[: PREVIEW_BYTES - PREVIEW_BYTES % 2])
 
 
-def preview_frame(text: str) -> tuple[Literal["audio", "done", "other"], bytes]:
-    """A JSON upstream frame during preview: base64 `response.output_audio.delta` audio (the same
-    encoding session.py decodes), `response.done`, or anything else."""
+async def preview_audio(session: VoiceSession) -> bytearray:
+    """Audio of the session's one response, up to PREVIEW_BYTES. Audio is queued before the
+    response ends, so once it has ended a short quiet gap means everything has been read."""
+    finished = asyncio.Event()
+
+    async def watch() -> None:
+        async for _ in session.response():
+            pass
+        finished.set()
+
+    watcher = asyncio.create_task(watch())
+    audio = bytearray()
+    events = session.events()
     try:
-        kind = grok.EventEnvelope.model_validate_json(text).type
-        if kind == "response.done":
-            return "done", b""
-        if kind == "response.output_audio.delta":
-            return "audio", base64.b64decode(grok.OutputAudioDelta.model_validate_json(text).delta)
-    except (ValidationError, ValueError):
-        log.warning("unparseable preview frame")
-    return "other", b""
+        while len(audio) < PREVIEW_BYTES:
+            try:
+                event = await asyncio.wait_for(anext(events), PREVIEW_DRAIN_S if finished.is_set() else None)
+            except (TimeoutError, StopAsyncIteration):
+                break
+            if isinstance(event, AudioDelta):
+                audio.extend(event.audio)
+            elif isinstance(event, VoiceClosed):
+                break
+    finally:
+        watcher.cancel()
+    return audio

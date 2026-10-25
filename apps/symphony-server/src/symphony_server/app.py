@@ -1,4 +1,9 @@
-"""Symphony server: core_server's run API plus Osmo's realtime WebSocket."""
+"""Symphony server: core_server's run API plus Osmo's voice WebSocket.
+
+Every model call goes through one core_ai ModelRegistry: the voice sessions,
+the harness runs behind each voice turn and `/api/runs`, image generation and
+voice previews.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
+from core_ai import ModelRegistry
 from core_harness import Tool
 from core_server import (
     InProcessRunBackend,
@@ -19,21 +25,27 @@ from core_server import (
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
+from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard
+from symphony_server.memory import MemoryPersistence
+from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import ModelsEvent
-from symphony_server.providers import CredentialStore, create_provider_router, with_locks
+from symphony_server.providers import CredentialStore, create_provider_router
 from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
-from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
+from symphony_server.upstream_log import UpstreamLog
+from symphony_server.voice_bridge import VoiceBridge
+from symphony_server.web_search import WebSearchTool
 from symphony_server.voices import (
     PREVIEW_CLIENTS_MAX,
     PREVIEW_RATE_LIMIT,
     PREVIEW_RATE_WINDOW_S,
     PREVIEW_SAMPLE_RATE,
-    VoiceCatalog,
     KeyedRateLimiter,
     PreviewCache,
+    SetVoiceTool,
+    core_model_id,
     default_selection,
     preview_error,
 )
@@ -41,32 +53,50 @@ from symphony_server.voices import (
 log = logging.getLogger("symphony")
 
 
-def osmo_tools(client: httpx.AsyncClient) -> dict[str, Tool]:
-    tools: list[Tool] = [WeatherTool(client), StockTool(client)]
-    return {tool.name: tool for tool in tools}
+def osmo_tools(settings: Settings, client: httpx.AsyncClient, access: ModelAccess, board: WidgetBoard) -> list[Tool]:
+    """The tools of every category enabled in settings (OSMO_TOOLS)."""
+    tools: list[Tool] = [
+        WebSearchTool(client, settings.exa_api_key),
+        CreateImageTool(access.registry, board, settings.image_model),
+        RenderWidgetTool(board),
+        UpdateWidgetTool(board),
+        SetVoiceTool(access),
+        WeatherTool(client),
+        StockTool(client),
+    ]
+    return [tool for tool in tools if tool.category in settings.tool_categories]
 
 
-def osmo_core_config(settings: Settings, tools: dict[str, Tool]) -> ServerConfig:
-    """core_server config whose text runs share Osmo's tools and prompt."""
-    return build_config(system_prompt=settings.instructions, tools=list(tools.values()))
+def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool]) -> ServerConfig:
+    """core_server config for every run: Osmo's prompt and tools on the shared registry, history in memory."""
+    return build_config(
+        registry=access.registry,
+        model_id=core_model_id(access.models()[0]),
+        system_prompt=settings.instructions,
+        tools=tools,
+        persistence=MemoryPersistence(),
+    )
 
 
 def create_app(
     settings: Settings,
     *,
-    core_config: ServerConfig,
-    tools: dict[str, Tool],
     http_client: httpx.AsyncClient,
     secret_store: SecretStore | None = None,
+    registry: ModelRegistry | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(
         secret_store or open_secret_store(settings),
         env={"XAI_API_KEY": settings.xai_api_key} if settings.xai_api_key else {},
     )
-    catalog = VoiceCatalog(http_client, credentials)
-    previews = PreviewCache(settings.realtime_url, credentials, settings.preview_cache_dir, catalog=catalog)
+    access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url)
+    access.connect("xai")
+    board = WidgetBoard()
+    core_config = osmo_core_config(settings, access, osmo_tools(settings, http_client, access, board))
+    previews = PreviewCache(access, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
+    upstream_log = UpstreamLog(settings.debug_upstream_file) if settings.debug_upstream_file is not None else None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -81,14 +111,14 @@ def create_app(
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:
-        """The picker's registry before any socket is open (the same payload as the `models` event)."""
-        models = with_locks(await catalog.refresh(), credentials)
+        """The picker's models before any socket is open (the same payload as the `models` event)."""
+        models = access.models()
         return ModelsEvent(models=list(models), selection=default_selection(models, settings.voice))
 
     @app.get("/voice-preview")
     async def voice_preview(request: Request, model: str = "", voice: str = "") -> Response:
         """A cached ~2 s PCM16 mono sample of `voice` on `model`; same checks as the `voice.preview` event."""
-        refused = preview_error(await catalog.refresh(), model, voice)
+        refused = preview_error(access.models(), model, voice)
         if refused is not None:
             return Response(refused, status_code=400, media_type="text/plain")
         if not preview_limiter.allow(request.client.host if request.client else "unknown"):
@@ -103,7 +133,17 @@ def create_app(
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
         await websocket.accept()
-        await OsmoSession(websocket, settings, tools, previews, credentials, catalog).run()
+        bridge = VoiceBridge(
+            websocket,
+            core_config=core_config,
+            backend=backend,
+            access=access,
+            board=board,
+            previews=previews,
+            default_voice=settings.voice,
+            upstream_log=upstream_log,
+        )
+        await bridge.run()
 
     if settings.static_dir is not None and settings.static_dir.is_dir():
         app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")

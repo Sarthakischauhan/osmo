@@ -14,10 +14,13 @@ from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
 from conftest import FakeGrok
-from symphony_server import session as session_module
+from core_ai import ModelRegistry
+
+from symphony_server import voice_bridge
 from symphony_server.file_store import FileSecretStore
+from symphony_server.model_access import ModelAccess
 from symphony_server.providers import CredentialStore
-from symphony_server.session import MAX_REPLAY_ITEMS, OsmoSession
+from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.voices import (
     PREVIEW_BYTES,
     PREVIEW_RATE_LIMIT,
@@ -25,7 +28,7 @@ from symphony_server.voices import (
     PreviewCache,
     RateLimiter,
 )
-from test_session import next_event, start
+from test_session import next_event, say, start
 
 FAKE_AUDIO = b"\x05\x00" * (PREVIEW_BYTES // 2)
 
@@ -88,7 +91,8 @@ def test_preview_is_rate_limited_per_socket(client: TestClient, canned_previews:
 
 
 def test_preview_cache_is_lru_bounded_and_drops_idle_locks(canned_previews: list[tuple[str, str]]) -> None:
-    cache = PreviewCache("ws://unused", CredentialStore(FileSecretStore(None), env={"XAI_API_KEY": "key"}), None, max_entries=2)
+    access = ModelAccess(ModelRegistry(), CredentialStore(FileSecretStore(None), env={"XAI_API_KEY": "key"}), "http://unused/v1")
+    cache = PreviewCache(access, None, max_entries=2)
 
     async def run() -> None:
         await cache.get("grok-voice-latest", "eve")
@@ -133,10 +137,10 @@ def test_failed_hot_swap_reports_the_previous_selection(
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
 
-        async def unreachable(self: OsmoSession, model: str) -> None:
-            return None
+        async def unreachable(self: VoiceBridge) -> bool:
+            return False
 
-        monkeypatch.setattr(OsmoSession, "open_upstream", unreachable)
+        monkeypatch.setattr(VoiceBridge, "open_voice", unreachable)
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
         configured = next_event(ws, "voice.configured")
         assert configured["error"].startswith("could not open grok-voice-3.0")
@@ -158,12 +162,13 @@ def test_picker_model_switch_waits_for_the_in_flight_response_then_listens(clien
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
         assert grok.paths.get(timeout=5).endswith("model=grok-voice-latest")
+        say(grok, "Tell me a joke.")
         grok.send({"type": "response.created", "response": {"id": "r1"}})
-        assert next_event(ws, "state")["state"] == "thinking"
+        assert next_event(ws, "transcript.delta")["role"] == "user"
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
         with pytest.raises(queue.Empty):
-            grok.paths.get(timeout=0.4)  # no swap while the response is in flight
-        grok.send({"type": "response.done"})
+            grok.paths.get(timeout=0.4)  # no swap while the turn is running
+        grok.send({"type": "response.done", "response": {"id": "r1"}})
         assert next_event(ws, "state")["state"] == "listening"
         assert grok.paths.get(timeout=5).endswith("model=grok-voice-3.0")
         assert next_event(ws, "voice.configured")["selection"]["model"] == "grok-voice-3.0"
@@ -178,24 +183,6 @@ def test_picker_swap_after_speaking_returns_to_listening(client: TestClient, gro
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
         next_event(ws, "voice.configured")
         assert next_event(ws, "state")["state"] == "listening"
-
-
-def test_hot_swap_replays_only_the_last_items(client: TestClient, grok: FakeGrok) -> None:
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        grok.paths.get(timeout=5)
-        total = MAX_REPLAY_ITEMS + 5
-        for n in range(total):
-            grok.send({"type": "conversation.item.input_audio_transcription.completed", "item_id": f"u{n}", "transcript": f"turn {n}"})
-        for _ in range(total):
-            next_event(ws, "transcript.delta")
-        ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
-        grok.paths.get(timeout=5)
-        texts = [grok.next_of("conversation.item.create")["item"]["content"][0]["text"] for _ in range(MAX_REPLAY_ITEMS)]
-        assert texts[0] == "turn 5" and texts[-1] == f"turn {total - 1}"
-        next_event(ws, "voice.configured")
-        with pytest.raises(queue.Empty):
-            grok.next_of("conversation.item.create", timeout=0.3)
 
 
 # ---------------------------------------------------------------- 6. previews only when quiet; mic paused
@@ -216,7 +203,7 @@ def test_preview_refused_while_the_assistant_speaks(
 def test_mic_is_not_forwarded_while_a_preview_plays(
     client: TestClient, grok: FakeGrok, canned_previews: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(session_module, "PREVIEW_SECONDS", 0.5)
+    monkeypatch.setattr(voice_bridge, "PREVIEW_SECONDS", 0.5)
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
         ask_preview(ws, "p1")

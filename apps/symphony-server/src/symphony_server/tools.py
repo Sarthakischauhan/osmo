@@ -1,8 +1,7 @@
 """Data tools Symphony runs for the voice model.
 
-They are core_harness Tools, so the same objects serve core_server runs
-(`/api/runs`) and the realtime tool loop. Web search is Grok's built-in
-server-side `web_search` tool, enabled in the session config.
+They are core_harness Tools in the `osmo` category, run inside harness runs:
+both voice turns and core_server's `/api/runs`.
 """
 
 from __future__ import annotations
@@ -77,6 +76,7 @@ class WeatherTool(Tool):
                 },
                 "required": ["location"],
             },
+            category="osmo",
         )
         self.client = client
 
@@ -167,6 +167,7 @@ class StockTool(Tool):
                 },
                 "required": ["symbol"],
             },
+            category="osmo",
         )
         self.client = client
 

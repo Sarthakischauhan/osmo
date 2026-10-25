@@ -11,15 +11,12 @@ from typing import Any
 
 import httpx
 import pytest
-from core_ai.registry import ModelRegistry
-from core_server import build_config
 from fastapi.testclient import TestClient
 from websockets.asyncio.server import ServerConnection, serve
 
-from symphony_server.app import create_app, osmo_tools
+from symphony_server.app import create_app
 from symphony_server.secret_store import SecretStore
 from symphony_server.settings import Settings
-from symphony_server.voices import XAI_VOICES_URL
 
 
 class FakeGrok:
@@ -71,8 +68,9 @@ class FakeGrok:
         self.loop.run_until_complete(main())
 
     @property
-    def url(self) -> str:
-        return f"ws://127.0.0.1:{self.port}/v1/realtime?model=grok-voice-latest"
+    def base_url(self) -> str:
+        """xAI's REST base on this server; core_ai opens `ws://…/v1/realtime?model=…` from it."""
+        return f"http://127.0.0.1:{self.port}/v1"
 
     def send(self, message: dict[str, Any] | bytes) -> None:
         payload: str | bytes = message if isinstance(message, bytes) else json.dumps(message)
@@ -109,29 +107,17 @@ def unreachable(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"unexpected network call to {request.url}")
 
 
-def no_voice_list(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(503, json={"error": "voice list unavailable in tests"})
-
-
 def make_client(
     settings: Settings,
     handler: Callable[[httpx.Request], httpx.Response] = unreachable,
-    voices: Callable[[httpx.Request], httpx.Response] = no_voice_list,
     secret_store: SecretStore | None = None,
 ) -> TestClient:
-    """The app with every outbound HTTP call answered by `handler` (by default: fail the test).
-    xAI's voice list is answered by `voices` (by default 503, so the documented roster is used)."""
-
-    def route(request: httpx.Request) -> httpx.Response:
-        return voices(request) if str(request.url) == XAI_VOICES_URL else handler(request)
-
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(route))
-    tools = osmo_tools(http_client)
-    config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
-    return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client, secret_store=secret_store))
+    """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store))
 
 
 @pytest.fixture
 def client(grok: FakeGrok) -> Iterator[TestClient]:
-    with make_client(Settings(xai_api_key="test-key", realtime_url=grok.url)) as test_client:
+    with make_client(Settings(xai_api_key="test-key", xai_base_url=grok.base_url)) as test_client:
         yield test_client

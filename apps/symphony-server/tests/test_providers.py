@@ -55,7 +55,7 @@ def fake() -> FakeProviders:
 
 
 def settings(tmp_path: Path, xai_key: str | None = None) -> Settings:
-    return Settings(xai_api_key=xai_key, realtime_url="ws://127.0.0.1:9/unused", credentials_file=tmp_path / "creds.enc")
+    return Settings(xai_api_key=xai_key, xai_base_url="http://127.0.0.1:9/v1", credentials_file=tmp_path / "creds.enc")
 
 
 def connected(client_get: httpx.Response) -> dict[str, bool]:
@@ -252,7 +252,7 @@ def test_api_through_any_store_never_returns_or_logs_the_secret(
     store: SecretStore = (
         InfisicalSecretStore(backend, FAKE_CONFIG) if store_kind == "infisical" else FakeSecretStore()
     )
-    with make_client(Settings(xai_api_key=None, realtime_url="ws://127.0.0.1:9/unused"), fake, secret_store=store) as client:
+    with make_client(Settings(xai_api_key=None, xai_base_url="http://127.0.0.1:9/v1"), fake, secret_store=store) as client:
         saved = client.post("/providers/openai/key", json={"key": GOOD_KEY})
         listing = client.get("/providers")
         bodies = [saved.text, listing.text, client.get("/voice-models").text]

@@ -79,7 +79,7 @@ def test_a_second_401_is_raised(caplog: pytest.LogCaptureFixture) -> None:
 def test_a_second_401_on_write_is_a_502_without_leaks(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     backend, _, store = stocked()
-    with make_client(Settings(xai_api_key=None, realtime_url="ws://127.0.0.1:9/unused"), secret_store=store) as client:
+    with make_client(Settings(xai_api_key=None, xai_base_url="http://127.0.0.1:9/v1"), secret_store=store) as client:
         assert client.get("/providers").status_code == 200
         backend.unauthorized = 2
         response = client.delete("/providers/openai")

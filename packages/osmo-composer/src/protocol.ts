@@ -50,7 +50,6 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
     voice: z.string().min(1).optional(),
-    instructions: z.string().optional(),
     model: z.string().min(1).optional(),
     effort: effortSchema.optional(),
   }),

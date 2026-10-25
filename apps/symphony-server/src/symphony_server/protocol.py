@@ -21,7 +21,6 @@ class _Event(BaseModel):
 class SessionStart(_Event):
     type: Literal["session.start"]
     voice: str | None = None
-    instructions: str | None = None
     model: str | None = None
     effort: Effort | None = None
 
@@ -124,6 +123,10 @@ class VoicePreviewResult(_Event):
     audio: str | None = None
     error: str | None = None
 
+
+WidgetEvent = Annotated[Union[WidgetRender, WidgetUpdate], Field(discriminator="type")]
+# The payload of an `osmo.widget` run event (see canvas.py).
+widget_event_adapter: TypeAdapter[WidgetEvent] = TypeAdapter(WidgetEvent)
 
 ServerEvent = Union[
     StateEvent, TranscriptDelta, WidgetRender, WidgetUpdate, ModelsEvent, VoiceConfigured, VoicePreviewResult
