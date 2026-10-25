@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from websockets.asyncio.server import ServerConnection, serve
 
 from symphony_server.app import create_app, osmo_tools
+from symphony_server.secret_store import SecretStore
 from symphony_server.settings import Settings
 from symphony_server.voices import XAI_VOICES_URL
 
@@ -116,6 +117,7 @@ def make_client(
     settings: Settings,
     handler: Callable[[httpx.Request], httpx.Response] = unreachable,
     voices: Callable[[httpx.Request], httpx.Response] = no_voice_list,
+    secret_store: SecretStore | None = None,
 ) -> TestClient:
     """The app with every outbound HTTP call answered by `handler` (by default: fail the test).
     xAI's voice list is answered by `voices` (by default 503, so the documented roster is used)."""
@@ -126,7 +128,7 @@ def make_client(
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(route))
     tools = osmo_tools(http_client)
     config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
-    return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client))
+    return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client, secret_store=secret_store))
 
 
 @pytest.fixture

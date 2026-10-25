@@ -55,6 +55,49 @@ The protocol is the boundary between the harness and the experience. Symphony is
 | [Chat SDK](https://github.com/Sarthakischauhan/chat-sdk) | Protocol-aware conversation UI, message rendering, and interactive widgets. |
 | Osmo client | Voice capture and playback, orb state, and composition of the SDK experience. |
 
+## Provider keys: file or Infisical
+
+Provider keys entered in "Connect provider" live only on the server, behind a `SecretStore`
+(`apps/symphony-server/src/symphony_server/secret_store.py`). `OSMO_SECRET_STORE` picks one:
+
+- `file` (default, for local use): one Fernet-encrypted file, `OSMO_CREDENTIALS_FILE`
+  (default `~/.config/osmo/credentials.enc`), with the key from `OSMO_CREDENTIALS_KEY` or, when that is
+  unset, a key generated once into `<OSMO_CREDENTIALS_FILE>.key` (mode 0600).
+- `infisical`: an [Infisical](https://infisical.com) project, through the official Python SDK
+  (`infisicalsdk`) with machine-identity universal auth.
+
+The API never returns a key: `GET /providers` reports only whether each provider is connected, and
+no key is ever logged.
+
+### Infisical setup
+
+1. Create a project in Infisical (Secrets Management) and note its project ID (Project Settings) and
+   the environment slug to use, for example `prod`.
+2. Create a machine identity: Organization > Access Control > Machine Identities > Create. Universal
+   Auth is configured by default; under it, select Add Client Secret and copy the Client ID and Client Secret.
+3. Add the identity to the project (Project > Access Control > Machine Identities > Add Machine
+   Identity to Project) with a role that can read, create, edit and delete secrets and folders under `/osmo`.
+4. Run the server with:
+
+   | Variable | Value |
+   | --- | --- |
+   | `OSMO_SECRET_STORE` | `infisical` |
+   | `INFISICAL_CLIENT_ID` | the identity's Client ID |
+   | `INFISICAL_CLIENT_SECRET` | its Client Secret |
+   | `INFISICAL_PROJECT_ID` | the project ID |
+   | `INFISICAL_ENV` | the environment slug, e.g. `prod` |
+   | `INFISICAL_SITE_URL` | optional; default `https://app.infisical.com` (EU cloud: `https://eu.infisical.com`, or your self-hosted URL) |
+
+The server logs in once at startup. Make the identity's Access Token TTL (Universal Auth configuration)
+cover the server's uptime, or restart it before the token expires.
+
+### Folder layout
+
+Each credential is a folder `/osmo/<owner>/<provider>` holding one secret, `KEY`, whose comment is the
+auth kind (`api_key` or `oauth`); for example `/osmo/default/openrouter/KEY`. The owner is always
+`default` today; it is a parameter of the store so per-user keys can come later. The folders are
+created on first use, and disconnecting a provider deletes its folder.
+
 ## Contributing
 
 ## Development

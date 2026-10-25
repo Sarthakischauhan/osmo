@@ -3,6 +3,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+from pydantic import SecretStr
+
+from symphony_server.infisical_store import DEFAULT_SITE_URL, InfisicalConfig
 
 DEFAULT_REALTIME_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
@@ -36,6 +41,9 @@ class Settings:
     # Encrypted provider credentials (providers.py); None keeps them in memory only.
     credentials_file: Path | None = None
     credentials_key: str | None = None
+    # Which SecretStore holds them (OSMO_SECRET_STORE); `infisical` needs `infisical` set.
+    secret_store: Literal["file", "infisical"] = "file"
+    infisical: InfisicalConfig | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -49,4 +57,29 @@ class Settings:
             preview_cache_dir=Path(previews) if previews else None,
             credentials_file=Path(os.getenv("OSMO_CREDENTIALS_FILE") or DEFAULT_CREDENTIALS_FILE).expanduser(),
             credentials_key=os.getenv("OSMO_CREDENTIALS_KEY") or None,
+            secret_store="infisical" if infisical_selected() else "file",
+            infisical=infisical_from_env() if infisical_selected() else None,
         )
+
+
+INFISICAL_REQUIRED = ("INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET", "INFISICAL_PROJECT_ID", "INFISICAL_ENV")
+
+
+def infisical_selected() -> bool:
+    choice = os.getenv("OSMO_SECRET_STORE") or "file"
+    if choice not in ("file", "infisical"):
+        raise ValueError(f"OSMO_SECRET_STORE must be 'file' or 'infisical', not {choice!r}")
+    return choice == "infisical"
+
+
+def infisical_from_env() -> InfisicalConfig:
+    missing = [name for name in INFISICAL_REQUIRED if not os.getenv(name)]
+    if missing:
+        raise ValueError(f"OSMO_SECRET_STORE=infisical needs {', '.join(missing)}")
+    return InfisicalConfig(
+        client_id=os.environ["INFISICAL_CLIENT_ID"],
+        client_secret=SecretStr(os.environ["INFISICAL_CLIENT_SECRET"]),
+        project_id=os.environ["INFISICAL_PROJECT_ID"],
+        environment=os.environ["INFISICAL_ENV"],
+        site_url=os.getenv("INFISICAL_SITE_URL") or DEFAULT_SITE_URL,
+    )

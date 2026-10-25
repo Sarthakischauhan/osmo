@@ -15,7 +15,10 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from conftest import make_client
+from fakes import FakeInfisical, FakeSecretStore
+from symphony_server.infisical_store import InfisicalSecretStore
 from symphony_server.providers import PROVIDERS
+from symphony_server.secret_store import SecretStore
 from symphony_server.settings import Settings
 
 GOOD_KEY = "sk-good-0123456789-secret"
@@ -238,3 +241,24 @@ def test_vercel_valid_key_connects_and_secret_never_appears_in_responses_or_logs
     assert all(GOOD_KEY not in body for body in bodies)
     assert GOOD_KEY not in caplog.text
     assert GOOD_KEY.encode() not in (tmp_path / "creds.enc").read_bytes()
+
+
+@pytest.mark.parametrize("store_kind", ["infisical", "fake"])
+def test_api_through_any_store_never_returns_or_logs_the_secret(
+    store_kind: str, fake: FakeProviders, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    backend = FakeInfisical()
+    store: SecretStore = (
+        InfisicalSecretStore(backend, backend.project_id, backend.environment) if store_kind == "infisical" else FakeSecretStore()
+    )
+    with make_client(Settings(xai_api_key=None, realtime_url="ws://127.0.0.1:9/unused"), fake, secret_store=store) as client:
+        saved = client.post("/providers/openai/key", json={"key": GOOD_KEY})
+        listing = client.get("/providers")
+        bodies = [saved.text, listing.text, client.get("/voice-models").text]
+        assert saved.status_code == 204 and connected(listing)["openai"] is True
+        assert set(listing.json()["providers"][0]) == {"id", "label", "authKinds", "connected"}
+        assert client.delete("/providers/openai").status_code == 204
+        assert connected(client.get("/providers"))["openai"] is False
+    assert all(GOOD_KEY not in body for body in bodies)
+    assert GOOD_KEY not in caplog.text

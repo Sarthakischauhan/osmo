@@ -15,6 +15,7 @@ dependencies = [
     "pydantic>=2.9",
     "python-dotenv>=1.0",
     "cryptography>=43",
+    "infisicalsdk>=1.0.17",
 ]
 
 [project.scripts]
@@ -39,3 +40,9 @@ testpaths = ["tests"]
 strict = true
 packages = ["symphony_server"]
 mypy_path = "src"
+
+# infisicalsdk ships no type information (no py.typed); the store types the slice it uses as Protocols.
+[[tool.mypy.overrides]]
+module = ["infisical_sdk", "infisical_sdk.*"]
+ignore_missing_imports = true
+

@@ -8,4 +8,6 @@
 symphony-core @ git+https://github.com/Sarthakischauhan/symphony@a335957c53009d6c4f82e8176a9abf975b736979#subdirectory=core_ai
 symphony-harness @ git+https://github.com/Sarthakischauhan/symphony@a335957c53009d6c4f82e8176a9abf975b736979#subdirectory=core_harness
 core-server @ file:../../vendor/core_server
+# Infisical SDK for OSMO_SECRET_STORE=infisical, pinned to the version the store is tested against.
+infisicalsdk==1.0.18
 -e .[dev]

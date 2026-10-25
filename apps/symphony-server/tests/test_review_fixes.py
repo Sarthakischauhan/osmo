@@ -15,6 +15,7 @@ from starlette.testclient import WebSocketTestSession
 
 from conftest import FakeGrok
 from symphony_server import session as session_module
+from symphony_server.file_store import FileSecretStore
 from symphony_server.providers import CredentialStore
 from symphony_server.session import MAX_REPLAY_ITEMS, OsmoSession
 from symphony_server.voices import (
@@ -87,7 +88,7 @@ def test_preview_is_rate_limited_per_socket(client: TestClient, canned_previews:
 
 
 def test_preview_cache_is_lru_bounded_and_drops_idle_locks(canned_previews: list[tuple[str, str]]) -> None:
-    cache = PreviewCache("ws://unused", CredentialStore(None, env={"XAI_API_KEY": "key"}), None, max_entries=2)
+    cache = PreviewCache("ws://unused", CredentialStore(FileSecretStore(None), env={"XAI_API_KEY": "key"}), None, max_entries=2)
 
     async def run() -> None:
         await cache.get("grok-voice-latest", "eve")

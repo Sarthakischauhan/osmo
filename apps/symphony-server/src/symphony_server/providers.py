@@ -1,39 +1,28 @@
 """Provider credentials: which providers are connected, and the endpoints that connect them.
 
-Secrets live only here, on the server. They are kept as `SecretStr` in memory, written to disk
-Fernet-encrypted, and never logged or returned by any endpoint: `GET /providers` reports only
-whether a provider is connected.
-
-Storage (see CONTRIBUTING.md):
-- `OSMO_CREDENTIALS_FILE`: the encrypted file (default `~/.config/osmo/credentials.enc`).
-- `OSMO_CREDENTIALS_KEY`: a Fernet key. When unset, a key is generated once into
-  `<OSMO_CREDENTIALS_FILE>.key` (mode 0600) and reused.
+Secrets live only on the server, in a `SecretStore` (secret_store.py; `OSMO_SECRET_STORE` picks the
+Fernet file or Infisical). They are kept as `SecretStr` in memory and never logged or returned by any
+endpoint: `GET /providers` reports only whether a provider is connected.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import logging
-import os
 import secrets
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
 
 import httpx
-from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from symphony_server.secret_store import DEFAULT_OWNER, AuthKind, ProviderAuth, SecretStore, SecretStoreError
 from symphony_server.voices import VoiceModel
 
 log = logging.getLogger("symphony.providers")
-
-AuthKind = Literal["api_key", "oauth"]
 
 # A started OAuth flow must come back within this many seconds.
 OAUTH_TTL_S = 600.0
@@ -90,73 +79,19 @@ def find_provider(provider_id: str) -> ProviderSpec | None:
     return next((p for p in PROVIDERS if p.id == provider_id), None)
 
 
-class ProviderAuth(BaseModel):
-    """One provider's credential. `secret` is a `SecretStr`, so it never shows in a repr or log."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    kind: AuthKind
-    secret: SecretStr
-
-
-_stored_adapter: TypeAdapter[dict[str, ProviderAuth]] = TypeAdapter(dict[str, ProviderAuth])
-
-
 class CredentialStore:
-    """Provider credentials, Fernet-encrypted at rest in `path` (memory only when `path` is None)."""
+    """One owner's view of a `SecretStore`, plus keys that come from the environment (never stored)."""
 
-    def __init__(self, path: Path | None, key: str | None = None, env: dict[str, str] | None = None) -> None:
-        self.path = path
-        self.env = env or {}
-        self.fernet = Fernet(key.encode() if key else self.keyfile_key())
-        self.auths: dict[str, ProviderAuth] = self.load()
-
-    def keyfile_key(self) -> bytes:
-        if self.path is None:
-            return Fernet.generate_key()
-        keyfile = self.path.with_name(self.path.name + ".key")
-        if keyfile.is_file():
-            return keyfile.read_bytes().strip()
-        keyfile.parent.mkdir(parents=True, exist_ok=True)
-        key = Fernet.generate_key()
-        descriptor = os.open(keyfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(key)
-        return key
-
-    def load(self) -> dict[str, ProviderAuth]:
-        if self.path is None or not self.path.is_file():
-            return {}
-        try:
-            return _stored_adapter.validate_json(self.fernet.decrypt(self.path.read_bytes()))
-        except InvalidToken:
-            log.error("credentials file %s could not be decrypted with the configured key; ignoring it", self.path)
-            return {}
-
-    def save(self) -> None:
-        if self.path is None:
-            return
-        plain = {pid: {"provider": a.provider, "kind": a.kind, "secret": a.secret.get_secret_value()} for pid, a in self.auths.items()}
-        token = self.fernet.encrypt(json.dumps(plain).encode())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        staging = self.path.with_name(self.path.name + ".tmp")
-        descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(token)
-        staging.replace(self.path)
-
-    def put(self, auth: ProviderAuth) -> None:
-        self.auths[auth.provider] = auth
-        self.save()
-
-    def delete(self, provider_id: str) -> None:
-        if self.auths.pop(provider_id, None) is not None:
-            self.save()
+    def __init__(self, store: SecretStore, env: dict[str, str] | None = None, owner: str = DEFAULT_OWNER) -> None:
+        self.store, self.env, self.owner = store, env or {}, owner
 
     def secret(self, provider_id: str) -> str | None:
         """The key to call `provider_id` with: a stored one, else its environment variable."""
-        stored = self.auths.get(provider_id)
+        try:
+            stored = self.store.get(self.owner, provider_id)
+        except SecretStoreError as exc:
+            log.warning("could not read the %s credential: %s", provider_id, exc)
+            stored = None
         if stored is not None:
             return stored.secret.get_secret_value()
         spec = find_provider(provider_id)
@@ -164,6 +99,20 @@ class CredentialStore:
 
     def connected(self, provider_id: str) -> bool:
         return bool(self.secret(provider_id))
+
+    def save(self, auth: ProviderAuth) -> None:
+        try:
+            self.store.put(self.owner, auth)
+        except SecretStoreError as exc:
+            log.error("could not store the %s credential: %s", auth.provider, exc)
+            raise HTTPException(502, "the credential store is unavailable") from None
+
+    def remove(self, provider_id: str) -> None:
+        try:
+            self.store.delete(self.owner, provider_id)
+        except SecretStoreError as exc:
+            log.error("could not delete the %s credential: %s", provider_id, exc)
+            raise HTTPException(502, "the credential store is unavailable") from None
 
 
 def with_locks(models: tuple[VoiceModel, ...], store: CredentialStore) -> tuple[VoiceModel, ...]:
@@ -259,12 +208,12 @@ def create_provider_router(store: CredentialStore, client: httpx.AsyncClient) ->
         if response.status_code != 200:
             log.info("%s rejected a key (HTTP %d)", spec.id, response.status_code)
             raise HTTPException(400, f"{spec.label} rejected this key")
-        store.put(ProviderAuth(provider=spec.id, kind="api_key", secret=body.key))
+        store.save(ProviderAuth(provider=spec.id, kind="api_key", secret=body.key))
         log.info("%s connected with an API key", spec.id)
 
     @router.delete("/{provider_id}", status_code=204)
     async def disconnect(provider_id: str) -> None:
-        store.delete(provider_or_404(provider_id).id)
+        store.remove(provider_or_404(provider_id).id)
 
     @router.get("/{provider_id}/oauth/start")
     async def oauth_start(provider_id: str, request: Request) -> RedirectResponse:
@@ -302,7 +251,7 @@ def create_provider_router(store: CredentialStore, client: httpx.AsyncClient) ->
             log.info("%s refused the OAuth code (HTTP %d)", spec.id, response.status_code)
             raise HTTPException(400, f"{spec.label} refused the authorization")
         key = OAuthKeyResponse.model_validate_json(response.content).key
-        store.put(ProviderAuth(provider=spec.id, kind="oauth", secret=key))
+        store.save(ProviderAuth(provider=spec.id, kind="oauth", secret=key))
         log.info("%s connected with OAuth", spec.id)
         return RedirectResponse(f"/#connected={spec.id}", status_code=303)
 

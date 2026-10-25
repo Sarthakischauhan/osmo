@@ -12,6 +12,7 @@ import pytest
 from websockets.asyncio.server import ServerConnection, serve
 
 from conftest import make_client
+from symphony_server.file_store import FileSecretStore
 from symphony_server.providers import CredentialStore
 from symphony_server.settings import Settings
 from symphony_server.voices import (
@@ -88,7 +89,7 @@ async def test_catalog_refetches_after_its_ttl() -> None:
     now = [0.0]
     upstream = VoiceList()
     client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
-    catalog = VoiceCatalog(client, CredentialStore(None, env={"XAI_API_KEY": KEY}), clock=lambda: now[0])
+    catalog = VoiceCatalog(client, CredentialStore(FileSecretStore(None), env={"XAI_API_KEY": KEY}), clock=lambda: now[0])
     await catalog.refresh()
     now[0] = 3599.0
     await catalog.refresh()
@@ -116,7 +117,7 @@ async def test_every_documented_voice_previews(voice: str) -> None:
 
     async with serve(handler, "127.0.0.1", 0) as server:
         port = next(iter(server.sockets)).getsockname()[1]
-        cache = PreviewCache(f"ws://127.0.0.1:{port}/v1/realtime", CredentialStore(None, env={"XAI_API_KEY": KEY}), None)
+        cache = PreviewCache(f"ws://127.0.0.1:{port}/v1/realtime", CredentialStore(FileSecretStore(None), env={"XAI_API_KEY": KEY}), None)
         audio = await cache.get("grok-voice-latest", voice)
     assert asked == [voice]
     assert len(audio) == PREVIEW_BYTES

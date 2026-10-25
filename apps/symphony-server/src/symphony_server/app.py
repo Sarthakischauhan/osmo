@@ -21,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 
 from symphony_server.protocol import ModelsEvent
 from symphony_server.providers import CredentialStore, create_provider_router, with_locks
+from symphony_server.secret_backends import open_secret_store
+from symphony_server.secret_store import SecretStore
 from symphony_server.session import OsmoSession
 from symphony_server.settings import Settings
 from symphony_server.tools import StockTool, WeatherTool
@@ -55,10 +57,10 @@ def create_app(
     core_config: ServerConfig,
     tools: dict[str, Tool],
     http_client: httpx.AsyncClient,
+    secret_store: SecretStore | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(
-        settings.credentials_file,
-        settings.credentials_key,
+        secret_store or open_secret_store(settings),
         env={"XAI_API_KEY": settings.xai_api_key} if settings.xai_api_key else {},
     )
     catalog = VoiceCatalog(http_client, credentials)
