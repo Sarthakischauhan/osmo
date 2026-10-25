@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import SecretStr
 
-from symphony_server.infisical_store import DEFAULT_SITE_URL, InfisicalConfig
+from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
 
 DEFAULT_REALTIME_URL = "wss://api.x.ai/v1/realtime?model=grok-voice-latest"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
@@ -82,4 +82,5 @@ def infisical_from_env() -> InfisicalConfig:
         project_id=os.environ["INFISICAL_PROJECT_ID"],
         environment=os.environ["INFISICAL_ENV"],
         site_url=os.getenv("INFISICAL_SITE_URL") or DEFAULT_SITE_URL,
+        cache_ttl_s=float(os.getenv("INFISICAL_CACHE_TTL_S") or DEFAULT_CACHE_TTL_S),
     )

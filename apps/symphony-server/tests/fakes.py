@@ -5,8 +5,24 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from infisical_sdk import InfisicalError
+from infisical_sdk.infisical_requests import APIError
 
+from pydantic import SecretStr
+
+from symphony_server.infisical_client import InfisicalConfig
 from symphony_server.secret_store import ProviderAuth
+
+FAKE_CONFIG = InfisicalConfig(
+    client_id="machine-id", client_secret=SecretStr("machine-secret-value"), project_id="proj-1", environment="prod"
+)
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
 
 
 class FakeSecretStore:
@@ -46,6 +62,11 @@ def join(parent: str, name: str) -> str:
     return f"{parent.rstrip('/')}/{name}"
 
 
+@dataclass(frozen=True)
+class FakeLogin:
+    expiresIn: int
+
+
 @dataclass
 class FakeInfisical:
     """Folders and secrets of one project environment. Like Infisical, writing needs an existing folder."""
@@ -56,12 +77,32 @@ class FakeInfisical:
     values: dict[tuple[str, str], FakeSecret] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     fail: bool = False
+    # Token lifetime handed out by login, logins made, and how many upcoming calls answer 401.
+    expires_in: int = 3600
+    logins: int = 0
+    unauthorized: int = 0
 
     def check(self, call: str, project_id: str, environment_slug: str) -> None:
         self.calls.append(call)
         assert (project_id, environment_slug) == (self.project_id, self.environment)
         if self.fail:
             raise InfisicalError("Infisical is down")
+        if self.unauthorized > 0:
+            self.unauthorized -= 1
+            raise APIError("Token expired", 401, {"message": "Token expired"})
+
+    @property
+    def auth(self) -> FakeInfisical:
+        return self
+
+    @property
+    def universal_auth(self) -> FakeInfisical:
+        return self
+
+    def login(self, *, client_id: str, client_secret: str) -> FakeLogin:
+        assert (client_id, client_secret) == (FAKE_CONFIG.client_id, FAKE_CONFIG.client_secret.get_secret_value())
+        self.logins += 1
+        return FakeLogin(self.expires_in)
 
     @property
     def secrets(self) -> FakeInfisical:

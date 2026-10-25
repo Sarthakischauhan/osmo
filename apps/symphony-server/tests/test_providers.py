@@ -15,7 +15,7 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from conftest import make_client
-from fakes import FakeInfisical, FakeSecretStore
+from fakes import FAKE_CONFIG, FakeInfisical, FakeSecretStore
 from symphony_server.infisical_store import InfisicalSecretStore
 from symphony_server.providers import PROVIDERS
 from symphony_server.secret_store import SecretStore
@@ -250,7 +250,7 @@ def test_api_through_any_store_never_returns_or_logs_the_secret(
     caplog.set_level(logging.DEBUG)
     backend = FakeInfisical()
     store: SecretStore = (
-        InfisicalSecretStore(backend, backend.project_id, backend.environment) if store_kind == "infisical" else FakeSecretStore()
+        InfisicalSecretStore(backend, FAKE_CONFIG) if store_kind == "infisical" else FakeSecretStore()
     )
     with make_client(Settings(xai_api_key=None, realtime_url="ws://127.0.0.1:9/unused"), fake, secret_store=store) as client:
         saved = client.post("/providers/openai/key", json={"key": GOOD_KEY})

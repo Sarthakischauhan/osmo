@@ -86,10 +86,17 @@ no key is ever logged.
    | `INFISICAL_CLIENT_SECRET` | its Client Secret |
    | `INFISICAL_PROJECT_ID` | the project ID |
    | `INFISICAL_ENV` | the environment slug, e.g. `prod` |
+   | `INFISICAL_CACHE_TTL_S` | optional; seconds to cache reads, default `60` |
    | `INFISICAL_SITE_URL` | optional; default `https://app.infisical.com` (EU cloud: `https://eu.infisical.com`, or your self-hosted URL) |
 
-The server logs in once at startup. Make the identity's Access Token TTL (Universal Auth configuration)
-cover the server's uptime, or restart it before the token expires.
+The server logs in on first use and tracks the token's lifetime (`expiresIn`): it logs in again
+60 seconds (or 10% of the lifetime, if shorter) before the token expires, and if Infisical still
+answers 401 it logs in again and retries the call once; a second failure returns 502. No restart is
+needed when tokens expire, but the Client Secret itself must stay valid (TTL 0 means it never expires).
+
+Each owner's credentials are cached in memory for `INFISICAL_CACHE_TTL_S` seconds (default 60),
+and the cache is dropped on every connect or disconnect. A key changed directly in Infisical shows
+up within that window.
 
 ### Folder layout
 

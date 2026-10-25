@@ -10,9 +10,10 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import make_client
-from fakes import FakeInfisical, FakeSecretStore
+from fakes import FAKE_CONFIG, FakeInfisical, FakeSecretStore
 from symphony_server.file_store import FileSecretStore
-from symphony_server.infisical_store import InfisicalConfig, InfisicalSecretStore
+from symphony_server.infisical_client import InfisicalConfig
+from symphony_server.infisical_store import InfisicalSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore, secret_path
 from symphony_server.settings import Settings
 
@@ -26,7 +27,7 @@ def file_store(tmp_path: Path) -> Reopen:
 
 def infisical_store(tmp_path: Path) -> Reopen:
     backend = FakeInfisical()
-    return lambda: InfisicalSecretStore(backend, backend.project_id, backend.environment)
+    return lambda: InfisicalSecretStore(backend, FAKE_CONFIG)
 
 
 def fake_store(tmp_path: Path) -> Reopen:
@@ -88,7 +89,7 @@ def test_secret_never_shows_in_a_repr(reopen: Reopen) -> None:
 
 def test_infisical_uses_one_folder_per_owner_and_provider() -> None:
     backend = FakeInfisical()
-    store = InfisicalSecretStore(backend, backend.project_id, backend.environment)
+    store = InfisicalSecretStore(backend, FAKE_CONFIG)
     store.put(DEFAULT_OWNER, auth("xai"))
     assert secret_path(DEFAULT_OWNER, "xai") == "/osmo/default/xai"
     assert backend.folder_paths == {"/", "/osmo", "/osmo/default", "/osmo/default/xai"}
@@ -97,20 +98,10 @@ def test_infisical_uses_one_folder_per_owner_and_provider() -> None:
     assert backend.folder_paths == {"/", "/osmo", "/osmo/default"} and backend.values == {}
 
 
-def test_infisical_reads_once_then_serves_from_memory() -> None:
-    backend = FakeInfisical()
-    InfisicalSecretStore(backend, backend.project_id, backend.environment).put(DEFAULT_OWNER, auth())
-    store = InfisicalSecretStore(backend, backend.project_id, backend.environment)
-    backend.calls.clear()
-    for _ in range(3):
-        assert store.get(DEFAULT_OWNER, "openai") == auth()
-    assert backend.calls == ["list /", "list /osmo", "list /osmo/default", "get /osmo/default/openai/KEY"]
-
-
 def test_infisical_outage_is_a_502_and_leaks_nothing(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     backend = FakeInfisical()
-    store = InfisicalSecretStore(backend, backend.project_id, backend.environment)
+    store = InfisicalSecretStore(backend, FAKE_CONFIG)
     store.put(DEFAULT_OWNER, auth("xai"))
     backend.fail = True
     with make_client(Settings(xai_api_key=None, realtime_url="ws://127.0.0.1:9/unused"), secret_store=store) as client:
