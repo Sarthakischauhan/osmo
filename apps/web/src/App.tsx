@@ -211,6 +211,12 @@ export function App() {
                   <span className="avatar" aria-hidden />
                   <div className="assistant-body">
                     <MessageContent parts={assistantParts(turn)} />
+                    {/* One element per widget keyed by its server id, so React state follows the
+                        widget itself and never shifts when text or activity rows are added above. */}
+                    {turn.widgets.map((widget) => {
+                      const part = toWidgetPart(widget.id, widget.type, widget.props);
+                      return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
+                    })}
                   </div>
                 </div>
               ),
@@ -267,7 +273,7 @@ function Clock({ since }: { since: number }) {
   return <span className="clock">{`${mm}:${ss}`}</span>;
 }
 
-/** One assistant turn as chat-sdk message parts: the spoken line, tool activity rows, then widgets. */
+/** One assistant turn's spoken line and tool activity rows as chat-sdk parts; widgets render separately, keyed by id. */
 function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[] {
   const parts: AgentPart[] = [];
   if (turn.text) parts.push({ type: "text", text: turn.text });
@@ -280,9 +286,5 @@ function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[]
       state: activity.done ? "output-available" : "input-available",
     }),
   );
-  for (const widget of turn.widgets) {
-    const part = toWidgetPart(widget.id, widget.type, widget.props);
-    if (part) parts.push(part);
-  }
   return parts;
 }

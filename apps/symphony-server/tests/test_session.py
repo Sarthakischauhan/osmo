@@ -131,7 +131,7 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
         call(grok, "render_widget", WEATHER_CARD, "c1")
         assert next_event(ws, "state") == {"type": "state", "state": "working", "detail": "Running render_widget"}
         rendered = next_event(ws, "widget.render")["widget"]
-        assert re.fullmatch(r"w\d+-[0-9a-f]{8}", rendered["id"])
+        assert re.fullmatch(r"w-[0-9a-f]{32}", rendered["id"])
         assert rendered == {"id": rendered["id"], "type": "card", "props": WEATHER_CARD["props"]}
         assert tool_output(grok) == {"shown": 'card "Palo Alto weekend"', "id": rendered["id"]}
 
@@ -194,6 +194,24 @@ def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeG
         call(grok, "update_widget", {"id": second, "patch": {"title": "Only the new one"}}, "c8")
         assert next_event(ws, "widget.update") == {"type": "widget.update", "id": second, "patch": {"title": "Only the new one"}}
         assert tool_output(grok)["id"] == second
+
+
+def test_two_renders_then_update_second_leaves_first_unchanged(client: TestClient, grok: FakeGrok) -> None:
+    stock = {"type": "card", "props": {"title": "TSLA", "body": "Loading"}}
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        first = render(ws, grok, WEATHER_CARD, "r1")
+        second = render(ws, grok, stock, "r2")
+        assert first != second
+
+        say(grok, "update the price")
+        call(grok, "update_widget", {"id": second, "patch": {"title": "TSLA $251"}}, "u1")
+        assert next_event(ws, "widget.update") == {"type": "widget.update", "id": second, "patch": {"title": "TSLA $251"}}
+        assert tool_output(grok) == {"shown": 'updated card "TSLA $251"', "id": second}
+
+        # An empty patch reports the stored widget as is: the first card kept its own title.
+        call(grok, "update_widget", {"id": first, "patch": {}}, "u2")
+        assert tool_output(grok) == {"shown": f'updated card "{WEATHER_CARD["props"]["title"]}"', "id": first}
 
 
 def test_widget_ids_never_repeat_across_sessions(client: TestClient, grok: FakeGrok) -> None:

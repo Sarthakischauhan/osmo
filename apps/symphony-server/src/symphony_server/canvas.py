@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
-import secrets
+import uuid
 from collections import OrderedDict
 from typing import Any
 
@@ -44,14 +44,14 @@ class WidgetBoard:
     def __init__(self, max_widgets: int = WIDGETS_MAX) -> None:
         self.max_widgets = max_widgets
         self.widgets: OrderedDict[str, Widget] = OrderedDict()
-        self.count = 0
 
     def get(self, widget_id: str) -> Widget | None:
         return self.widgets.get(widget_id)
 
     def add(self, widget: Widget) -> str:
-        self.count += 1
-        widget_id = f"w{self.count}-{secrets.token_hex(4)}"
+        # A fresh uuid per render: unique within and across sessions, so an update can only
+        # reach its own widget.
+        widget_id = f"w-{uuid.uuid4().hex}"
         self.put(widget_id, widget)
         return widget_id
 
