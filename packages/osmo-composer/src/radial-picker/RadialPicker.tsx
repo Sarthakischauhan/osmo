@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
 import {
+  optionTokenVars,
   CLOSE_GRACE_MS,
   FREEZE_AFTER_SNAP_MS,
   PREVIEW_HOVER_MS,
@@ -17,6 +18,7 @@ import {
   polar,
   slotAngle,
 } from "./geometry";
+import { RadialOption } from "./option";
 import { type ProviderIcon, ProviderMark, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
 import { type Context, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
 
@@ -481,22 +483,19 @@ export function RadialPicker({
           className="rp-slot"
           style={{ left: x, top: y, opacity: presence.opacity, transform: `translate(-50%, -50%) scale(${presence.scale})` }}
         >
-          <div
+          <RadialOption
             id={`${ids}-${key}-${index}`}
-            role="option"
-            aria-selected={isSelected}
-            aria-haspopup={key === "providers" && groups[index]?.locked ? "dialog" : undefined}
-            data-locked={key === "providers" && groups[index]?.locked ? true : undefined}
+            ring={key}
+            selected={isSelected}
+            locked={key === "providers" && groups[index]?.locked === true}
             title={label.tip === undefined ? label.title : undefined}
-            aria-label={label.tip === undefined ? label.title : `${label.text}, ${label.tip}`}
-            className={`rp-item rp-${key}`}
-            data-state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
-            style={{ animationDelay: `${Math.max(0, Math.round(position)) * 20}ms` }}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() => commit(key, index)}
+            label={label.tip === undefined ? label.title : `${label.text}, ${label.tip}`}
+            state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
+            delayMs={Math.max(0, Math.round(position)) * 20}
+            onCommit={() => commit(key, index)}
           >
             {label.node}
-          </div>
+          </RadialOption>
           {label.tip !== undefined && isHover && (
             <span className="rp-tip" role="tooltip" data-for={`${ids}-${key}-${index}`}>
               {label.tip}
@@ -542,7 +541,7 @@ export function RadialPicker({
       data-open={state.depth > 0}
       data-depth={state.depth}
       data-reduced-motion={reduced}
-      style={{ width, height: cy + orbSize / 2 + 64 }}
+      style={{ ...optionTokenVars(), width, height: cy + orbSize / 2 + 64 }}
       onPointerMove={(event) => {
         const point = localPoint(event.clientX, event.clientY);
         if (!point) return;

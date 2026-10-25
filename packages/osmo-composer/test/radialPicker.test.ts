@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { type VoiceModel, voiceModelSchema } from "../src/protocol";
 import {
   BANDS,
+  OPTION_TOKENS,
+  optionTokenVars,
   FREEZE_AFTER_SNAP_MS,
   RINGS,
   clampOffset,
@@ -124,12 +126,12 @@ describe("hit bands", () => {
     const ring = (r: number, angle: number) => hitTest(0, 0, at(r, angle).x, at(r, angle).y).ring;
     expect(ring(30, 90)).toBe("orb");
     expect(ring(BANDS.orb, 90)).toBe("providers");
-    expect(ring(119, 90)).toBe("providers");
-    expect(ring(120, 90)).toBe("models");
-    expect(ring(197, 90)).toBe("models");
-    expect(ring(198, 120)).toBe("voices");
-    expect(ring(274, 60)).toBe("effort");
-    expect(ring(275, 60)).toBe("none");
+    expect(ring(BANDS.r1 - 1, 90)).toBe("providers");
+    expect(ring(BANDS.r1, 90)).toBe("models");
+    expect(ring(BANDS.r2 - 1, 90)).toBe("models");
+    expect(ring(BANDS.r2, 120)).toBe("voices");
+    expect(ring(BANDS.r3 - 1, 60)).toBe("effort");
+    expect(ring(BANDS.r3, 60)).toBe("none");
     expect(hitTest(0, 0, 0, 100).ring).toBe("none");
   });
   it("finds the item under an angle at an offset", () => {
@@ -332,7 +334,7 @@ describe("model ring labels", () => {
   it("never truncates the model ring text and styles the id tooltip without a border", () => {
     const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
     const rule = (sel: string) => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
-    expect(rule(".rp-models")).not.toMatch(/ellipsis|max-width|overflow/);
+    expect(rule(".rp-option")).not.toMatch(/ellipsis|max-width|overflow/);
     expect(rule(".rp-tip")).toMatch(/border: 0/);
     expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
   });
@@ -359,6 +361,35 @@ describe("a 28-voice ring (xAI's documented roster)", () => {
     const presence = itemPresence(RINGS.voices, -0.25);
     expect(presence.opacity).toBeGreaterThan(0);
     expect(presence.opacity).toBeLessThan(1);
+  });
+});
+
+describe("one option primitive", () => {
+  const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+  it("has no per-ring option rules", () => {
+    expect(css).not.toMatch(/\.rp-(providers|models|voices|effort)\b/);
+    expect(css).not.toMatch(/\[data-ring/);
+    expect(css).not.toMatch(/\.rp-item\b/);
+  });
+  it("sizes .rp-option only from the shared tokens", () => {
+    const option = css.match(/\.rp-option \{([^}]*)\}/)?.[1] ?? "";
+    expect(option).toMatch(/height: var\(--rp-option-height\)/);
+    expect(option).toMatch(/padding: 0 var\(--rp-option-padding-x\)/);
+    expect(option).toMatch(/border-radius: var\(--rp-option-radius\)/);
+    expect(option).toMatch(/gap: var\(--rp-option-gap\)/);
+    expect(option).toMatch(/border: var\(--picker-border\)/);
+  });
+  it("declares the same token values in CSS as OPTION_TOKENS", () => {
+    for (const [name, value] of Object.entries(optionTokenVars())) {
+      expect(css).toContain(`${name}: ${value};`);
+    }
+  });
+  it("keeps hit areas at least 44px and spaces rings by --rp-ring-spacing", () => {
+    expect(OPTION_TOKENS.hit).toBeGreaterThanOrEqual(44);
+    expect(OPTION_TOKENS.height).toBeLessThanOrEqual(OPTION_TOKENS.hit);
+    expect(RINGS.models.radius - RINGS.providers.radius).toBe(OPTION_TOKENS.ringSpacing);
+    expect(RINGS.voices.radius - RINGS.models.radius).toBe(OPTION_TOKENS.ringSpacing);
+    expect(RINGS.effort.radius).toBe(RINGS.voices.radius);
   });
 });
 

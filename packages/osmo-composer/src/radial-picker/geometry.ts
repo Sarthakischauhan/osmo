@@ -18,16 +18,60 @@ export interface RingSpec {
   step: number;
 }
 
+/**
+ * Shared option tokens, in px. The single source for both the CSS (`--rp-option-*` and
+ * `--rp-ring-spacing`, set on `.rp` from here) and the ring radii below.
+ */
+export const OPTION_TOKENS = {
+  /** Visual height of every option (pills and provider logo chips alike). */
+  height: 36,
+  /** Horizontal padding inside every option. */
+  paddingX: 12,
+  /** Corner radius (full pill). */
+  radius: 999,
+  /** Gap between an option's label and its glyph (logo, meter, playing bars). */
+  gap: 6,
+  fontSize: 12,
+  /** Minimum hit-area height; the option's ::before extends the visual height to this. */
+  hit: 44,
+  /** Radial distance from one ring to the next. */
+  ringSpacing: 76,
+} as const;
+
+/** Radius of the innermost (providers) ring; every other ring is `ringSpacing` further out. */
+const R1 = 84;
+const R2 = R1 + OPTION_TOKENS.ringSpacing;
+const R3 = R1 + 2 * OPTION_TOKENS.ringSpacing;
+
 export const RINGS: Record<RingKey, RingSpec> = {
-  // 44px discs 40° apart at r = 84 leave a ~14px gap between neighbours.
-  providers: { key: "providers", radius: 84, low: 30, high: 150, visible: 4, step: 40 },
-  models: { key: "models", radius: 160, low: 20, high: 160, visible: 5, step: 35 },
-  voices: { key: "voices", radius: 235, low: 130, high: 170, visible: 3, step: 20 },
-  effort: { key: "effort", radius: 235, low: 14, high: 46, visible: 3, step: 16 },
+  // 44px-wide logo chips (12 + 20 + 12) 40° apart at r = 84 leave a ~13px gap between neighbours.
+  providers: { key: "providers", radius: R1, low: 30, high: 150, visible: 4, step: 40 },
+  models: { key: "models", radius: R2, low: 20, high: 160, visible: 5, step: 35 },
+  voices: { key: "voices", radius: R3, low: 130, high: 170, visible: 3, step: 20 },
+  effort: { key: "effort", radius: R3, low: 14, high: 46, visible: 3, step: 16 },
 };
 
-/** Radius bands for hit-testing, in px from the orb centre. */
-export const BANDS = { orb: 56, r1: 120, r2: 198, r3: 275 } as const;
+/** Radius bands for hit-testing, in px from the orb centre: halfway between rings. */
+export const BANDS = {
+  orb: 56,
+  r1: R1 + OPTION_TOKENS.ringSpacing / 2,
+  r2: R2 + OPTION_TOKENS.ringSpacing / 2,
+  r3: R3 + OPTION_TOKENS.ringSpacing / 2,
+} as const;
+
+/** The tokens as CSS custom properties for `.rp`'s inline style. */
+export function optionTokenVars(): Record<`--rp-${string}`, string> {
+  const t = OPTION_TOKENS;
+  return {
+    "--rp-option-height": `${t.height}px`,
+    "--rp-option-padding-x": `${t.paddingX}px`,
+    "--rp-option-radius": `${t.radius}px`,
+    "--rp-option-gap": `${t.gap}px`,
+    "--rp-option-font-size": `${t.fontSize}px`,
+    "--rp-option-hit": `${t.hit}px`,
+    "--rp-ring-spacing": `${t.ringSpacing}px`,
+  };
+}
 
 export const SNAP_IDLE_MS = 120;
 export const SNAP_MS = 180;
