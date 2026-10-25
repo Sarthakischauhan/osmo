@@ -32,6 +32,8 @@ class Settings:
     instructions: str = DEFAULT_INSTRUCTIONS
     static_dir: Path | None = None
     preview_cache_dir: Path | None = None
+    # Set by OSMO_DEBUG_UPSTREAM=1: where raw upstream traffic is captured (see upstream_log).
+    debug_upstream_file: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -43,4 +45,9 @@ class Settings:
             voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,
             preview_cache_dir=Path(previews) if previews else None,
+            debug_upstream_file=(
+                Path(os.getenv("OSMO_DEBUG_UPSTREAM_FILE", "osmo-upstream.jsonl"))
+                if os.getenv("OSMO_DEBUG_UPSTREAM") == "1"
+                else None
+            ),
         )

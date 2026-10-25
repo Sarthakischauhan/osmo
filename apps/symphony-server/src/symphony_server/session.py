@@ -44,6 +44,7 @@ from symphony_server.protocol import (
     client_event_adapter,
 )
 from symphony_server.settings import Settings
+from symphony_server.upstream_log import UpstreamLog
 from symphony_server.voices import (
     SET_VOICE,
     SET_VOICE_PARAMETERS,
@@ -128,6 +129,7 @@ class OsmoSession:
         self.selection = default_selection(VOICE_MODELS, settings.voice)
         self.instructions = settings.instructions
         self.settings = settings
+        self.upstream_log = None if settings.debug_upstream_file is None else UpstreamLog(settings.debug_upstream_file)
         self.tools = tools
         self.upstream: ClientConnection | None = None
         self.pump: asyncio.Task[None] | None = None
@@ -229,7 +231,10 @@ class OsmoSession:
         if upstream is None:
             return
         try:
-            await upstream.send(event.model_dump_json(exclude_none=True))
+            payload = event.model_dump_json(exclude_none=True)
+            if self.upstream_log is not None and isinstance(event, grok.SessionUpdate):
+                self.upstream_log.record("out", payload)
+            await upstream.send(payload)
         except ConnectionClosed:
             if upstream is self.upstream:
                 await self.upstream_lost()
@@ -409,6 +414,8 @@ class OsmoSession:
     async def pump_upstream(self, upstream: ClientConnection) -> None:
         try:
             async for message in upstream:
+                if self.upstream_log is not None:
+                    self.upstream_log.record("in", message)
                 if isinstance(message, bytes):
                     await self.assistant_audio(message)
                 else:

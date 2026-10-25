@@ -66,3 +66,5 @@ make install
 ```
 
 Set `XAI_API_KEY` in your environment for live voice sessions. Run the web client and Python server in separate terminals with `make dev-web` and `make dev-server`. Use `make typecheck`, `make test`, and `make build` for frontend checks and production build; `make server-check` and `make server-test` run Python checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+To capture a model misbehaviour, run the server with `OSMO_DEBUG_UPSTREAM=1` (optionally `OSMO_DEBUG_UPSTREAM_FILE=path`, default `./osmo-upstream.jsonl`): every upstream event and each `session.update` is appended as redacted JSONL (audio as byte lengths, no keys or headers).
