@@ -260,17 +260,19 @@ def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGro
 def test_empty_transcript_cancels_instead_of_running_a_turn(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
+        # Server VAD answers the committed noise before its (empty) transcript arrives.
+        grok.send({"type": "input_audio_buffer.speech_stopped"})
         grok.send({"type": "response.created", "response": {"id": "r1"}})
-        say(grok, "   ")
+        grok.send({"type": "conversation.item.input_audio_transcription.completed", "item_id": "u", "transcript": "   "})
         assert grok.next_json()["type"] == "response.cancel"
 
 
 def test_missing_key_is_reported_not_faked(grok: FakeGrok) -> None:
-    with make_client(Settings(xai_api_key=None, xai_base_url=grok.base_url)) as client:
+    with make_client(Settings(xai_base_url=grok.base_url)) as client:
         with client.websocket_connect("/ws") as ws:
             ws.send_text(json.dumps({"type": "session.start"}))
             state = next_event(ws, "state")
-            assert state == {"type": "state", "state": "idle", "detail": "xAI is not connected: add a key or set XAI_API_KEY on the server"}
+            assert state == {"type": "state", "state": "idle", "detail": "xAI is not connected: add a key in Providers"}
 
 
 def test_picker_models_are_the_registry_realtime_models(client: TestClient) -> None:

@@ -40,7 +40,7 @@ jobs:
       - run: docker build -t osmo .
       - name: container serves the web app and core_server health
         run: |
-          # Any provider key satisfies core_server's registry at boot; this one is a dummy that never leaves the runner.
-          docker run -d --name osmo -p 8080:8080 -e XAI_API_KEY=ci-dummy osmo
+          # No provider key: the server boots with every model locked until one is added in Providers.
+          docker run -d --name osmo -p 8080:8080 osmo
           for i in $(seq 1 30); do curl -fsS localhost:8080/api/health && break; sleep 1; done
           curl -fsS localhost:8080/ | grep -q '<div id="root">'

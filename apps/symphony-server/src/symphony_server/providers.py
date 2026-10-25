@@ -46,9 +46,6 @@ class ProviderSpec:
     # One cheap authenticated GET that succeeds only with a valid key.
     validate_url: str
     oauth: OAuthSpec | None = None
-    # Environment variable that also connects this provider (it is never written to the file).
-    # Only xAI has one: it is the key Osmo has always booted with.
-    env_var: str | None = None
 
     @property
     def kinds(self) -> list[AuthKind]:
@@ -59,7 +56,7 @@ class ProviderSpec:
 # (https://openrouter.ai/docs/use-cases/oauth-pkce). xAI, OpenAI and Vercel only issue API keys from
 # their consoles, so they are api_key only.
 PROVIDERS: tuple[ProviderSpec, ...] = (
-    ProviderSpec(id="xai", label="xAI", validate_url="https://api.x.ai/v1/models", env_var="XAI_API_KEY"),
+    ProviderSpec(id="xai", label="xAI", validate_url="https://api.x.ai/v1/models"),
     ProviderSpec(id="openai", label="OpenAI", validate_url="https://api.openai.com/v1/models"),
     ProviderSpec(
         id="openrouter",
@@ -80,22 +77,19 @@ def find_provider(provider_id: str) -> ProviderSpec | None:
 
 
 class CredentialStore:
-    """One owner's view of a `SecretStore`, plus keys that come from the environment (never stored)."""
+    """One owner's view of a `SecretStore`: the only source of provider keys."""
 
-    def __init__(self, store: SecretStore, env: dict[str, str] | None = None, owner: str = DEFAULT_OWNER) -> None:
-        self.store, self.env, self.owner = store, env or {}, owner
+    def __init__(self, store: SecretStore, owner: str = DEFAULT_OWNER) -> None:
+        self.store, self.owner = store, owner
 
     def secret(self, provider_id: str) -> str | None:
-        """The key to call `provider_id` with: a stored one, else its environment variable."""
+        """The stored key to call `provider_id` with, if any."""
         try:
             stored = self.store.get(self.owner, provider_id)
         except SecretStoreError as exc:
             log.warning("could not read the %s credential: %s", provider_id, exc)
             stored = None
-        if stored is not None:
-            return stored.secret.get_secret_value()
-        spec = find_provider(provider_id)
-        return self.env.get(spec.env_var) if spec is not None and spec.env_var else None
+        return stored.secret.get_secret_value() if stored is not None else None
 
     def connected(self, provider_id: str) -> bool:
         return bool(self.secret(provider_id))

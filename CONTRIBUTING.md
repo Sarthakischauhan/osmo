@@ -6,7 +6,7 @@ Thanks for contributing to Osmo. The project pairs Symphony's durable agent harn
 
 - [Bun](https://bun.sh/) and [uv](https://docs.astral.sh/uv/)
 - Python 3.11 or newer and [uv](https://docs.astral.sh/uv/)
-- An `XAI_API_KEY` for live voice sessions (tests do not require one)
+- An xAI API key for live voice sessions, added in the app's Providers panel (tests do not require one)
 
 ## Setup
 
@@ -20,7 +20,7 @@ The `--no-sources` option preserves the vendored `core_server`'s upstream worksp
 
 ## Run locally
 
-Start the Python server from the repository root with `make dev-server` (set `XAI_API_KEY` in the environment). It listens on `127.0.0.1:8787` by default. In a separate terminal, start the web client with `make dev-web` (or `make dev`):
+Start the Python server from the repository root with `make dev-server` (then add your xAI key under Providers). It listens on `127.0.0.1:8787` by default. In a separate terminal, start the web client with `make dev-web` (or `make dev`):
 
 ```sh
 make dev-web
@@ -37,7 +37,7 @@ Models of a provider without a credential arrive `locked`; picking one in the ra
 - `OSMO_CREDENTIALS_FILE`: Fernet-encrypted credentials file (default `~/.config/osmo/credentials.enc`).
 - `OSMO_CREDENTIALS_KEY`: Fernet key for that file. When unset, one is generated once into
   `<OSMO_CREDENTIALS_FILE>.key` (mode 0600); losing it makes the stored keys unreadable.
-- `XAI_API_KEY` still connects xAI without being written to the file.
+- Keys come only from this store: the `XAI_API_KEY` environment variable is not read.
 - `OSMO_SECRET_STORE=infisical` stores them in Infisical instead; see "Provider keys: file or
   Infisical" in the README.
 

@@ -9,7 +9,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from core_ai import ModelRegistry
+from core_ai.voice import VoiceRegistry
 
 from conftest import FakeGrok
 from symphony_server.voices import (
@@ -68,7 +68,7 @@ def test_models_event_on_connect(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         event = next_event(ws, "models")
         assert event["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
-        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models(ModelRegistry())[0].voices]
+        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models(VoiceRegistry())[0].voices]
 
 
 def frames_until(grok: FakeGrok, *types: str) -> list[dict[str, Any]]:
@@ -189,7 +189,7 @@ def test_voice_models_endpoint_serves_the_registry_before_any_socket(client: Tes
 
 
 def test_model_ring_short_labels_are_distinct_and_served(client: TestClient) -> None:
-    shorts = [m.shortLabel for m in voice_models(ModelRegistry())]
+    shorts = [m.shortLabel for m in voice_models(VoiceRegistry())]
     assert shorts == ["Latest", "3.0"]
     assert len(set(shorts)) == len(shorts)
     served = client.get("/voice-models").json()["models"]

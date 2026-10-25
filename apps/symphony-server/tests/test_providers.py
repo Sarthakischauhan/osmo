@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -54,8 +55,8 @@ def fake() -> FakeProviders:
     return FakeProviders()
 
 
-def settings(tmp_path: Path, xai_key: str | None = None) -> Settings:
-    return Settings(xai_api_key=xai_key, xai_base_url="http://127.0.0.1:9/v1", credentials_file=tmp_path / "creds.enc")
+def settings(tmp_path: Path) -> Settings:
+    return Settings(xai_base_url="http://127.0.0.1:9/v1", credentials_file=tmp_path / "creds.enc")
 
 
 def connected(client_get: httpx.Response) -> dict[str, bool]:
@@ -98,11 +99,14 @@ def test_valid_key_connects_unlocks_models_and_delete_disconnects(tmp_path: Path
             assert all(m["locked"] is True for m in event["models"])
 
 
-def test_env_key_connects_xai_without_touching_the_file(tmp_path: Path, fake: FakeProviders) -> None:
-    with make_client(settings(tmp_path, xai_key="env-key-secret"), fake) as client:
-        assert connected(client.get("/providers"))["xai"] is True
-        assert all(m["locked"] is False for m in client.get("/voice-models").json()["models"])
-    assert not (tmp_path / "creds.enc").exists()
+def test_xai_api_key_in_the_environment_is_not_a_credential(
+    tmp_path: Path, fake: FakeProviders, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keys come only from the SecretStore (the provider auth flow), never from the environment."""
+    monkeypatch.setenv("XAI_API_KEY", "env-key-secret")
+    with make_client(replace(Settings.from_env(), credentials_file=tmp_path / "creds.enc"), fake) as client:
+        assert connected(client.get("/providers"))["xai"] is False
+        assert all(m["locked"] is True for m in client.get("/voice-models").json()["models"])
 
 
 def test_unknown_provider_is_404(tmp_path: Path, fake: FakeProviders) -> None:
@@ -197,12 +201,12 @@ def test_credentials_are_encrypted_at_rest_and_survive_a_restart(tmp_path: Path,
 
 def test_explicit_key_from_env_is_used_and_a_wrong_key_cannot_read_the_file(tmp_path: Path, fake: FakeProviders) -> None:
     key = Fernet.generate_key().decode()
-    with make_client(Settings(xai_api_key=None, credentials_file=tmp_path / "c.enc", credentials_key=key), fake) as client:
+    with make_client(Settings(credentials_file=tmp_path / "c.enc", credentials_key=key), fake) as client:
         assert client.post("/providers/xai/key", json={"key": GOOD_KEY}).status_code == 204
     assert not (tmp_path / "c.enc.key").exists()
     assert GOOD_KEY.encode() in Fernet(key.encode()).decrypt((tmp_path / "c.enc").read_bytes())
     other = Fernet.generate_key().decode()
-    with make_client(Settings(xai_api_key=None, credentials_file=tmp_path / "c.enc", credentials_key=other), fake) as client:
+    with make_client(Settings(credentials_file=tmp_path / "c.enc", credentials_key=other), fake) as client:
         assert connected(client.get("/providers"))["xai"] is False
 
 
@@ -252,7 +256,7 @@ def test_api_through_any_store_never_returns_or_logs_the_secret(
     store: SecretStore = (
         InfisicalSecretStore(backend, FAKE_CONFIG) if store_kind == "infisical" else FakeSecretStore()
     )
-    with make_client(Settings(xai_api_key=None, xai_base_url="http://127.0.0.1:9/v1"), fake, secret_store=store) as client:
+    with make_client(Settings(xai_base_url="http://127.0.0.1:9/v1"), fake, secret_store=store) as client:
         saved = client.post("/providers/openai/key", json={"key": GOOD_KEY})
         listing = client.get("/providers")
         bodies = [saved.text, listing.text, client.get("/voice-models").text]

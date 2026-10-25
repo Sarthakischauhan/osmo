@@ -38,7 +38,6 @@ DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo")
 
 @dataclass(frozen=True)
 class Settings:
-    xai_api_key: str | None
     # xAI's REST base; core_ai derives the realtime WebSocket from it.
     xai_base_url: str = DEFAULT_XAI_BASE_URL
     voice: str = "eve"
@@ -64,7 +63,6 @@ class Settings:
         static = os.getenv("OSMO_STATIC_DIR")
         previews = os.getenv("OSMO_PREVIEW_CACHE_DIR")
         return cls(
-            xai_api_key=os.getenv("XAI_API_KEY") or None,
             xai_base_url=os.getenv("XAI_BASE_URL", DEFAULT_XAI_BASE_URL),
             voice=os.getenv("OSMO_VOICE", "eve"),
             static_dir=Path(static) if static else None,

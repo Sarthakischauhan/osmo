@@ -12,10 +12,13 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from websockets.asyncio.server import ServerConnection, serve
 
 from symphony_server.app import create_app
-from symphony_server.secret_store import SecretStore
+from core_ai.voice import VoiceRegistry
+from symphony_server.file_store import FileSecretStore
+from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
 from symphony_server.settings import Settings
 
 
@@ -111,13 +114,21 @@ def make_client(
     settings: Settings,
     handler: Callable[[httpx.Request], httpx.Response] = unreachable,
     secret_store: SecretStore | None = None,
+    voices: VoiceRegistry | None = None,
 ) -> TestClient:
     """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store))
+    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store, voices=voices))
+
+
+def xai_key_store(key: str = "test-key") -> SecretStore:
+    """An in-memory SecretStore holding an xAI key, as the provider auth flow would leave it."""
+    store = FileSecretStore(None)
+    store.put(DEFAULT_OWNER, ProviderAuth(provider="xai", kind="api_key", secret=SecretStr(key)))
+    return store
 
 
 @pytest.fixture
 def client(grok: FakeGrok) -> Iterator[TestClient]:
-    with make_client(Settings(xai_api_key="test-key", xai_base_url=grok.base_url)) as test_client:
+    with make_client(Settings(xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
         yield test_client

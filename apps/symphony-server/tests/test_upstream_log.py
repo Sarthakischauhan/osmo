@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeGrok, make_client
+from conftest import FakeGrok, make_client, xai_key_store
 from symphony_server.settings import Settings
 from test_session import say, start, wait_listening
 
@@ -17,7 +17,7 @@ API_KEY = "xai-super-secret-key"
 
 
 def run_session(grok: FakeGrok, settings: Settings) -> None:
-    with make_client(settings) as client, client.websocket_connect("/ws") as ws:
+    with make_client(settings, secret_store=xai_key_store(API_KEY)) as client, client.websocket_connect("/ws") as ws:
         start(ws, grok)
         say(grok, "hello")
         grok.send({"type": "response.created", "response": {"id": "r1"}})
@@ -35,7 +35,6 @@ def read_lines(path: Path) -> list[dict[str, Any]]:
 def test_off_by_default_writes_nothing(grok: FakeGrok, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OSMO_DEBUG_UPSTREAM", raising=False)
-    monkeypatch.setenv("XAI_API_KEY", API_KEY)
     monkeypatch.setenv("XAI_BASE_URL", grok.base_url)
     settings = Settings.from_env()
     assert settings.debug_upstream_file is None
@@ -47,7 +46,6 @@ def test_on_writes_redacted_jsonl(grok: FakeGrok, tmp_path: Path, monkeypatch: p
     target = tmp_path / "capture.jsonl"
     monkeypatch.setenv("OSMO_DEBUG_UPSTREAM", "1")
     monkeypatch.setenv("OSMO_DEBUG_UPSTREAM_FILE", str(target))
-    monkeypatch.setenv("XAI_API_KEY", API_KEY)
     monkeypatch.setenv("XAI_BASE_URL", grok.base_url)
     run_session(grok, Settings.from_env())
 

@@ -1,6 +1,6 @@
 """Voice model registry, the `set_voice` contract, and cached 2 s voice previews.
 
-The picker's models are the core_ai registry's realtime models (sent as the
+The picker's models are the core_ai voice registry's realtime models (sent as the
 `models` event); `set_voice` and `session.configure` are validated against the
 same list, so the picker, the voice command and the server can never disagree.
 """
@@ -11,15 +11,14 @@ import asyncio
 import hashlib
 import json
 import logging
-import secrets
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from core_ai import ModelInfo, ModelRegistry
-from core_ai.voice import AudioDelta, VoiceClosed, VoiceConfig, VoiceSession
+from core_ai import ModelInfo
+from core_ai.voice import AudioDelta, VoiceClosed, VoiceConfig, VoiceRegistry, VoiceSession
 from core_harness import EventSink, Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -98,10 +97,10 @@ OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in
 LATEST = "latest"
 
 
-def voice_models(registry: ModelRegistry) -> tuple[VoiceModel, ...]:
-    """The picker's models: every realtime model in the core_ai registry, latest first.
+def voice_models(voices: VoiceRegistry) -> tuple[VoiceModel, ...]:
+    """The picker's models: every realtime model in the core_ai voice registry, latest first.
     Voices and reasoning efforts come from each model's ModelInfo."""
-    realtime = [m for m in registry.models() if m.api == "realtime" and m.provider in OSMO_PROVIDERS]
+    realtime = [m for m in voices.models() if m.api == "realtime" and m.provider in OSMO_PROVIDERS]
     return tuple(voice_model(m) for m in sorted(realtime, key=lambda m: (not m.id.endswith(LATEST), m.id)))
 
 
@@ -144,7 +143,7 @@ class SetVoiceTool(Tool):
     def __init__(self, access: ModelAccess) -> None:
         super().__init__(
             name=SET_VOICE,
-            description=set_voice_description(voice_models(access.registry)),
+            description=set_voice_description(voice_models(access.voices)),
             parameters=SET_VOICE_PARAMETERS,
             category="osmo",
         )
@@ -291,7 +290,7 @@ class PreviewCache:
         self.waiters: dict[tuple[str, str], int] = {}
 
     def models(self) -> tuple[VoiceModel, ...]:
-        return voice_models(self.access.registry)
+        return voice_models(self.access.voices)
 
     def disk_path(self, model: str, voice: str) -> Path | None:
         if self.directory is None:
@@ -335,21 +334,20 @@ class PreviewCache:
         return audio
 
     async def generate(self, model: str, voice: str) -> bytes:
-        """Open a short-lived voice session on the registry and keep the first ~2 s it speaks."""
+        """Open a short-lived voice session on the voice registry and keep the first ~2 s it speaks."""
         entry = find_model(self.models(), model)
         if entry is None or not self.access.connect(entry.provider):
             raise RuntimeError(f"{entry.provider if entry else model} is not connected on the server")
         config = VoiceConfig(voice=voice, instructions="Read the user's line aloud, exactly, once.", turn_detection="manual")
-        session_id = f"preview-{secrets.token_hex(6)}"
         audio = bytearray()
         async with asyncio.timeout(PREVIEW_TIMEOUT_S):
-            session = await self.access.registry.open_voice(core_model_id(entry), config, session_id=session_id)
+            session = await self.access.voices.open(core_model_id(entry), config)
             try:
                 await session.add_message("user", PREVIEW_LINE)
                 await session.respond()
                 audio = await preview_audio(session)
             finally:
-                await self.access.registry.close_voice(session_id, session)
+                await session.aclose()
         if not audio:
             raise RuntimeError("the voice model returned no audio")
         return bytes(audio[: PREVIEW_BYTES - PREVIEW_BYTES % 2])

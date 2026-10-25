@@ -17,5 +17,5 @@ RUN uv venv /venv && uv pip install --no-sources -p /venv -r requirements.txt
 COPY --from=web /repo/apps/web/dist /srv/web
 ENV OSMO_STATIC_DIR=/srv/web PORT=8080
 EXPOSE 8080
-# XAI_API_KEY must come from the host's secret store at runtime; it is never baked in.
+# Provider keys are added at runtime through Providers and kept in the secret store; none is baked in.
 CMD ["sh", "-c", "/venv/bin/python -m symphony_server --host 0.0.0.0 --port ${PORT}"]

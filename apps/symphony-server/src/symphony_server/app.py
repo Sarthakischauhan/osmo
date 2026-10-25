@@ -1,8 +1,8 @@
 """Symphony server: core_server's run API plus Osmo's voice WebSocket.
 
-Every model call goes through one core_ai ModelRegistry: the voice sessions,
-the harness runs behind each voice turn and `/api/runs`, image generation and
-voice previews.
+Every model call goes through core_ai package calls: the VoiceRegistry for voice
+sessions and previews, the ModelRegistry for the harness runs behind `/api/runs`,
+and image generation. Both get their keys from the SecretStore (ModelAccess).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from core_ai import ModelRegistry
+from core_ai.voice import VoiceRegistry
 from core_harness import Tool
 from core_server import (
     InProcessRunBackend,
@@ -75,7 +76,16 @@ def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool])
         system_prompt=settings.instructions,
         tools=tools,
         persistence=MemoryPersistence(),
+        context_limits=voice_context_limits(access.voices),
     )
+
+
+def voice_context_limits(voices: VoiceRegistry) -> dict[str, int]:
+    """Each voice model's window, from its ModelInfo, keyed by the run's model id. The harness
+    compacts a run's history (core_server's KeepSystemRecentCompactor) against the window of the
+    model that run is on, so the first turn after a switch to a smaller model compacts to its
+    budget; the full history stays in MemoryPersistence until then."""
+    return {m.full_id: m.context_limit for m in voices.catalog.list() if m.context_limit is not None}
 
 
 def create_app(
@@ -84,12 +94,10 @@ def create_app(
     http_client: httpx.AsyncClient,
     secret_store: SecretStore | None = None,
     registry: ModelRegistry | None = None,
+    voices: VoiceRegistry | None = None,
 ) -> FastAPI:
-    credentials = CredentialStore(
-        secret_store or open_secret_store(settings),
-        env={"XAI_API_KEY": settings.xai_api_key} if settings.xai_api_key else {},
-    )
-    access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url)
+    credentials = CredentialStore(secret_store or open_secret_store(settings))
+    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(), credentials, settings.xai_base_url)
     access.connect("xai")
     board = WidgetBoard()
     core_config = osmo_core_config(settings, access, osmo_tools(settings, http_client, access, board))

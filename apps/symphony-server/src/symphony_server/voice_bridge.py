@@ -4,7 +4,9 @@ core_server harness runs on the other.
 The voice session is audio in and out only. Every user turn (a finished spoken
 utterance or a widget tap) is a harness run on this bridge's session id, so the
 harness owns history (MemoryPersistence), tools and the model call; the run's
-model call reaches the open voice session through core_ai's session registry.
+model call reaches the open voice session through its core_harness voice link
+(`voice_links`, keyed by this bridge's session id). The bridge owns turns: it
+records what the session heard on the link and decides which run answers.
 The bridge follows each run's events and turns them into Osmo wire events.
 """
 
@@ -28,7 +30,7 @@ from core_ai.voice import (
     VoiceEvent,
     VoiceSession,
 )
-from core_harness import ControlPlaneEvent
+from core_harness import ControlPlaneEvent, VoiceLink, voice_links
 from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRequest, RunSubmission, ServerConfig
 from pydantic import BaseModel, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -113,6 +115,7 @@ class VoiceBridge:
         # Every run of this browser socket shares it, so the harness keeps one conversation.
         self.session_id = f"osmo-{secrets.token_hex(8)}"
         self.voice: VoiceSession | None = None
+        self.link: VoiceLink | None = None
         self.selection = default_selection(access.models(), default_voice)
         self.state: OsmoState = "idle"
         self.state_detail: str | None = None
@@ -203,7 +206,7 @@ class VoiceBridge:
         if self.voice is not None:
             return
         if not self.access.connect("xai"):
-            await self.set_state("idle", "xAI is not connected: add a key or set XAI_API_KEY on the server")
+            await self.set_state("idle", "xAI is not connected: add a key in Providers")
             return
         picked = resolve_selection(
             self.access.models(), event.model_dump(include={"model", "voice", "effort"}, exclude_none=True), self.selection
@@ -230,20 +233,19 @@ class VoiceBridge:
         )
 
     async def open_voice(self) -> bool:
-        """Open a voice session on the selected model under this bridge's session id (replacing
-        any earlier one there) and start reading it."""
+        """Open a voice session on the selected model, link it to this bridge's session id
+        (replacing any earlier link there) and start reading it."""
         model = self.model()
         if not self.access.connect(model.provider):
             return False
         observer = self.upstream_log.record if self.upstream_log is not None else None
         try:
-            voice = await self.access.registry.open_voice(
-                core_model_id(model), self.voice_config(), session_id=self.session_id, observer=observer
-            )
+            voice = await self.access.voices.open(core_model_id(model), self.voice_config(), observer)
         except (OSError, WebSocketException) as exc:
             log.error("could not open the voice session on %s: %s", model.id, exc)
             return False
         self.voice = voice
+        self.link = voice_links.open(self.session_id, core_model_id(model), voice)
         log.info("voice session open (model %s)", model.id)
         self.spawn(self.pump(voice))
         return True
@@ -251,18 +253,23 @@ class VoiceBridge:
     async def swap(self) -> bool:
         """Move onto a newly selected model. The model is fixed per voice session, so open a new
         one; it is seeded from the harness history on the next turn. The browser socket stays."""
-        old = self.voice
+        old, old_link = self.voice, self.link
         if not await self.open_voice():
             return False
+        if old_link is not None:
+            voice_links.close(self.session_id, old_link)
         if old is not None:
-            await self.access.registry.close_voice(self.session_id, old)
+            await old.aclose()
         return True
 
     async def close_voice(self) -> None:
         voice, self.voice = self.voice, None
+        link, self.link = self.link, None
         await self.cancel_run()
+        if link is not None:
+            voice_links.close(self.session_id, link)
         if voice is not None:
-            await self.access.registry.close_voice(self.session_id, voice)
+            await voice.aclose()
 
     async def voice_lost(self) -> None:
         await self.close_voice()
@@ -284,6 +291,8 @@ class VoiceBridge:
             await self.set_state("thinking")
         elif isinstance(event, UserTranscript):
             if event.text:
+                if self.link is not None and self.link.session is voice:
+                    self.link.heard.append(event.text)  # spoken as audio: the run must not resend it
                 await self.emit(TranscriptDelta(role="user", text=event.text))
                 await self.submit(event.text)
             else:
