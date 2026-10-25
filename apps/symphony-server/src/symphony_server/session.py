@@ -82,8 +82,6 @@ MAX_REPLAY_ITEMS = 40
 SWAP_WAIT_S = 15.0
 # Voice previews are played only while the assistant is quiet.
 PREVIEW_STATES: tuple[OsmoState, ...] = ("idle", "listening")
-# A model that writes its tool call as text instead of emitting a function call item.
-TOOL_CALL_TAG = "<tool_call>"
 
 
 def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
@@ -111,28 +109,6 @@ def realtime_tools(tools: Mapping[str, Tool]) -> list[dict[str, Any]]:
         },
         *functions,
     ]
-
-
-@dataclass
-class TranscriptGuard:
-    """Per assistant item: passes spoken text through and cuts everything from a `<tool_call>` tag on.
-
-    A tail that could be the start of the tag is held back until the next delta decides it."""
-
-    held: str = ""
-    leaked: bool = False
-
-    def feed(self, delta: str) -> str:
-        if self.leaked:
-            return ""
-        text = self.held + delta
-        cut = text.find(TOOL_CALL_TAG)
-        if cut >= 0:
-            self.leaked, self.held = True, ""
-            return text[:cut]
-        keep = next((n for n in range(len(TOOL_CALL_TAG) - 1, 0, -1) if text.endswith(TOOL_CALL_TAG[:n])), 0)
-        self.held = text[len(text) - keep :] if keep else ""
-        return text[: len(text) - keep]
 
 
 @dataclass
@@ -165,7 +141,6 @@ class OsmoSession:
         self.outputs_pending = False
         # Spoken turns so far, replayed into a fresh upstream when the model is hot-swapped.
         self.history: list[HistoryItem] = []
-        self.transcript_guards: dict[str | None, TranscriptGuard] = {}
         # Function calls already run this response: xAI may report one call by two events.
         self.handled_calls: set[str] = set()
         self.upstream_count = 0
@@ -490,7 +465,8 @@ class OsmoSession:
                 await self.set_state("thinking")
         elif isinstance(event, grok.OutputAudioTranscriptDelta):
             if not self.muted:
-                await self.assistant_transcript(event.item_id, event.delta)
+                self.remember_assistant(event.item_id, event.delta)
+                await self.emit(TranscriptDelta(role="assistant", text=event.delta, itemId=event.item_id))
         elif isinstance(event, grok.OutputAudioDelta):
             await self.assistant_audio(base64.b64decode(event.delta))
         elif isinstance(event, grok.FunctionCallArgumentsDone):
@@ -508,10 +484,6 @@ class OsmoSession:
                 )
         elif isinstance(event, grok.ResponseDone):
             self.response_active = False
-            guards, self.transcript_guards = self.transcript_guards, {}
-            for item_id, guard in guards.items():
-                if guard.held and not self.muted:
-                    await self.show_assistant_text(item_id, guard.held)
             if self.outputs_pending:
                 # All function outputs of this response are in; continue once.
                 self.outputs_pending = False
@@ -615,23 +587,6 @@ class OsmoSession:
         )
         await self.send_upstream(grok.ResponseCreate())
         await self.set_state("thinking")
-
-    async def assistant_transcript(self, item_id: str | None, delta: str) -> None:
-        """Shows and remembers what the assistant says, minus any tool call it wrote as text.
-
-        Leaked tool-call text never reaches the browser or the history replayed on a hot-swap,
-        where it would teach the next model to write tags instead of calling tools."""
-        guard = self.transcript_guards.setdefault(item_id, TranscriptGuard())
-        was_leaked = guard.leaked
-        visible = guard.feed(delta)
-        if guard.leaked and not was_leaked:
-            log.warning("model wrote a tool call as text in item %s; dropped from the transcript", item_id)
-        if visible:
-            await self.show_assistant_text(item_id, visible)
-
-    async def show_assistant_text(self, item_id: str | None, text: str) -> None:
-        self.remember_assistant(item_id, text)
-        await self.emit(TranscriptDelta(role="assistant", text=text, itemId=item_id))
 
     def remember_assistant(self, item_id: str | None, delta: str) -> None:
         last = self.history[-1] if self.history else None
