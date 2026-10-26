@@ -28,7 +28,7 @@ from core_server import (
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-from symphony_server.agents import AgentRuns
+from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
 from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard
 from symphony_server.memory import MemoryPersistence
@@ -142,6 +142,7 @@ def create_app(
     app.include_router(create_provider_router(credentials, http_client, storage, settings.oauth_clients))
     app.include_router(create_thread_router(storage))
     app.include_router(create_approval_router(broker))
+    app.include_router(create_run_router(agents))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:

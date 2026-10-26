@@ -21,6 +21,7 @@ from typing import Any, Literal, Protocol
 
 from core_harness import ControlPlaneEvent, EventSink, Tool
 from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRequest, RunSubmission
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from symphony_server.approvals import (
@@ -93,6 +94,8 @@ class AgentRuns:
         self.sessions: dict[str, str] = {}
         self.observers: dict[str, AgentObserver] = {}
         self.tasks: set[asyncio.Task[None]] = set()
+        # The approval each waiting run asks for, by run id.
+        self.asking: dict[str, ApprovalRequest] = {}
 
     def observe(self, thread_id: str, observer: AgentObserver) -> None:
         self.observers[thread_id] = observer
@@ -138,6 +141,12 @@ class AgentRuns:
             await self.backend.cancel(run_id)
         return record
 
+    def recent(self, since: float) -> list[AgentRunRecord]:
+        """This server's live runs, and those that finished at or after `since` (epoch seconds)."""
+        live = ("running", "waiting_approval")
+        picked = [run for run in self.runs.values() if run.status in live or run.updatedAt >= since]
+        return sorted(picked, key=lambda run: (run.createdAt, run.runId))
+
     async def shutdown(self) -> None:
         for task in tuple(self.tasks):
             task.cancel()
@@ -161,10 +170,9 @@ class AgentRuns:
         elif kind == APPROVAL_REQUIRED:
             asked = ApprovalPayload.model_validate(event.payload)
             await self.update(record, "waiting_approval", phase=asked.summary)
-            await self.show(
-                record,
-                ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments),
-            )
+            request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments)
+            self.asking[run_id] = request
+            await self.show(record, request)
             text = f"[agent {run_id}] needs approval to: {asked.summary}. Ask the user to tap Approve or Deny on screen."
             await self.notify(record, Notice(run_id, "interrupt", text))
         elif kind == APPROVAL_RESOLVED:
@@ -188,6 +196,8 @@ class AgentRuns:
     async def update(self, record: AgentRunRecord, status: AgentRunStatus, *, phase: str | None = None, result: str | None = None) -> None:
         changed = record.model_copy(update={"status": status, "result": result or record.result, "updatedAt": time.time()})
         self.runs[record.runId] = changed
+        if status != "waiting_approval":
+            self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
         await self.show(changed, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
 
@@ -200,6 +210,23 @@ class AgentRuns:
         observer = self.observers.get(record.threadId)
         if observer is not None:
             await observer.tell(notice)
+
+
+class RunList(BaseModel):
+    runs: list[AgentRunRecord]
+    approvals: list[ApprovalRequest]
+
+
+def create_run_router(runs: AgentRuns) -> APIRouter:
+    """`GET /api/runs`: every thread's background runs, for the home screen's Running list."""
+    router = APIRouter(prefix="/api/runs")
+
+    @router.get("")
+    async def list_runs(since: float = Query(0.0, description="Also list runs that finished at or after this time (epoch seconds).")) -> RunList:
+        listed = runs.recent(since)
+        return RunList(runs=listed, approvals=[runs.asking[run.runId] for run in listed if run.runId in runs.asking])
+
+    return router
 
 
 @dataclass

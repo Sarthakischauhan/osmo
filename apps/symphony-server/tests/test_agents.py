@@ -65,6 +65,14 @@ def agent_client(grok: FakeGrok, agent: ScriptedAgent) -> TestClient:
     return client
 
 
+def done_after(client: TestClient, thread_runs: int) -> float:
+    """A time just after the latest of the first thread's `thread_runs` runs last changed."""
+    thread_id = client.get("/api/threads").json()["threads"][0]["id"]
+    runs = client.get(f"/api/threads/{thread_id}").json()["runs"]
+    assert len(runs) == thread_runs
+    return float(max(run["updatedAt"] for run in runs)) + 0.001
+
+
 def told(grok: FakeGrok, prefix: str) -> str:
     """The next message the bridge adds to the voice conversation that starts with `prefix`."""
     while True:
@@ -99,6 +107,10 @@ def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_
         # Needing approval interrupts: the voice model is told and asked to speak.
         assert "needs approval" in told(grok, f"[agent {run_id}]")
         grok.next_of("response.create")
+        # The home screen lists the waiting run with what it asks for.
+        listed = client.get("/api/runs").json()
+        assert [(run["runId"], run["status"]) for run in listed["runs"]] == [(run_id, "waiting_approval")]
+        assert [approval["approvalId"] for approval in listed["approvals"]] == [asked["approvalId"]]
 
         assert client.post(f"/api/approvals/{asked['approvalId']}", json={"approved": False}).status_code == 204
         assert next_event(ws, "approval.resolved") == {
@@ -110,6 +122,10 @@ def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_
         while done["status"] != "completed":
             done = next_event(ws, "agent.update")
         assert done["result"] == "Skipped the picture."
+        assert client.get("/api/runs").json()["approvals"] == []
+        # Finished runs are listed only when asked for since before they finished.
+        assert client.get("/api/runs", params={"since": done_after(client, thread_runs=1)}).json()["runs"] == []
+        assert [run["status"] for run in client.get("/api/runs").json()["runs"]] == ["completed"]
         assert told(grok, f"[agent {run_id}]") == f"[agent {run_id}] done: Skipped the picture."
         grok.next_of("response.create")
 

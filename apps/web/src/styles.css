@@ -1,18 +1,12 @@
+/* Osmo's app styles. Colours come from the tokens in tailwind.css (dark default, `.light`). */
 :root {
-  --bg: #0b0b0c;
-  --panel: #151517;
-  --panel-2: #1c1c1f;
-  --panel-3: #232327;
-  --text: #ececef;
-  --muted: #8b8b93;
-  --accent: #a5b4fc;
-  --accent-strong: #6366f1;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  color-scheme: dark;
+  --surface-1: color-mix(in srgb, var(--foreground) 5%, var(--background));
+  --surface-2: color-mix(in srgb, var(--foreground) 8%, var(--background));
+  --surface-3: color-mix(in srgb, var(--foreground) 12%, var(--background));
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text); font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { background: var(--background); color: var(--foreground); font: 14px/20px var(--font-sans); }
 button { font: inherit; color: inherit; }
 
 .app { display: grid; grid-template-rows: 60px 1fr auto; height: 100%; }
@@ -21,43 +15,42 @@ button { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 16px; }
 .brand strong { font-size: 15px; font-weight: 600; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
-.clock { font: 11px var(--mono); color: var(--muted); }
-.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
-.end:hover { background: var(--panel-3); }
+.clock { font: 11px var(--font-mono); color: var(--muted-foreground); }
+.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.end:hover { background: var(--surface-3); }
 
 .feed { max-width: 608px; margin: 0 auto; padding: 24px 0 32px; display: flex; flex-direction: column; gap: 18px; }
-.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
 
 .turn.user { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 75%; animation: rise .25s ease-out; }
-.bubble { margin: 0; padding: 9px 14px; border-radius: 18px; background: var(--panel-3); font-size: 13px; }
-.spoken { font-size: 10px; color: var(--muted); }
+.bubble { margin: 0; padding: 9px 14px; border-radius: 18px; background: var(--surface-3); font-size: 13px; }
+.spoken { font-size: 10px; color: var(--muted-foreground); }
 
 .turn.assistant { display: grid; grid-template-columns: 28px 1fr; gap: 0; animation: rise .25s ease-out; }
-.avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
+.avatar { width: 8px; height: 8px; margin: 6px 0 0 6px; border-radius: 50%; background: var(--foreground); }
 .assistant-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 
 /* chat-sdk (@sarchauhan/chat) renders text, tool rows and card/options widgets.
    Osmo keeps its borderless look by overriding chat-sdk's tokens and frames here only. */
 .canvas.chat-root {
   display: block; overflow-y: auto; border-radius: 0; isolation: auto;
-  --chat-bg: var(--bg);
-  --chat-bg-elevated: var(--panel);
-  --chat-fg: var(--text);
-  --chat-fg-muted: var(--muted);
-  --chat-fg-subtle: var(--muted);
+  --chat-bg: var(--background);
+  --chat-bg-elevated: var(--surface-1);
+  --chat-fg: var(--foreground);
+  --chat-fg-muted: var(--muted-foreground);
+  --chat-fg-subtle: var(--muted-foreground);
   --chat-border: transparent;
   --chat-border-strong: transparent;
-  --chat-control-bg: var(--panel-2);
-  --chat-control-hover: var(--panel-3);
-  --chat-accent: var(--accent);
-  --chat-primary: var(--accent);
-  --chat-primary-fg: #111;
+  --chat-control-bg: var(--surface-2);
+  --chat-control-hover: var(--surface-3);
+  --chat-accent: var(--foreground);
+  --chat-primary: var(--foreground);
+  --chat-primary-fg: var(--background);
   --chat-ring: transparent;
-  --chat-user-bg: var(--panel-3);
-  --chat-user-fg: var(--text);
+  --chat-user-bg: var(--surface-3);
+  --chat-user-fg: var(--foreground);
   --chat-radius: 20px;
   --chat-radius-lg: 20px;
-  --chat-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --chat-font-sans: var(--font-sans);
   --chat-body-size: 13px;
 }
 .canvas.chat-root .chat-widget-card,
@@ -69,65 +62,65 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question button,
 .canvas.chat-root .chat-widget-header,
 .canvas.chat-root .chat-widget-meta { border: 0; box-shadow: none; outline: none; }
-.canvas.chat-root .chat-widget-card { border-radius: 20px; background: var(--panel); padding: 16px; }
+.canvas.chat-root .chat-widget-card { border-radius: 20px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-widget-header { padding: 0 0 6px; background: none; }
 .canvas.chat-root .chat-widget-body { padding: 0; }
 .canvas.chat-root .chat-widget-label-row { display: none; }
 .canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
-.canvas.chat-root .chat-question { border-radius: 20px; background: #15151f; padding: 16px; }
+.canvas.chat-root .chat-question { border-radius: 20px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-question-eyebrow { display: none; }
 .canvas.chat-root .chat-question h3 { font-size: 12px; margin: 0; }
-.canvas.chat-root .chat-question-description { font-size: 10px; color: var(--accent); }
-.canvas.chat-root .chat-question-option { border-radius: 14px; background: #1d1d2a; transition: background .2s ease; }
+.canvas.chat-root .chat-question-description { font-size: 10px; color: var(--foreground); }
+.canvas.chat-root .chat-question-option { border-radius: 14px; background: var(--surface-2); transition: background .2s ease; }
 .canvas.chat-root .chat-question-option:hover,
-.canvas.chat-root .chat-question-option[data-selected="true"] { background: #262638; }
+.canvas.chat-root .chat-question-option[data-selected="true"] { background: var(--surface-3); }
 .canvas.chat-root .chat-question footer { background: none; }
-.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--panel-3); color: var(--text); }
-.canvas.chat-root .agent-tool { border-radius: 14px; background: var(--panel); font-size: 10px; }
+.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--surface-3); color: var(--foreground); }
+.canvas.chat-root .agent-tool { border-radius: 14px; background: var(--surface-1); font-size: 10px; }
 .canvas.chat-root .agent-tool-complete .agent-tool-state,
 .canvas.chat-root .agent-tool-complete .agent-tool-dot,
 .canvas.chat-root .agent-tool-complete .agent-tool-chevron { display: none; }
-.canvas.chat-root .agent-tool summary { padding: 8px 14px; font-size: 10px; color: var(--muted); }
-.canvas.chat-root .agent-tool-name { font: 10px var(--mono); color: var(--text); }
+.canvas.chat-root .agent-tool summary { padding: 8px 14px; font-size: 10px; color: var(--muted-foreground); }
+.canvas.chat-root .agent-tool-name { font: 10px var(--font-mono); color: var(--foreground); }
 
 .osmo-card-image { width: 100%; border-radius: 14px; margin-bottom: 10px; }
 .osmo-card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--panel-2); cursor: pointer; font-size: 12px; }
-.osmo-card-actions button:hover { background: var(--panel-3); }
+.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.osmo-card-actions button:hover { background: var(--surface-3); }
 
-.osmo-chart { border-radius: 20px; background: var(--panel); padding: 16px; }
+.osmo-chart { border-radius: 20px; background: var(--surface-1); padding: 16px; }
 .osmo-chart svg { width: 100%; height: 160px; display: block; }
 .osmo-chart-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; font-size: 11px; }
-.osmo-legend { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.osmo-legend { display: inline-flex; gap: 6px; align-items: center; color: var(--muted-foreground); }
 .osmo-legend i { width: 8px; height: 8px; border-radius: 2px; }
-.osmo-chart-last { margin-left: auto; font: 12px var(--mono); }
+.osmo-chart-last { margin-left: auto; font: 12px var(--font-mono); }
 .osmo-chart-last em { font-style: normal; margin-left: 6px; }
 .osmo-chart-last .up { color: #4ade80; }
 .osmo-chart-last .down { color: #f87171; }
-.osmo-chart-axis { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--muted); margin-top: 4px; }
+.osmo-chart-axis { display: flex; justify-content: space-between; font: 10px var(--font-mono); color: var(--muted-foreground); margin-top: 4px; }
 
-.osmo-html { overflow: hidden; border-radius: 20px; background: var(--panel); }
-.osmo-html-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; background: var(--panel-2); }
+.osmo-html { overflow: hidden; border-radius: 20px; background: var(--surface-1); }
+.osmo-html-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; background: var(--surface-2); }
 .osmo-html-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .osmo-html-tools { display: flex; align-items: center; gap: 2px; }
-.osmo-html-zoom { min-width: 38px; text-align: center; font: 10px var(--mono); color: var(--muted); }
-.osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; transition: background .2s ease, color .2s ease; }
-.osmo-icon-button:hover:not(:disabled) { background: var(--panel-3); color: var(--text); }
-.osmo-icon-button:focus-visible { outline: none; background: var(--panel-3); color: var(--text); box-shadow: 0 0 0 4px rgba(165, 180, 252, .14); }
+.osmo-html-zoom { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
+.osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
+.osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
+.osmo-icon-button:focus-visible { outline: none; background: var(--surface-3); color: var(--foreground); box-shadow: 0 0 0 2px var(--ring); }
 .osmo-icon-button:disabled { opacity: .35; cursor: default; }
 .osmo-html-viewport { position: relative; overflow: hidden; background: #111; }
 .osmo-html-viewport iframe { display: block; border: 0; background: #111; transform-origin: 0 0; }
 .osmo-html-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 4vh 4vw; background: rgba(5, 5, 6, .72); backdrop-filter: blur(6px); animation: rise .2s ease-out; }
-.osmo-html-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border-radius: 22px; background: var(--panel); box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+.osmo-html-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border-radius: 22px; background: var(--surface-1); box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
 .osmo-html-modal .osmo-html-viewport { flex: 1; }
 
-.dock { padding: 18px 0 22px; background: linear-gradient(to top, var(--bg) 60%, transparent); display: flex; justify-content: center; }
+.dock { padding: 18px 0 22px; background: var(--background); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .orb { position: relative; width: 64px; height: 64px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }
-.orb:focus-visible { outline: none; box-shadow: 0 0 0 10px rgba(165, 180, 252, .14); }
+.orb:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 /* The canvas draws every state (see osmo-composer orbVisual.ts); it overhangs the button so the glow has room. */
 .orb-canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
-.orb-caption { margin: 0; font-size: 11px; color: var(--muted); }
+.orb-caption { margin: 0; font-size: 11px; color: var(--muted-foreground); }
 
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
@@ -153,3 +146,120 @@ button { font: inherit; color: inherit; }
 }
 /* While the dial is open its summary pill sits where the caption is. */
 .dock .orb-composer:has(.rp[data-open="true"]) .orb-caption { visibility: hidden; }
+
+/* ---- Thread sidebar and voice home (osmo-design spec) ---- */
+/* Tailwind's preflight is off, so the shadcn primitives get the resets they assume here. */
+[data-slot^="sidebar"] ul, [data-slot^="sidebar"] li { list-style: none; margin: 0; padding: 0; }
+:where([data-slot] button, button[data-slot], .osmo-sidebar button) { border: 0; background: none; }
+[data-slot="sidebar-inner"] { background: var(--sidebar); }
+h1, h2, p { margin: 0; }
+kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+.app { height: 100svh; min-height: 0; background: var(--background); color: var(--foreground); }
+.osmo-mono { font: 12px/16px var(--font-mono); }
+.osmo-muted { color: var(--muted-foreground); }
+.osmo-tertiary { color: var(--fg-tertiary); font-size: 12px; line-height: 16px; }
+.osmo-warn { color: var(--status-warn); }
+.osmo-ok { color: var(--status-ok); }
+.osmo-err { color: var(--status-err); }
+.osmo-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.osmo-dot-ok { background: var(--status-ok); }
+.osmo-dot-warn { background: var(--status-warn); }
+.osmo-dot-err { background: var(--status-err); }
+.osmo-dot-none { background: var(--fg-tertiary); }
+.osmo-spin { display: inline-block; animation: osmo-spin 1.2s linear infinite; }
+@keyframes osmo-spin { to { transform: rotate(360deg); } }
+.osmo-link { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; font-weight: 500; }
+.osmo-section-label .osmo-link { color: var(--fg-tertiary); }
+.osmo-link:hover { color: var(--foreground); }
+.osmo-underline { font-size: 13px; text-decoration: underline; }
+
+.osmo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, opacity .15s ease-out; }
+.osmo-btn-sm { height: 28px; }
+.osmo-btn-primary { background: var(--foreground); color: var(--background); }
+.osmo-btn-primary:hover { opacity: .88; }
+.osmo-btn-ghost { background: var(--accent); color: var(--foreground); }
+.osmo-btn-ghost:hover { background: var(--sidebar-accent); }
+.osmo-btn-destructive { background: var(--destructive); color: #fff; }
+.osmo-icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
+.osmo-icon-btn:hover { background: var(--accent); color: var(--foreground); }
+.osmo-tooltip-kbd { margin-left: 8px; color: inherit; opacity: .7; }
+
+/* Sidebar: 256 / 48 px, no border (the surface change is the divider). */
+.osmo-sidebar { border: 0 !important; font-size: 13px; }
+.osmo-sidebar-header { flex-direction: row; align-items: center; justify-content: space-between; padding: 8px 8px 4px 16px; }
+[data-collapsible="icon"] .osmo-sidebar-header { justify-content: center; padding: 8px 0 4px; }
+.osmo-sidebar-brand { font-size: 14px; font-weight: 600; color: var(--foreground); }
+.osmo-sidebar-icons { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 4px; }
+.osmo-new-thread { display: flex; align-items: center; gap: 8px; height: 32px; margin: 4px 8px 0; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--foreground); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out; }
+.osmo-new-thread:hover { background: var(--accent); }
+.osmo-new-thread span { flex: 1; text-align: left; }
+.osmo-thread-group { padding: 0 8px; }
+.osmo-thread-group-label { height: auto; padding: 16px 8px 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
+.osmo-thread-button { height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); }
+.osmo-thread-button:hover { background: var(--accent); color: var(--foreground); }
+.osmo-thread-button[data-active="true"] { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.osmo-thread-row .osmo-thread-button { padding-right: 32px; }
+.osmo-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.osmo-thread-action { color: var(--muted-foreground); border-radius: 4px; }
+.osmo-rename { box-sizing: border-box; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; background: var(--background); box-shadow: inset 0 0 0 1px var(--fg-tertiary); color: var(--foreground); font: 13px var(--font-sans); }
+.osmo-sidebar-empty { padding: 16px 16px; color: var(--muted-foreground); font-size: 13px; }
+.osmo-sidebar-empty-title { margin-bottom: 2px; color: var(--foreground); font-size: 14px; font-weight: 500; }
+.osmo-menu { width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); }
+.osmo-menu [role="menuitem"] { height: 32px; padding: 0 8px; border-radius: 4px; font-size: 13px; }
+.osmo-delete-dialog { width: 400px; max-width: calc(100vw - 32px); padding: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); color: var(--foreground); }
+.osmo-delete-dialog h2 { font-size: 16px; line-height: 24px; font-weight: 600; }
+.osmo-delete-dialog p { color: var(--muted-foreground); font-size: 14px; }
+
+/* Voice home: a 560px column, 72px from the top, 32px between sections. */
+.osmo-home { display: flex; flex-direction: column; gap: 32px; width: min(560px, calc(100% - 32px)); margin: 72px auto 0; }
+.osmo-greeting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.osmo-greeting { font-size: 24px; line-height: 32px; font-weight: 600; }
+.osmo-pill { display: inline-flex; flex: none; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--accent); color: var(--foreground); font-size: 13px; cursor: pointer; }
+span.osmo-pill { cursor: default; }
+.osmo-popover { width: 280px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); }
+.osmo-model-picker { background: transparent; padding: 4px; }
+.osmo-model-picker [cmdk-input-wrapper], .osmo-model-picker [data-slot="command-input-wrapper"] { height: 32px; padding: 0 8px; border: 0; }
+.osmo-model-picker input { border: 0; background: none; color: var(--foreground); font-size: 13px; outline: none; }
+.osmo-model-picker [cmdk-group-heading] { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--fg-tertiary); }
+.osmo-model-picker [cmdk-item] { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; color: var(--muted-foreground); }
+.osmo-model-picker [cmdk-item][data-selected="true"] { background: var(--accent); color: var(--foreground); }
+.osmo-model-picker [cmdk-item][data-current="true"] { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
+.osmo-section { display: flex; flex-direction: column; }
+.osmo-section-label { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
+.osmo-list-row { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 -8px; padding: 0 8px; border: 0; border-radius: 6px; background: none; color: var(--foreground); font-size: 13px; text-align: left; transition: background .15s ease-out; }
+button.osmo-list-row { cursor: pointer; }
+.osmo-list-row:hover, .osmo-list-row:focus-visible { background: var(--accent); }
+.osmo-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.osmo-resume { opacity: 0; transition: opacity .15s ease-out; }
+.osmo-recent-row:hover .osmo-resume, .osmo-recent-row:focus-visible .osmo-resume { opacity: 1; }
+.osmo-feed-runs { margin-bottom: 8px; }
+.osmo-run-dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--background); color: var(--foreground); }
+
+/* In-stream approval: an --accent block; one tertiary line once answered. */
+.osmo-approval { padding: 16px; border-radius: 8px; background: var(--accent); }
+.osmo-approval-title { margin-bottom: 4px; font-size: 14px; font-weight: 500; }
+.osmo-approval-call { margin-bottom: 12px; overflow-wrap: anywhere; font: 12px/16px var(--font-mono); color: var(--muted-foreground); }
+.osmo-approval-actions { display: flex; align-items: center; gap: 8px; }
+.osmo-approval-hint { margin-left: auto; font-size: 12px; color: var(--fg-tertiary); }
+.osmo-approval-resolved { font-size: 12px; line-height: 16px; color: var(--fg-tertiary); }
+
+/* OrbDock (VITE_SDK_ORB): solid --foreground, states by scale and opacity, no glow. */
+.osmo-orb-dock { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; padding-bottom: 18px; }
+.osmo-orb { width: 72px; height: 72px; padding: 0; border: 0; border-radius: 50%; background: var(--foreground); cursor: pointer; transition: transform .15s ease-out, opacity .15s ease-out; }
+.osmo-orb[data-mode="idle"], .osmo-orb[data-mode="connecting"] { opacity: .4; }
+.osmo-orb[data-mode="listening"] { animation: osmo-breathe 2.4s ease-in-out infinite; }
+.osmo-orb[data-mode="thinking"] { opacity: .7; }
+.osmo-orb[data-mode="speaking"] { animation: osmo-breathe 0.9s ease-in-out infinite; }
+@keyframes osmo-breathe { 50% { transform: scale(1.06); } }
+.osmo-orb-caption { font-size: 12px; color: var(--fg-tertiary); }
+.osmo-thinking { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); max-width: 360px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); font-size: 13px; color: var(--muted-foreground); white-space: nowrap; }
+.osmo-thinking-summary { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.osmo-thinking-steps { margin: 8px 0 0; padding-left: 18px; white-space: normal; }
+
+@media (prefers-reduced-motion: reduce) {
+  .osmo-spin { animation: none; }
+  .osmo-orb[data-mode="listening"], .osmo-orb[data-mode="speaking"] { animation: none; opacity: 1; }
+  * { transition: none !important; }
+}

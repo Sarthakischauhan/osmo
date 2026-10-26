@@ -5,6 +5,7 @@ import type { AgentPart } from "@sarchauhan/protocol";
 import {
   OrbComposer,
   type ServerEvent,
+  type Thread,
   type VoiceModel,
   type VoiceSelection,
   orbMode,
@@ -14,23 +15,86 @@ import {
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
 import { Toaster } from "@/components/ui/sonner";
+import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ApprovalPrompt } from "@/components/ApprovalPrompt";
+import { OrbDock } from "@/components/OrbDock";
+import { ThreadSidebar } from "@/components/ThreadSidebar";
+import { ProviderPill, pillState } from "@/components/home/ProviderPill";
+import { RecentThreads } from "@/components/home/RecentThreads";
+import { RunsList } from "@/components/home/RunsList";
+import { VoiceHome } from "@/components/home/VoiceHome";
+import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
+import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
 import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
+import { type Feed, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
+const SDK_ORB = import.meta.env.VITE_SDK_ORB === "1";
+const USER_NAME: string | undefined = import.meta.env.VITE_OSMO_USER_NAME || undefined;
+const api = threadApi();
+
+type FeedAction = { kind: "event"; event: ServerEvent } | { kind: "load"; feed: Feed };
+function feedReducer(state: Feed, action: FeedAction): Feed {
+  return action.kind === "load" ? action.feed : reduceFeed(state, action.event);
+}
+
+/** `?theme=light|dark` forces a theme; otherwise the system's (tailwind.css). */
+function forcedTheme(): "light" | "dark" | undefined {
+  const theme = new URLSearchParams(window.location.search).get("theme");
+  return theme === "light" || theme === "dark" ? theme : undefined;
+}
+
+function systemTheme(): "light" | "dark" {
+  return forcedTheme() ?? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+}
 
 export function App() {
-  const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
+  useEffect(() => {
+    const theme = forcedTheme();
+    if (theme) document.documentElement.classList.add(theme);
+  }, []);
+  return (
+    <TooltipProvider delayDuration={300}>
+      <SidebarProvider>
+        <Osmo />
+      </SidebarProvider>
+    </TooltipProvider>
+  );
+}
+
+function useNow(): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function Osmo() {
+  const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [threadId, setThreadId] = useState<string>();
+  const [runs, setRuns] = useState<Runs>({});
+  const approvals = useRef<ApprovalRequest[]>([]);
+  const now = useNow();
+  const sidebar = useSidebar();
   const speaking = useRef(false);
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
   const pickSetters = useRef<{ save: (next: VoiceSelection) => void; choose: (next: VoiceSelection) => void }>();
   const onEvent = useCallback((event: ServerEvent) => {
-    dispatch(event);
+    dispatchFeed({ kind: "event", event });
+    setRuns((previous) => reduceRuns(previous, event, Date.now()));
+    if (event.type === "thread") {
+      setThreadId(event.thread.id);
+      setThreads((previous) => [event.thread, ...previous.filter((t) => t.id !== event.thread.id)]);
+    }
     cues.current?.onServerEvent(event);
     // The server confirmed a pick (session start, picker, or `set_voice`): only now is it saved.
     // On error the picker snaps back to what is still in effect, and nothing is saved.
@@ -47,8 +111,113 @@ export function App() {
     model: pick?.model,
     voice: pick?.voice,
     effort: pick?.effort,
+    threadId,
     onEvent,
   });
+  const { end } = session;
+  useEffect(() => {
+    api.list().then(setThreads, () => toast.error("Could not load threads"));
+  }, []);
+  const openThread = useCallback(
+    async (id: string | undefined) => {
+      end();
+      setThreadId(id);
+      if (id === undefined) {
+        dispatchFeed({ kind: "load", feed: emptyFeed });
+        return;
+      }
+      try {
+        const detail = await api.get(id);
+        const ownRuns = new Set(detail.runs.map((run) => run.runId));
+        // Approvals its runs still wait for go back into the stream.
+        const waiting = approvals.current.filter((approval) => ownRuns.has(approval.runId));
+        dispatchFeed({ kind: "load", feed: waiting.reduce((shown, approval) => reduceFeed(shown, approval), feedFromMessages(detail.messages)) });
+      } catch {
+        toast.error("Could not open that thread");
+      }
+    },
+    [end],
+  );
+  const renameThread = useCallback(async (id: string, title: string) => {
+    try {
+      const renamed = await api.rename(id, title);
+      setThreads((previous) => previous.map((t) => (t.id === id ? renamed : t)));
+    } catch {
+      toast.error("Could not rename the thread");
+    }
+  }, []);
+  const forkThread = useCallback(
+    async (id: string) => {
+      try {
+        const copy = await api.fork(id);
+        setThreads((previous) => insertAfter(previous, id, copy));
+        await openThread(copy.id);
+        return copy;
+      } catch {
+        toast.error("Could not fork the thread");
+        return undefined;
+      }
+    },
+    [openThread],
+  );
+  const deleteThread = useCallback(
+    async (id: string) => {
+      try {
+        await api.remove(id);
+        setThreads((previous) => previous.filter((t) => t.id !== id));
+        if (id === threadId) await openThread(undefined);
+      } catch {
+        toast.error("Could not delete the thread");
+      }
+    },
+    [openThread, threadId],
+  );
+  const countMessages = useCallback(async (id: string) => (await api.get(id)).messages.length, []);
+  // The socket only echoes approval.resolved while a session is live, so record a decision the server accepted here.
+  const decide = useCallback(async (approvalId: string, runId: string, approved: boolean) => {
+    if (await decideApproval(approvalId, approved)) dispatchFeed({ kind: "event", event: { type: "approval.resolved", approvalId, runId, approved } });
+    else toast.error("That approval is no longer pending");
+  }, []);
+  // Every thread's runs (the socket only reports the open thread's): polled for the Running list.
+  useEffect(() => {
+    const poll = () =>
+      fetchRuns(Date.now() - COMPLETED_LINGER_MS).then(
+        (listed) => {
+          approvals.current = listed.approvals;
+          setRuns((previous) => mergeListed(previous, listed));
+        },
+        () => undefined,
+      );
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const review = useCallback(
+    async (run: RunView) => {
+      if (run.threadId !== undefined && run.threadId !== threadId) await openThread(run.threadId);
+      window.setTimeout(() => document.getElementById(`approval-${run.approvalId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    },
+    [openThread, threadId],
+  );
+  // ⌘K: a new thread (Home); Space: talk, or interrupt while Osmo speaks.
+  const { start, interrupt, connection } = session;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        void openThread(undefined);
+        return;
+      }
+      const target = event.target;
+      const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(target.tagName));
+      if (event.code !== "Space" || typing || event.repeat) return;
+      event.preventDefault();
+      if (connection === "disconnected") void start();
+      else if (session.state === "speaking") interrupt();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openThread, start, interrupt, connection, session.state]);
   // A new `models` event from the socket replaces the registry; later HTTP refreshes may override it.
   const socketModels = useRef(session.voiceModels);
   if (session.voiceModels !== socketModels.current) {
@@ -87,6 +256,13 @@ export function App() {
       configure(next);
     },
     [choose, configure],
+  );
+  const onPickModel = useCallback(
+    (model: VoiceModel) => {
+      if (session.connection === "connected") toast("Switches after current turn");
+      onPick({ model: model.id, voice: model.defaultVoice });
+    },
+    [onPick, session.connection],
   );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
@@ -133,16 +309,9 @@ export function App() {
       thinking: "Thinking",
       speaking: "Speaking",
     };
-    const colors: Record<typeof mode, [string, string, string]> = {
-      connecting: ["#d6dae4", "#8c94a8", "#464c60"],
-      idle: ["#e2e6ff", "#8c96f0", "#3e3aaa"],
-      listening: ["#e6ecff", "#8192f8", "#4338ca"],
-      awaiting: ["#ffecbe", "#fbbf24", "#b45309"],
-      thinking: ["#fff", "#ddd6fe", "#a78bfa"],
-      speaking: ["#e0e7ff", "#818cf8", "#4c1d95"],
-    };
-    const [light, mid, deep] = colors[mode];
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><radialGradient id="g" cx="35%" cy="28%" r="70%"><stop stop-color="${light}"/><stop offset=".55" stop-color="${mid}"/><stop offset="1" stop-color="${deep}"/></radialGradient></defs><circle cx="32" cy="32" r="25" fill="${mid}" opacity=".3"/><circle cx="32" cy="32" r="21" fill="url(#g)"/></svg>`;
+    const opacity: Record<typeof mode, number> = { connecting: 0.4, idle: 0.6, listening: 1, awaiting: 1, thinking: 0.8, speaking: 1 };
+    const fill = systemTheme() === "light" ? "#171717" : "#ededed";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="${fill}" opacity="${opacity[mode]}"/></svg>`;
     const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
     const previousTitle = document.title;
     const previousHref = icon?.href;
@@ -161,80 +330,108 @@ export function App() {
     }
   }, []);
 
-  return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <strong>Osmo</strong>
-        </div>
-        <div className="topbar-right">
-          {session.startedAt !== undefined && <Clock since={session.startedAt} />}
-          {connected && (
-            <button type="button" className="end" onClick={session.end}>
-              <span aria-hidden>✕</span> End
-            </button>
-          )}
-        </div>
-      </header>
+  const shownRuns = visibleRuns(runs, now);
+  const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
+  const lastAssistant = [...feed.turns].reverse().find((turn): turn is AssistantTurn => turn.role === "assistant");
+  const steps = lastAssistant?.activities.map((activity) => activity.label) ?? [];
+  const retry = () => {
+    const current = registry.find((model) => model.id === pick?.model);
+    if (current) onLockedProvider(current.provider);
+  };
+  const connectProvider = (id: string) => {
+    const provider = providers.find((p) => p.id === id);
+    if (provider) setConnecting(provider);
+    else onLockedProvider(id);
+  };
+  const pill = (
+    <ProviderPill
+      state={pillState(providers, session.connection, session.error ?? catalogError)}
+      registry={registry}
+      providers={providers}
+      current={pick?.model}
+      onPick={onPickModel}
+      onConnect={connectProvider}
+      onRetry={retry}
+    />
+  );
 
-      <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-        <main className="canvas chat-root" data-theme="dark" onChange={onFeedChange}>
-          <div className="feed">
-            {feed.turns.length === 0 && (
-              <div className="empty">
-                <p>Ask about the weather, a stock, places nearby, or have it build something.</p>
+  return (
+    <>
+      <ThreadSidebar
+        threads={threads}
+        activeId={threadId}
+        onSelect={(id) => void openThread(id)}
+        onNew={() => void openThread(undefined)}
+        onRename={(id, title) => void renameThread(id, title)}
+        onFork={forkThread}
+        onDelete={(id) => void deleteThread(id)}
+        countMessages={countMessages}
+      />
+      <SidebarInset className="app">
+        <header className="topbar">
+          <div className="brand">
+            {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
+            <strong>{threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
+          </div>
+          <div className="topbar-right">
+            {session.startedAt !== undefined && <Clock since={session.startedAt} />}
+            {connected && (
+              <button type="button" className="end" onClick={session.end}>
+                <span aria-hidden>✕</span> End
+              </button>
+            )}
+          </div>
+        </header>
+
+        <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
+          <main className="canvas chat-root" data-theme={systemTheme()} onChange={onFeedChange}>
+            {feed.turns.length === 0 ? (
+              <VoiceHome
+                name={USER_NAME}
+                now={now}
+                pill={pill}
+                runs={runsList}
+                recent={<RecentThreads threads={threads} now={now} onResume={(id) => void openThread(id)} onViewAll={() => sidebar.setOpen(true)} />}
+              />
+            ) : (
+              <div className="feed">
+                {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
+                {feed.turns.map((turn) => (
+                  <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
+                ))}
+                <div ref={bottom} />
               </div>
             )}
-            {feed.turns.map((turn) =>
-              turn.role === "user" ? (
-                <div key={turn.key} className="turn user">
-                  <div className="bubble">
-                    <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
-                  </div>
-                  <span className="spoken">🎙 spoken</span>
-                </div>
-              ) : (
-                <div key={turn.key} className="turn assistant">
-                  <span className="avatar" aria-hidden />
-                  <div className="assistant-body">
-                    <MessageContent parts={assistantParts(turn)} />
-                    {/* One element per widget keyed by its server id, so React state follows the
-                        widget itself and never shifts when text or activity rows are added above. */}
-                    {turn.widgets.map((widget) => {
-                      const part = toWidgetPart(widget.id, widget.type, widget.props);
-                      return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
-                    })}
-                  </div>
-                </div>
-              ),
-            )}
-            <div ref={bottom} />
-          </div>
-        </main>
-      </WidgetProvider>
+          </main>
+        </WidgetProvider>
 
-      <footer className="dock">
-        <OrbComposer
-          session={session}
-          awaitingChoice={pending !== undefined}
-          pickerError={catalogError}
-          picker={
-            pick && registry.length > 0
-              ? {
-                  registry,
-                  value: pick,
-                  onChange: onPick,
-                  onPreview: session.previewVoice,
-                  onPreviewStop: session.stopPreview,
-                  previewing: session.previewing,
-                  previewDisabled: session.state !== "idle" && session.state !== "listening",
-                  providers,
-                  onLockedProvider,
-                }
-              : undefined
-          }
-        />
-      </footer>
+        <footer className="dock">
+          {SDK_ORB ? (
+            <OrbDock session={session} mode={mode} thinking={session.detail} steps={steps} />
+          ) : (
+            <OrbComposer
+              session={session}
+              awaitingChoice={pending !== undefined}
+              pickerError={catalogError}
+              picker={
+                pick && registry.length > 0
+                  ? {
+                      registry,
+                      value: pick,
+                      onChange: onPick,
+                      onPreview: session.previewVoice,
+                      onPreviewStop: session.stopPreview,
+                      previewing: session.previewing,
+                      previewDisabled: session.state !== "idle" && session.state !== "listening",
+                      providers,
+                      onLockedProvider,
+                    }
+                  : undefined
+              }
+            />
+          )}
+        </footer>
+      </SidebarInset>
       <ConnectProviderDialog
         provider={connecting}
         onOpenChange={(open) => {
@@ -246,8 +443,41 @@ export function App() {
         }}
       />
       <Toaster position="top-center" />
-    </div>
+    </>
   );
+}
+
+type AssistantTurn = Extract<Turn, { role: "assistant" }>;
+
+function FeedTurn({ turn, step, onDecide }: { turn: Turn; step: number | undefined; onDecide: (approvalId: string, runId: string, approved: boolean) => Promise<void> }) {
+  switch (turn.role) {
+    case "user":
+      return (
+        <div className="turn user">
+          <div className="bubble">
+            <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
+          </div>
+          <span className="spoken">🎙 spoken</span>
+        </div>
+      );
+    case "approval":
+      return <ApprovalPrompt turn={turn} step={step} onDecide={(approved) => void onDecide(turn.approvalId, turn.runId, approved)} />;
+    case "assistant":
+      return (
+        <div className="turn assistant">
+          <span className="avatar" aria-hidden />
+          <div className="assistant-body">
+            <MessageContent parts={assistantParts(turn)} />
+            {/* One element per widget keyed by its server id, so React state follows the
+                widget itself and never shifts when text or activity rows are added above. */}
+            {turn.widgets.map((widget) => {
+              const part = toWidgetPart(widget.id, widget.type, widget.props);
+              return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
+            })}
+          </div>
+        </div>
+      );
+  }
 }
 
 function Clock({ since }: { since: number }) {
@@ -263,7 +493,7 @@ function Clock({ since }: { since: number }) {
 }
 
 /** One assistant turn's spoken line and tool activity rows as chat-sdk parts; widgets render separately, keyed by id. */
-function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[] {
+function assistantParts(turn: AssistantTurn): AgentPart[] {
   const parts: AgentPart[] = [];
   if (turn.text) parts.push({ type: "text", text: turn.text });
   turn.activities.forEach((activity, i) =>
