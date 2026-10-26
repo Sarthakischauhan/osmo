@@ -24,8 +24,15 @@ export const RING_LABELS: Record<RingKey, string> = {
   effort: "Reasoning effort",
 };
 
-const EFFORT_LABEL: Record<Effort, string> = { none: "Off", low: "Low", medium: "Med", high: "High" };
-const EFFORT_BARS: Record<Effort, number> = { none: 0, low: 1, medium: 2, high: 3 };
+const EFFORT_LABEL: Record<Effort, string> = {
+  none: "Off",
+  minimal: "Min",
+  low: "Low",
+  medium: "Med",
+  high: "High",
+  xhigh: "Max",
+};
+const EFFORT_BARS: Record<Effort, number> = { none: 0, minimal: 1, low: 1, medium: 2, high: 3, xhigh: 3 };
 
 /** The model ring's text: the registry's short label, else its label. */
 export function modelRingLabel(model: Pick<VoiceModel, "label" | "shortLabel">): string {
