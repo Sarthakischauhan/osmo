@@ -15,7 +15,6 @@ from starlette.testclient import WebSocketTestSession
 
 from conftest import FakeGrok, xai_key_store
 from core_ai import ModelRegistry
-from core_ai.voice import VoiceRegistry
 
 from symphony_server import session_previews
 from symphony_server.model_access import ModelAccess
@@ -91,7 +90,7 @@ def test_preview_is_rate_limited_per_socket(client: TestClient, canned_previews:
 
 
 def test_preview_cache_is_lru_bounded_and_drops_idle_locks(canned_previews: list[tuple[str, str]]) -> None:
-    access = ModelAccess(ModelRegistry(), VoiceRegistry(), CredentialStore(xai_key_store("key")), "http://unused/v1")
+    access = ModelAccess(ModelRegistry(), CredentialStore(xai_key_store("key")), "http://unused/v1")
     cache = PreviewCache(access, None, max_entries=2)
 
     async def run() -> None:

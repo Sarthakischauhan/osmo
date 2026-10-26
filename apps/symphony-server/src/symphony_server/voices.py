@@ -1,6 +1,6 @@
-"""Voice model registry, the `set_voice` contract, and cached 2 s voice previews.
+"""The voice models, the `set_voice` contract, and cached 2 s voice previews.
 
-The picker's models are the core_ai voice registry's realtime models (sent as the
+The picker's models are the core_ai voice catalog's realtime models (sent as the
 `models` event); `set_voice` and `session.configure` are validated against the
 same list, so the picker, the voice command and the server can never disagree.
 """
@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from core_ai.voice import AudioDelta, VoiceModelSpec, VoiceClosed, VoiceConfig, VoiceRegistry, VoiceSession
+from core_ai.voice import VOICE_MODELS, AudioDelta, VoiceModelSpec, VoiceClosed, VoiceConfig, VoiceSession
 from core_harness import EventSink, Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -96,11 +96,12 @@ OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in
 LATEST = "latest"
 
 
-def voice_models(voices: VoiceRegistry) -> tuple[VoiceModel, ...]:
-    """The picker's models: every realtime model in the core_ai voice registry, latest first.
-    Voices and reasoning efforts come from each model's VoiceModelSpec."""
-    specs = [m.spec for m in voices.models() if m.spec.provider in OSMO_PROVIDERS]
-    return tuple(voice_model(m) for m in sorted(specs, key=lambda m: (not m.id.endswith(LATEST), m.id)))
+def voice_models() -> tuple[VoiceModel, ...]:
+    """The picker's models: every realtime model in the core_ai voice catalog, latest first, then
+    in catalog order (xAI's, newest first). Voices and reasoning efforts come from each model's
+    VoiceModelSpec."""
+    specs = [m for m in VOICE_MODELS if m.provider in OSMO_PROVIDERS]
+    return tuple(voice_model(m) for m in sorted(specs, key=lambda m: not m.id.endswith(LATEST)))
 
 
 def voice_model(info: VoiceModelSpec) -> VoiceModel:
@@ -120,7 +121,7 @@ def voice_model(info: VoiceModelSpec) -> VoiceModel:
 
 
 def core_model_id(model: VoiceModel) -> str:
-    """The core_ai registry id (`namespace:model`) behind a picker model."""
+    """The core_ai id (`namespace:model`) behind a picker model."""
     return f"{CORE_NAMESPACES[model.provider]}:{model.id}"
 
 
@@ -142,7 +143,7 @@ class SetVoiceTool(Tool):
     def __init__(self, access: ModelAccess) -> None:
         super().__init__(
             name=SET_VOICE,
-            description=set_voice_description(voice_models(access.voices)),
+            description=set_voice_description(voice_models()),
             parameters=SET_VOICE_PARAMETERS,
         )
         self.access = access
@@ -157,11 +158,16 @@ class SetVoiceTool(Tool):
         return json.dumps({"configured": configured, "say": "Confirm the switch in one short line."})
 
 
+def voice_entry(voice: Voice) -> str:
+    """`id (traits)`, or just the id for a voice the catalog publishes no traits for."""
+    return f"{voice.id} ({', '.join(voice.traits)})" if voice.traits else voice.id
+
+
 def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
     """Tool description carrying the catalog, so 'a deeper voice' can be resolved from traits."""
     lines = []
     for model in models:
-        voices = "; ".join(f"{v.id} ({', '.join(v.traits)})" for v in model.voices)
+        voices = "; ".join(voice_entry(v) for v in model.voices)
         efforts = ", ".join(model.capabilities.reasoningEffort or []) or "none"
         lines.append(f"- {model.id}: voices {voices}; reasoning effort {efforts}")
     return (
@@ -294,7 +300,7 @@ class PreviewCache:
         self.waiters: dict[tuple[str, str], int] = {}
 
     def models(self) -> tuple[VoiceModel, ...]:
-        return voice_models(self.access.voices)
+        return voice_models()
 
     def disk_path(self, model: str, voice: str) -> Path | None:
         if self.directory is None:
@@ -338,14 +344,14 @@ class PreviewCache:
         return audio
 
     async def generate(self, model: str, voice: str) -> bytes:
-        """Open a short-lived voice session on the voice registry and keep the first ~2 s it speaks."""
+        """Open a short-lived voice session and keep the first ~2 s it speaks."""
         entry = find_model(self.models(), model)
         if entry is None or not self.access.connect(entry.provider):
             raise RuntimeError(f"{entry.provider if entry else model} is not connected on the server")
         config = VoiceConfig(voice=voice, instructions="Read the user's line aloud, exactly, once.", turn_detection="manual")
         audio = bytearray()
         async with asyncio.timeout(PREVIEW_TIMEOUT_S):
-            session = await self.access.voices.open(core_model_id(entry), config)
+            session = await self.access.open_voice(entry, config)
             try:
                 await session.add_message("user", PREVIEW_LINE)
                 await session.respond()

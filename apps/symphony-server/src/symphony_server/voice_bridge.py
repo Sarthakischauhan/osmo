@@ -212,7 +212,7 @@ class VoiceBridge:
         if not self.access.connect(model.provider):
             return False
         try:
-            voice = await self.access.voices.open(core_model_id(model), self.voice_config())
+            voice = await self.access.open_voice(model, self.voice_config())
         except (OSError, WebSocketException) as exc:
             log.error("could not open the voice session on %s: %s", model.id, exc)
             return False

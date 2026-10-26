@@ -8,7 +8,6 @@ import json
 import httpx
 import pytest
 from core_ai import ModelRegistry
-from core_ai.voice import VoiceRegistry
 from core_ai.types import Message
 from core_harness import EventSink
 
@@ -37,7 +36,7 @@ class DrawingRegistry(ModelRegistry):
 
 
 def tool_names(categories: str | None) -> set[str]:
-    access = ModelAccess(ModelRegistry(), VoiceRegistry(), CredentialStore(FileSecretStore(None)), "http://unused/v1")
+    access = ModelAccess(ModelRegistry(), CredentialStore(FileSecretStore(None)), "http://unused/v1")
     settings = Settings(tool_categories=tool_categories(categories))
     return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, WidgetBoard())}
 

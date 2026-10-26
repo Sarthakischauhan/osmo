@@ -304,9 +304,13 @@ def test_missing_key_is_reported_not_faked(grok: FakeGrok) -> None:
             assert state == {"type": "state", "state": "idle", "detail": "xAI is not connected: add a key in Providers"}
 
 
-def test_picker_models_are_the_registry_realtime_models(client: TestClient) -> None:
+def test_picker_models_are_the_catalog_realtime_models(client: TestClient) -> None:
     body = client.get("/voice-models").json()
-    assert [(m["id"], m["shortLabel"]) for m in body["models"]] == [("grok-voice-latest", "Latest"), ("grok-voice-3.0", "3.0")]
+    assert [(m["id"], m["shortLabel"]) for m in body["models"]] == [
+        ("grok-voice-latest", "Latest"),
+        ("grok-voice-3.0", "3.0"),
+        ("grok-voice-2.0", "2.0"),
+    ]
     assert body["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
 
 

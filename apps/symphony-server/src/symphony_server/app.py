@@ -1,6 +1,6 @@
 """Symphony server: core_server's run API plus Osmo's voice WebSocket.
 
-Every model call goes through core_ai package calls: the VoiceRegistry for voice
+Every model call goes through core_ai package calls: `core_ai.voice` for voice
 sessions and previews, the ModelRegistry for the harness runs behind `/api/runs`,
 and image generation. Both get their keys from the SecretStore (ModelAccess).
 """
@@ -8,12 +8,11 @@ and image generation. Both get their keys from the SecretStore (ModelAccess).
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
 import httpx
 from core_ai import ModelRegistry
-from core_ai.voice import VoiceRegistry
 from core_harness import Tool
 from core_server import (
     RunContext,
@@ -70,9 +69,14 @@ def osmo_tools(settings: Settings, client: httpx.AsyncClient, access: ModelAcces
     return [tool for tool in tools if TOOL_CATEGORIES[tool.name] in settings.tool_categories]
 
 
-def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool], links: VoiceLinks) -> ServerConfig:
+def osmo_core_config(
+    settings: Settings, access: ModelAccess, tools: list[Tool], links: VoiceLinks, context_limits: Mapping[str, int]
+) -> ServerConfig:
     """core_server config for every run: Osmo's prompt and tools on the shared registry, history in memory,
-    and a VoiceRunLink addon handing each run its session's voice link so voice models answer on it."""
+    and a VoiceRunLink addon handing each run its session's voice link so voice models answer on it.
+    `context_limits` holds only known voice-model windows (by run model id); core_server's
+    KeepSystemRecentCompactor trims a run to its model's window, and a model without one (xAI
+    documents none) is not trimmed."""
 
     def voice_link(context: RunContext) -> VoiceRunLink:
         return VoiceRunLink(links.get(context.session_id))
@@ -83,15 +87,9 @@ def osmo_core_config(settings: Settings, access: ModelAccess, tools: list[Tool],
         system_prompt=settings.instructions,
         tools=tools,
         persistence=MemoryPersistence(),
-        context_limits=voice_context_limits(access.voices),
+        context_limits=dict(context_limits),
         addon_factories=[voice_link],
     )
-
-
-def voice_context_limits(voices: VoiceRegistry) -> dict[str, int]:
-    """Known voice-model windows by run model id. core_server's KeepSystemRecentCompactor trims a
-    run's history to its model's window; a model without one (xAI documents none) is not trimmed."""
-    return {model.full_id: model.context_limit for model in voices.models() if model.context_limit is not None}
 
 
 def create_app(
@@ -100,14 +98,16 @@ def create_app(
     http_client: httpx.AsyncClient,
     secret_store: SecretStore | None = None,
     registry: ModelRegistry | None = None,
-    voices: VoiceRegistry | None = None,
+    voice_context_limits: Mapping[str, int] | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(secret_store or open_secret_store(settings))
-    access = ModelAccess(registry or ModelRegistry(), voices or VoiceRegistry(), credentials, settings.xai_base_url)
+    access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url)
     access.connect("xai")
     board = WidgetBoard()
     links = VoiceLinks()
-    core_config = osmo_core_config(settings, access, osmo_tools(settings, http_client, access, board), links)
+    core_config = osmo_core_config(
+        settings, access, osmo_tools(settings, http_client, access, board), links, voice_context_limits or {}
+    )
     previews = PreviewCache(access, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))

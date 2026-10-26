@@ -16,7 +16,6 @@ from pydantic import SecretStr
 from websockets.asyncio.server import ServerConnection, serve
 
 from symphony_server.app import create_app
-from core_ai.voice import VoiceRegistry
 from symphony_server.file_store import FileSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
 from symphony_server.settings import Settings
@@ -148,11 +147,11 @@ def make_client(
     settings: Settings,
     handler: Callable[[httpx.Request], httpx.Response] = unreachable,
     secret_store: SecretStore | None = None,
-    voices: VoiceRegistry | None = None,
+    voice_context_limits: dict[str, int] | None = None,
 ) -> TestClient:
     """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store, voices=voices))
+    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store, voice_context_limits=voice_context_limits))
 
 
 def xai_key_store(key: str = "test-key") -> SecretStore:

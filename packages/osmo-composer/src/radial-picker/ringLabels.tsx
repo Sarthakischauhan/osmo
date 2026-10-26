@@ -44,10 +44,16 @@ export function modelLabel(model: VoiceModel | undefined): OptionLabel {
   return { text, title: model?.id ?? "", node: text, tip: model?.id };
 }
 
+/** Hover title: the label, plus its traits when the catalog publishes any. */
+function voiceTitle(voice: Voice | undefined): string {
+  if (voice === undefined) return "";
+  return voice.traits.length > 0 ? `${voice.label} · ${voice.traits.join(", ")}` : voice.label;
+}
+
 export function voiceLabel(voice: Voice | undefined, playing: boolean): OptionLabel {
   return {
     text: voice?.label ?? "",
-    title: voice ? `${voice.label} · ${voice.traits.join(", ")}` : "",
+    title: voiceTitle(voice),
     node: (
       <>
         {voice?.label}

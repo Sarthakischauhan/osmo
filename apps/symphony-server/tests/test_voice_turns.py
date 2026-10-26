@@ -11,7 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import FakeGrok, make_client, xai_key_store
-from core_ai.voice import VoiceRegistry
 from core_harness.context.compact import COMPACTED_CONTEXT_MARK
 from symphony_server.settings import Settings
 from test_session import DINNER, answer, next_event, render, say, start, wait_listening
@@ -23,9 +22,9 @@ SMALL_MODEL = "grok-voice-3.0"
 
 @pytest.fixture
 def small_client(grok: FakeGrok) -> Iterator[TestClient]:
-    voices = VoiceRegistry(context_limits={f"grok:{SMALL_MODEL}": SMALL_LIMIT})
+    limits = {f"grok:{SMALL_MODEL}": SMALL_LIMIT}
     settings = Settings(xai_base_url=grok.base_url)
-    with make_client(settings, secret_store=xai_key_store(), voices=voices) as test_client:
+    with make_client(settings, secret_store=xai_key_store(), voice_context_limits=limits) as test_client:
         yield test_client
 
 

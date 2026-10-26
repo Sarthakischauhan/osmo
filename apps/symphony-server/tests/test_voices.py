@@ -9,7 +9,6 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from core_ai.voice import VoiceRegistry
 
 from conftest import FakeGrok
 from symphony_server.voices import (
@@ -21,6 +20,7 @@ from symphony_server.voices import (
     SetVoiceArgs,
     parse_voice_change,
     resolve_selection,
+    set_voice_description,
     voice_models,
 )
 from test_session import answer, call, next_event, say, start, tool_output, wait_listening
@@ -70,7 +70,7 @@ def test_models_event_on_connect(client: TestClient) -> None:
     with client.websocket_connect("/ws") as ws:
         event = next_event(ws, "models")
         assert event["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
-        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models(VoiceRegistry())[0].voices]
+        assert [v["id"] for v in event["models"][0]["voices"]] == [v.id for v in voice_models()[0].voices]
 
 
 def frames_until(grok: FakeGrok, *types: str) -> list[dict[str, Any]]:
@@ -182,17 +182,30 @@ def test_set_voice_model_switch_happens_after_the_confirming_turn(client: TestCl
         assert next_event(ws, "voice.configured")["source"] == "tool"
 
 
-def test_voice_models_endpoint_serves_the_registry_before_any_socket(client: TestClient) -> None:
+def test_voice_models_endpoint_serves_the_catalog_before_any_socket(client: TestClient) -> None:
     body = client.get("/voice-models").json()
     assert body["type"] == "models"
-    assert [m["id"] for m in body["models"]] == ["grok-voice-latest", "grok-voice-3.0"]
+    assert [m["id"] for m in body["models"]] == ["grok-voice-latest", "grok-voice-3.0", "grok-voice-2.0"]
     assert body["models"][0]["capabilities"]["reasoningEffort"] == ["none", "high"]
     assert body["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
 
 
 def test_model_ring_short_labels_are_distinct_and_served(client: TestClient) -> None:
-    shorts = [m.shortLabel for m in voice_models(VoiceRegistry())]
-    assert shorts == ["Latest", "3.0"]
+    shorts = [m.shortLabel for m in voice_models()]
+    assert shorts == ["Latest", "3.0", "2.0"]
     assert len(set(shorts)) == len(shorts)
     served = client.get("/voice-models").json()["models"]
-    assert [(m["id"], m["shortLabel"]) for m in served] == [("grok-voice-latest", "Latest"), ("grok-voice-3.0", "3.0")]
+    assert [(m["id"], m["shortLabel"]) for m in served] == [
+        ("grok-voice-latest", "Latest"),
+        ("grok-voice-3.0", "3.0"),
+        ("grok-voice-2.0", "2.0"),
+    ]
+
+
+def test_set_voice_description_lists_traits_only_where_the_catalog_has_them() -> None:
+    model = voice_models()[0]
+    plain = model.model_copy(update={"voices": [Voice(id="eve", label="Eve", traits=[])]})
+    described = model.model_copy(update={"voices": [Voice(id="sal", label="Sal", traits=["deep"])]})
+    text = set_voice_description((plain, described))
+    assert f"- {model.id}: voices eve;" in text
+    assert f"- {model.id}: voices sal (deep);" in text
