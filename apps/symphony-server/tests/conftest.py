@@ -6,18 +6,21 @@ import asyncio
 import json
 import queue
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
 import pytest
-from core_ai.registry import ModelRegistry
-from core_server import build_config
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from websockets.asyncio.server import ServerConnection, serve
 
-from symphony_server.app import create_app, osmo_tools
+from symphony_server.app import create_app
+from symphony_server.file_store import FileSecretStore
+from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
 from symphony_server.settings import Settings
+
+# Hermetic per-model context windows (xAI documents none; the server requires them configured).
 
 
 class FakeGrok:
@@ -48,14 +51,17 @@ class FakeGrok:
             outbox = self.outbox
             assert outbox is not None
 
+            requests: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
             async def push() -> None:
                 while True:
-                    await conn.send(await outbox.get())
+                    await conn.send(await echo_metadata(await outbox.get(), requests))
 
             pusher = asyncio.create_task(push())
             try:
                 async for message in conn:
                     self.received.put(message)
+                    record_request(message, requests)
             finally:
                 pusher.cancel()
                 self.closed.put(path)
@@ -69,8 +75,9 @@ class FakeGrok:
         self.loop.run_until_complete(main())
 
     @property
-    def url(self) -> str:
-        return f"ws://127.0.0.1:{self.port}/v1/realtime?model=grok-voice-latest"
+    def base_url(self) -> str:
+        """xAI's REST base on this server; core_ai opens `ws://…/v1/realtime?model=…` from it."""
+        return f"http://127.0.0.1:{self.port}/v1"
 
     def send(self, message: dict[str, Any] | bytes) -> None:
         payload: str | bytes = message if isinstance(message, bytes) else json.dumps(message)
@@ -98,6 +105,35 @@ class FakeGrok:
                 return message
 
 
+# How long the fake waits for a pending `response.create` before treating a pushed
+# `response.created` as a server-VAD response (null metadata).
+REQUEST_WAIT_S = 0.2
+
+
+def record_request(message: str | bytes, requests: asyncio.Queue[dict[str, Any]]) -> None:
+    """Queue the metadata of each `response.create` the client sends, as xAI does."""
+    if isinstance(message, str):
+        event = json.loads(message)
+        if event["type"] == "response.create":
+            requests.put_nowait(event.get("response", {}).get("metadata"))
+
+
+async def echo_metadata(payload: str | bytes, requests: asyncio.Queue[dict[str, Any]]) -> str | bytes:
+    """Echo the oldest pending request's metadata on a test-pushed `response.created`
+    (docs.x.ai: response.create metadata is returned on response.created/done; server-VAD
+    responses carry null metadata)."""
+    if isinstance(payload, bytes):
+        return payload
+    event = json.loads(payload)
+    if event["type"] != "response.created" or "metadata" in event["response"]:
+        return payload
+    try:
+        event["response"]["metadata"] = await asyncio.wait_for(requests.get(), REQUEST_WAIT_S)
+    except TimeoutError:
+        event["response"]["metadata"] = None
+    return json.dumps(event)
+
+
 @pytest.fixture
 def grok() -> FakeGrok:
     return FakeGrok()
@@ -107,14 +143,25 @@ def unreachable(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"unexpected network call to {request.url}")
 
 
-def make_client(settings: Settings) -> TestClient:
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(unreachable))
-    tools = osmo_tools(http_client)
-    config = build_config(registry=ModelRegistry(), model_id="grok:grok-test", tools=list(tools.values()))
-    return TestClient(create_app(settings, core_config=config, tools=tools, http_client=http_client))
+def make_client(
+    settings: Settings,
+    handler: Callable[[httpx.Request], httpx.Response] = unreachable,
+    secret_store: SecretStore | None = None,
+    voice_context_limits: dict[str, int] | None = None,
+) -> TestClient:
+    """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return TestClient(create_app(settings, http_client=http_client, secret_store=secret_store, voice_context_limits=voice_context_limits))
+
+
+def xai_key_store(key: str = "test-key") -> SecretStore:
+    """An in-memory SecretStore holding an xAI key, as the provider auth flow would leave it."""
+    store = FileSecretStore(None)
+    store.put(DEFAULT_OWNER, ProviderAuth(provider="xai", kind="api_key", secret=SecretStr(key)))
+    return store
 
 
 @pytest.fixture
 def client(grok: FakeGrok) -> Iterator[TestClient]:
-    with make_client(Settings(xai_api_key="test-key", realtime_url=grok.url)) as test_client:
+    with make_client(Settings(xai_base_url=grok.base_url), secret_store=xai_key_store()) as test_client:
         yield test_client

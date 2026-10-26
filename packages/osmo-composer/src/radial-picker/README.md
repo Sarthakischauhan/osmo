@@ -41,6 +41,10 @@ const [pick, save, choose] = usePersistedPick(session.voiceModels);
 
 `VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "none" | "low" | "medium" | "high"` (xAI documents `reasoning.effort` as `"high"` or `"none"`).
 
+## Model labels
+
+The model ring shows `VoiceModel.shortLabel` (e.g. "Latest", "3.0"), else `label`, untruncated; hovering or keyboard-focusing a model shows its full id in a tooltip.
+
 ## `providerIcons`
 
 Keyed by `VoiceModel.provider`; each entry is `{ label, logo?, fallback? }`. `label` is used in the
@@ -63,7 +67,7 @@ const icons = { ...providerIcons, acme: { label: "Acme", logo: "https://cdn.exam
 - Rings (angles CCW from +x): R1 providers r=84, 30–150°, 4 slots × 40° (fewer providers than slots are spread evenly around 90°); R2 models r=160, 20–160°, 5 × 35°;
   R3 voices r=235, 130–170°, 3 × 20° (left); R3 effort r=235, 14–46°, 3 × 16° (right, only levels in `reasoningEffort`, hidden if none).
 - Hover orb → R1, provider → R2, model → R3. Leaving the dial closes it after 250 ms; Escape closes and refocuses the orb.
-- Hit-testing is by radius from the orb centre (R1 56–120, R2 120–198, R3 198–275; R3 side by angle).
+- Hit-testing is by radius from the orb centre (R1 56–122, R2 122–198, R3 198–274; R3 side by angle; ring radii 84/160/236 = 84 + n × `--rp-ring-spacing`).
 - Scroll with wheel/trackpad (`deltaY + deltaX`), touch angular drag, or ←/→ in a focused ring. Offsets are fractional,
   snap 120 ms after input stops with a 180 ms ease-out, clamp at both ends, and never wrap. Edge items fade/scale over the last
   half-slot, with `…` where more items exist. While a ring scrolls or settles, outer rings don't open or switch until 150 ms after the snap.
@@ -75,7 +79,27 @@ const icons = { ...providerIcons, acme: { label: "Acme", logo: "https://cdn.exam
 White alphas on `#0A0A0A`, no tint. Pills: idle fill 0.04 / text `#B5B5B5`, hover 0.09 / `#FFF`, selected 0.16 / `#FFF`, `backdrop-filter: blur(14px)`.
 Following Osmo's no-lines rule there are **no borders and no arc tracks**: state is fill plus a soft glow, and arcs are implied
 by spacing. To restore the original spec's lines, add `box-shadow: inset 0 0 0 1px rgba(255,255,255,.12 | .25 | .45)` to the
-idle/hover/selected `.rp-item` rules in `radialPicker.css`.
+idle/hover/selected `.rp-option` rules in `radialPicker.css`.
+
+## Option tokens
+
+Every option in every ring (provider logo chips, models, voices, effort) is one primitive: `RadialOption`
+(`option.tsx`) rendering one class, `.rp-option`, tagged only with `data-ring`. There are **no per-ring size
+rules**; sizes come from these tokens on `.rp`. `OPTION_TOKENS` in `geometry.ts` is the source: `.rp` gets them
+inline and the CSS defaults mirror them (a unit test keeps the two equal).
+
+| Token | Value | Meaning |
+| --- | --- | --- |
+| `--rp-option-height` | 36px | visual height of every option |
+| `--rp-option-padding-x` | 12px | horizontal padding of every option |
+| `--rp-option-radius` | 999px | corner radius (pill) |
+| `--rp-option-gap` | 6px | gap between label and glyph (logo, meter, playing bars) |
+| `--rp-option-font-size` | 12px | label size |
+| `--rp-option-hit` | 44px | minimum hit height; `::before` extends the 36px pill to it |
+| `--rp-ring-spacing` | 76px | radial distance between rings (radii 84 / 160 / 236) |
+
+Provider chips are the same 36px pill with a 20px logo (or 20px-wide monogram) inside the same padding.
+`apps/web/e2e/unified-options-shots.ts` fails if computed height or padding differs between any two rings.
 
 ## In Osmo
 

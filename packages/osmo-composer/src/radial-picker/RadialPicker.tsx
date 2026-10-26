@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
-import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
+import type { VoiceModel, VoiceSelection } from "../protocol";
 import {
+  optionTokenVars,
   CLOSE_GRACE_MS,
   FREEZE_AFTER_SNAP_MS,
   PREVIEW_HOVER_MS,
@@ -17,12 +18,28 @@ import {
   polar,
   slotAngle,
 } from "./geometry";
-import { type ProviderIcon, ProviderMark, providerIcon, providerIcons as defaultIcons } from "./providerIcons";
-import { type Context, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
+import { RadialOption } from "./option";
+import { type ProviderIcon, providerIcons as defaultIcons } from "./providerIcons";
+import {
+  type OptionLabel,
+  PICKER_LABEL,
+  RING_LABELS,
+  effortLabel,
+  modelLabel,
+  pickSummary,
+  providerLabel,
+  voiceLabel,
+} from "./ringLabels";
+import { useReducedMotion } from "./useReducedMotion";
+
+export { modelRingLabel } from "./ringLabels";
+import { type Context, type PickerProvider, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
 
 export interface RadialPickerProps {
   registry: VoiceModel[];
   value: VoiceSelection;
+  /** Shown in the summary pill instead of the pick while the models fail to (re)load. */
+  loadError?: string;
   /** Fires once per commit (click, Enter or Space). Send `session.configure` from here. */
   onChange: (next: VoiceSelection) => void;
   orbSize?: number;
@@ -42,10 +59,12 @@ export interface RadialPickerProps {
   previewing?: { model: string; voice: string };
   /** No previews right now (e.g. the agent is speaking). */
   previewDisabled?: boolean;
+  /** Every provider the server knows (`GET /providers`); those without voice models show locked. */
+  providers?: readonly PickerProvider[];
+  /** A locked provider (not connected, or no voice models yet) was committed: offer to connect it. */
+  onLockedProvider?: (provider: string) => void;
 }
 
-const EFFORT_LABEL: Record<Effort, string> = { none: "Off", low: "Low", medium: "Med", high: "High" };
-const EFFORT_BARS: Record<Effort, number> = { none: 0, low: 1, medium: 2, high: 3 };
 /** Dial canvas: R3 radius plus room for half a pill. */
 const REACH = 300;
 const KEY_ORDER: RingKey[] = ["providers", "models", "voices", "effort"];
@@ -57,20 +76,11 @@ interface Glide {
   start: number;
 }
 
-function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReduced(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return reduced;
-}
 
 export function RadialPicker({
   registry,
   value,
+  loadError,
   onChange,
   orbSize = 96,
   providerIcons = defaultIcons,
@@ -81,8 +91,10 @@ export function RadialPicker({
   previewDisabled = false,
   onOrbActivate,
   orbLabel,
+  providers,
+  onLockedProvider,
 }: RadialPickerProps) {
-  const groups = useMemo(() => groupProviders(registry), [registry]);
+  const groups = useMemo(() => groupProviders(registry, providers), [registry, providers]);
   const [state, dispatch] = useReducer(reducePicker, initialPicker);
   const reduced = useReducedMotion();
   const [glide, setGlide] = useState<{ ring: RingKey; value: number } | undefined>();
@@ -326,7 +338,10 @@ export function RadialPicker({
   const commit = (ring: RingKey, index: number) => {
     if (ring === "providers") {
       const target = groups[index];
-      if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
+      if (target?.locked) {
+        close();
+        onLockedProvider?.(target.id);
+      } else if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
       return;
     }
     if (ring === "models") {
@@ -394,15 +409,7 @@ export function RadialPicker({
 
   // ---------------------------------------------------------------- render
 
-  const valueModel = registry.find((m) => m.id === value.model);
-  const summary = [
-    valueModel ? providerIcon(providerIcons, valueModel.provider).label : undefined,
-    value.model,
-    valueModel?.voices.find((v) => v.id === value.voice)?.label ?? value.voice,
-    value.effort,
-  ]
-    .filter((part) => part !== undefined)
-    .join(" · ");
+  const summary = pickSummary(registry, value, providerIcons);
 
   const renderRing = (key: RingKey) => {
     const ring = ringSpec(key, counts[key]);
@@ -410,51 +417,14 @@ export function RadialPicker({
     const count = counts[key];
     const selected = selectedIndex(key);
     const markers = moreMarkers(ring, count, offset);
-    const labelFor = (index: number): { text: string; title: string; node: ReactNode } => {
-      if (key === "providers") {
-        const g = groups[index];
-        const entry = providerIcon(providerIcons, g?.id ?? "");
-        return { text: entry.label, title: entry.label, node: <ProviderMark entry={entry} /> };
-      }
-      if (key === "models") {
-        const m = group?.models[index];
-        return { text: m?.label ?? "", title: m?.id ?? "", node: m?.label };
-      }
+    const labelFor = (index: number): OptionLabel => {
+      if (key === "providers") return providerLabel(groups[index], providerIcons);
+      if (key === "models") return modelLabel(group?.models[index]);
       if (key === "voices") {
         const v = pathModel?.voices[index];
-        const playing = previewing !== undefined && previewing.model === pathModel?.id && previewing.voice === v?.id;
-        return {
-          text: v?.label ?? "",
-          title: v ? `${v.label} · ${v.traits.join(", ")}` : "",
-          node: (
-            <>
-              {v?.label}
-              {playing && (
-                <span className="rp-playing" aria-label="previewing">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              )}
-            </>
-          ),
-        };
+        return voiceLabel(v, previewing !== undefined && previewing.model === pathModel?.id && previewing.voice === v?.id);
       }
-      const level = efforts[index] ?? "low";
-      return {
-        text: EFFORT_LABEL[level],
-        title: `Reasoning effort: ${level}`,
-        node: (
-          <>
-            {EFFORT_LABEL[level]}
-            <span className="rp-meter" aria-hidden>
-              {[1, 2, 3].map((bar) => (
-                <i key={bar} data-on={bar <= EFFORT_BARS[level]} />
-              ))}
-            </span>
-          </>
-        ),
-      };
+      return effortLabel(efforts[index] ?? "low");
     };
     const items: ReactNode[] = [];
     for (let index = 0; index < count; index++) {
@@ -473,20 +443,24 @@ export function RadialPicker({
           className="rp-slot"
           style={{ left: x, top: y, opacity: presence.opacity, transform: `translate(-50%, -50%) scale(${presence.scale})` }}
         >
-          <div
+          <RadialOption
             id={`${ids}-${key}-${index}`}
-            role="option"
-            aria-selected={isSelected}
-            title={label.title}
-            aria-label={label.title}
-            className={`rp-item rp-${key}`}
-            data-state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
-            style={{ animationDelay: `${Math.max(0, Math.round(position)) * 20}ms` }}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() => commit(key, index)}
+            ring={key}
+            selected={isSelected}
+            locked={key === "providers" && groups[index]?.locked === true}
+            title={label.tip === undefined ? label.title : undefined}
+            label={label.tip === undefined ? label.title : `${label.text}, ${label.tip}`}
+            state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
+            delayMs={Math.max(0, Math.round(position)) * 20}
+            onCommit={() => commit(key, index)}
           >
             {label.node}
-          </div>
+          </RadialOption>
+          {label.tip !== undefined && isHover && (
+            <span className="rp-tip" role="tooltip" data-for={`${ids}-${key}-${index}`}>
+              {label.tip}
+            </span>
+          )}
         </div>,
       );
     }
@@ -527,7 +501,7 @@ export function RadialPicker({
       data-open={state.depth > 0}
       data-depth={state.depth}
       data-reduced-motion={reduced}
-      style={{ width, height: cy + orbSize / 2 + 64 }}
+      style={{ ...optionTokenVars(), width, height: cy + orbSize / 2 + 64 }}
       onPointerMove={(event) => {
         const point = localPoint(event.clientX, event.clientY);
         if (!point) return;
@@ -587,21 +561,12 @@ export function RadialPicker({
       </button>
       {/* After the orb in DOM order so Tab goes orb → providers → models → voices → effort. */}
       <div className="rp-dial">{openRings.map(renderRing)}</div>
-      <output className="rp-summary" style={{ top: cy + orbSize / 2 + 18 }} aria-live="polite">
-        {summary}
+      <output className="rp-summary" data-error={loadError !== undefined} style={{ top: cy + orbSize / 2 + 18 }} aria-live="polite">
+        {loadError ?? summary}
       </output>
     </div>
   );
 }
-
-const PICKER_LABEL = "Change provider, model, voice and reasoning";
-
-const RING_LABELS: Record<RingKey, string> = {
-  providers: "Providers",
-  models: "Models",
-  voices: "Voices",
-  effort: "Reasoning effort",
-};
 
 /** Whether `element` has keyboard (`:focus-visible`) focus; false where the selector is unsupported. */
 export function focusVisible(element: Element): boolean {

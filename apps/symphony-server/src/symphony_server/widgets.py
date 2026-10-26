@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints, TypeAdapter, field_validator
 
 
 class _Strict(BaseModel):
@@ -21,10 +21,14 @@ class WidgetButton(_Strict):
     label: str = Field(min_length=1, max_length=80)
 
 
+# A picture made by create_image travels inline as base64; any other image must be a web URL.
+DataImageUrl = Annotated[str, StringConstraints(pattern=r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$")]
+
+
 class CardProps(_Strict):
     title: str = Field(min_length=1, max_length=120)
     body: str = Field(max_length=4000)
-    image: HttpUrl | None = None
+    image: HttpUrl | DataImageUrl | None = None
     actions: list[WidgetButton] | None = Field(default=None, max_length=4)
 
 

@@ -11,11 +11,17 @@ export const widgetActionSchema = z.object({
   label: z.string().min(1).max(80),
 });
 
+/** A card image: an http(s) link, or a picture create_image drew, inlined as a data: URL (same rule as Symphony). */
+export const cardImageSchema = z.union([
+  z.string().url().regex(/^https?:\/\//),
+  z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/),
+]);
+
 export const cardPropsSchema = z
   .object({
     title: z.string().min(1).max(120),
     body: z.string().max(4000),
-    image: z.string().url().optional(),
+    image: cardImageSchema.optional(),
     actions: z.array(widgetActionSchema).max(4).optional(),
   })
   .strict();

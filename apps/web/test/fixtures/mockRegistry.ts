@@ -20,7 +20,7 @@ const duo: [string, string, string[]][] = [
 /**
  * Test fixture (never bundled): 7 providers, one (openai) with 9 models, one model
  * (claude-voice-1) with 6 voices and all three efforts, plus the real
- * grok-voice-latest with Eve, Ara and Sal. Used by the main-app picker e2e.
+ * grok-voice-latest with Eve, Ara and Sal. Used by the main-app picker and provider-auth e2e.
  */
 export const MOCK_REGISTRY: VoiceModel[] = [
   model("xai", "grok-voice-latest", "Grok Voice", [
@@ -50,3 +50,11 @@ export const MOCK_REGISTRY: VoiceModel[] = [
   model("deepgram", "aura-2", "Aura 2", [["thalia", "Thalia", ["clear"]], ["orion", "Orion", ["deep"]]]),
   model("cartesia", "sonic-2", "Sonic 2", [["sky", "Sky", ["airy"]], ["stone", "Stone", ["low"]]]),
 ];
+
+/** Providers the mock server reports as not connected; their models arrive `locked`. */
+export const LOCKED_PROVIDERS = ["openai", "openrouter", "vercel"];
+
+/** MOCK_REGISTRY plus an OpenRouter model, with LOCKED_PROVIDERS' models locked (provider-auth e2e). */
+export const LOCKED_REGISTRY: VoiceModel[] = [...MOCK_REGISTRY, model("openrouter", "openrouter-voice", "OR Voice", duo), model("vercel", "vercel-voice", "Gateway Voice", duo)].map((m) =>
+  LOCKED_PROVIDERS.includes(m.provider) ? { ...m, locked: true } : m,
+);

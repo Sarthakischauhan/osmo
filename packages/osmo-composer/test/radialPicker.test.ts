@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { VoiceModel } from "../src/protocol";
+import { readFileSync } from "node:fs";
+import { type VoiceModel, voiceModelSchema } from "../src/protocol";
 import {
   BANDS,
+  OPTION_TOKENS,
+  optionTokenVars,
   FREEZE_AFTER_SNAP_MS,
   RINGS,
   clampOffset,
   edgeFalloff,
   hitTest,
   itemAt,
+  itemPresence,
   moreMarkers,
   nearestSlot,
   offsetFor,
@@ -17,7 +21,7 @@ import {
   snapOffset,
 } from "../src/radial-picker/geometry";
 import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
-import { focusVisible } from "../src/radial-picker/RadialPicker";
+import { focusVisible, modelRingLabel } from "../src/radial-picker/RadialPicker";
 import {
   type LogoFetch,
   isPlaceholderLogo,
@@ -122,12 +126,12 @@ describe("hit bands", () => {
     const ring = (r: number, angle: number) => hitTest(0, 0, at(r, angle).x, at(r, angle).y).ring;
     expect(ring(30, 90)).toBe("orb");
     expect(ring(BANDS.orb, 90)).toBe("providers");
-    expect(ring(119, 90)).toBe("providers");
-    expect(ring(120, 90)).toBe("models");
-    expect(ring(197, 90)).toBe("models");
-    expect(ring(198, 120)).toBe("voices");
-    expect(ring(274, 60)).toBe("effort");
-    expect(ring(275, 60)).toBe("none");
+    expect(ring(BANDS.r1 - 1, 90)).toBe("providers");
+    expect(ring(BANDS.r1, 90)).toBe("models");
+    expect(ring(BANDS.r2 - 1, 90)).toBe("models");
+    expect(ring(BANDS.r2, 120)).toBe("voices");
+    expect(ring(BANDS.r3 - 1, 60)).toBe("effort");
+    expect(ring(BANDS.r3, 60)).toBe("none");
     expect(hitTest(0, 0, 0, 100).ring).toBe("none");
   });
   it("finds the item under an angle at an offset", () => {
@@ -178,6 +182,37 @@ describe("reducer", () => {
     const s = reducePicker(open, { type: "scroll", ring: "providers", slots: 0.3, count: 3 });
     expect(reducePicker(s, { type: "hoverProvider", provider: "openai", now: 0, groups, value }).depth).toBe(1);
   });
+  it("a provider whose models are all locked is a locked group whose models ring never opens", () => {
+    const locked = groupProviders(REGISTRY.map((m) => (m.provider === "openai" ? { ...m, locked: true } : m)));
+    expect(locked.find((g) => g.id === "openai")?.locked).toBe(true);
+    expect(locked.filter((g) => g.id !== "openai").every((g) => !g.locked)).toBe(true);
+    const opened = reducePicker(initialPicker, { type: "open", groups: locked, value });
+    expect(reducePicker(opened, { type: "hoverProvider", provider: "openai", now: 0, groups: locked, value }).depth).toBe(1);
+    const other = locked.find((g) => g.id !== "openai")?.id ?? "";
+    const r2 = reducePicker(opened, { type: "hoverProvider", provider: other, now: 0, groups: locked, value });
+    expect(reducePicker(r2, { type: "hoverProvider", provider: "openai", now: 0, groups: locked, value })).toMatchObject({ depth: 1, provider: undefined });
+  });
+  it("shows every known provider: those without voice models are locked with a reason", () => {
+    const xai = [model("xai", "grok-voice-latest", ["eve"], ["none", "high"])];
+    const known = [
+      { id: "xai", label: "xAI" },
+      { id: "openai", label: "OpenAI" },
+      { id: "vercel", label: "Vercel AI Gateway" },
+      { id: "openrouter", label: "OpenRouter" },
+    ];
+    const ring = groupProviders(xai, known);
+    expect(ring.map((g) => [g.id, g.locked, g.reason ?? null])).toEqual([
+      ["xai", false, null],
+      ["openai", true, "No voice models yet"],
+      ["vercel", true, "No voice models yet"],
+      ["openrouter", true, "No voice models yet"],
+    ]);
+    expect(ring.find((g) => g.id === "vercel")?.label).toBe("Vercel AI Gateway");
+    const unconnected = groupProviders(xai.map((m) => ({ ...m, locked: true })), known);
+    expect(unconnected[0]).toMatchObject({ id: "xai", locked: true, reason: "not connected" });
+    const opened = reducePicker(initialPicker, { type: "open", groups: ring, value });
+    expect(reducePicker(opened, { type: "hoverProvider", provider: "openai", now: 0, groups: ring, value }).depth).toBe(1);
+  });
   it("reveals a keyboard-focused item by scrolling the least", () => {
     const s = { ...open, offsets: { ...open.offsets, models: 0 } };
     expect(reducePicker(s, { type: "reveal", ring: "models", index: 6, count: 9 }).offsets.models).toBe(2);
@@ -195,6 +230,10 @@ describe("selection rules", () => {
     if (!grok) throw new Error("fixture");
     expect(pickModel(grok, { model: "deep", voice: "v1", effort: "high" })).toEqual({ model: "grok-voice-latest", voice: "eve" });
   });
+  it("without medium, a new model starts at its highest effort, however the registry lists them", () => {
+    const xai = model("xai", "grok-voice-latest", ["eve"], ["none", "high"]);
+    expect(pickModel(xai, { model: "x", voice: "v" })).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+  });
   it("orders efforts low → high and hides them when absent", () => {
     expect(effortsOf(REGISTRY.find((m) => m.id === "m4"))).toEqual(["low", "high"]);
     expect(effortsOf(REGISTRY[0])).toEqual([]);
@@ -202,7 +241,13 @@ describe("selection rules", () => {
 });
 
 describe("persistence", () => {
-  it("uses the key osmo.voice-pick", () => expect(PICK_STORAGE_KEY).toBe("osmo.voice-pick"));
+  it("uses the key osmo.voice-pick.v2, so picks saved under the old 'none' default are not read", () =>
+    expect(PICK_STORAGE_KEY).toBe("osmo.voice-pick.v2"));
+  it("defaults xAI's realtime models to high effort, as the server's default_selection does", () => {
+    const xai = [model("xai", "grok-voice-latest", ["eve"], ["none", "high"]), model("xai", "grok-voice-3.0", ["eve"], ["none", "high"])];
+    expect(defaultPick(xai)).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+    expect(restorePick(null, xai)?.effort).toBe("high");
+  });
   it("restores a saved pick that still exists", () => {
     expect(restorePick(JSON.stringify({ model: "deep", voice: "v3", effort: "low" }), REGISTRY)).toEqual({ model: "deep", voice: "v3", effort: "low" });
   });
@@ -304,3 +349,78 @@ describe("focusVisible", () => {
     ).toBe(false);
   });
 });
+
+describe("model ring labels", () => {
+  it("shows the short label, else the label", () => {
+    expect(modelRingLabel({ label: "Grok Voice", shortLabel: "Latest" })).toBe("Latest");
+    expect(modelRingLabel({ label: "Grok Voice 3.0", shortLabel: "3.0" })).toBe("3.0");
+    expect(modelRingLabel({ label: "Thinker" })).toBe("Thinker");
+    expect(modelRingLabel({ label: "Thinker", shortLabel: null })).toBe("Thinker");
+  });
+  it("accepts shortLabel on the wire, optional", () => {
+    const base = model("xai", "grok-voice-3.0", ["eve"]);
+    expect(voiceModelSchema.parse({ ...base, shortLabel: "3.0" }).shortLabel).toBe("3.0");
+    expect(voiceModelSchema.parse(base).shortLabel).toBeUndefined();
+  });
+  it("never truncates the model ring text and styles the id tooltip without a border", () => {
+    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+    const rule = (sel: string) => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(".rp-option")).not.toMatch(/ellipsis|max-width|overflow/);
+    expect(rule(".rp-tip")).toMatch(/border: 0/);
+    expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
+  });
+});
+
+describe("summary font", () => {
+  it("uses the ring pills' sans (inherited from .rp), not a monospace", () => {
+    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+    const summary = css.match(/\.rp-summary \{([^}]*)\}/)?.[1] ?? "";
+    expect(summary).toMatch(/font-family: inherit/);
+    expect(summary).toMatch(/font-weight: 500/);
+    expect(summary).not.toMatch(/mono/i);
+    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: Inter/);
+  });
+});
+
+describe("a 28-voice ring (xAI's documented roster)", () => {
+  it("shows a window with … markers, fades mid-glide and settles on whole slots", () => {
+    expect(moreMarkers(RINGS.voices, 28, 0)).toEqual({ before: false, after: true });
+    expect(moreMarkers(RINGS.voices, 28, 12)).toEqual({ before: true, after: true });
+    expect(moreMarkers(RINGS.voices, 28, 25)).toEqual({ before: true, after: false });
+    expect(snapOffset(RINGS.voices, 28, 12.4)).toBe(12);
+    expect(snapOffset(RINGS.voices, 28, 40)).toBe(25);
+    const presence = itemPresence(RINGS.voices, -0.25);
+    expect(presence.opacity).toBeGreaterThan(0);
+    expect(presence.opacity).toBeLessThan(1);
+  });
+});
+
+describe("one option primitive", () => {
+  const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
+  it("has no per-ring option rules", () => {
+    expect(css).not.toMatch(/\.rp-(providers|models|voices|effort)\b/);
+    expect(css).not.toMatch(/\[data-ring/);
+    expect(css).not.toMatch(/\.rp-item\b/);
+  });
+  it("sizes .rp-option only from the shared tokens", () => {
+    const option = css.match(/\.rp-option \{([^}]*)\}/)?.[1] ?? "";
+    expect(option).toMatch(/height: var\(--rp-option-height\)/);
+    expect(option).toMatch(/padding: 0 var\(--rp-option-padding-x\)/);
+    expect(option).toMatch(/border-radius: var\(--rp-option-radius\)/);
+    expect(option).toMatch(/gap: var\(--rp-option-gap\)/);
+    expect(option).toMatch(/border: var\(--picker-border\)/);
+  });
+  it("declares the same token values in CSS as OPTION_TOKENS", () => {
+    for (const [name, value] of Object.entries(optionTokenVars())) {
+      expect(css).toContain(`${name}: ${value};`);
+    }
+  });
+  it("keeps hit areas at least 44px and spaces rings by --rp-ring-spacing", () => {
+    expect(OPTION_TOKENS.hit).toBeGreaterThanOrEqual(44);
+    expect(OPTION_TOKENS.height).toBeLessThanOrEqual(OPTION_TOKENS.hit);
+    expect(RINGS.models.radius - RINGS.providers.radius).toBe(OPTION_TOKENS.ringSpacing);
+    expect(RINGS.voices.radius - RINGS.models.radius).toBe(OPTION_TOKENS.ringSpacing);
+    expect(RINGS.effort.radius).toBe(RINGS.voices.radius);
+  });
+});
+

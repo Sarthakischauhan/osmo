@@ -96,7 +96,7 @@ async function main() {
     await page.evaluate(() => window.localStorage.clear());
     await page.reload();
     await page.waitForSelector(".dock .rp-orb");
-    const stored = () => page.evaluate(() => window.localStorage.getItem("osmo.voice-pick"));
+    const stored = () => page.evaluate(() => window.localStorage.getItem("osmo.voice-pick.v2"));
     await page.locator(".dock .rp-orb").click();
     await page.waitForSelector("text=Nice to meet you, Ada", { timeout: 8000 });
     check(`session.start's voice.configured saved the applied pick (${await stored()})`, (await stored())?.includes("grok-voice-latest") === true);

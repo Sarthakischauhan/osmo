@@ -23,14 +23,18 @@ export const voiceModelSchema = z.object({
   id: z.string(),
   provider: z.string(),
   label: z.string(),
+  /** Short, distinct name for the model ring; falls back to `label`. */
+  shortLabel: z.string().nullish(),
   capabilities: z.object({
     tools: z.boolean(),
     interrupt: z.boolean(),
     customVoices: z.boolean(),
-    reasoningEffort: z.array(effortSchema).optional(),
+    reasoningEffort: z.array(effortSchema).nullish(),
   }),
   voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
   defaultVoice: z.string(),
+  /** The provider has no credential on the server: picking it asks to connect it. */
+  locked: z.boolean().optional(),
 });
 export type VoiceModel = z.infer<typeof voiceModelSchema>;
 
@@ -46,7 +50,6 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
     voice: z.string().min(1).optional(),
-    instructions: z.string().optional(),
     model: z.string().min(1).optional(),
     effort: effortSchema.optional(),
   }),

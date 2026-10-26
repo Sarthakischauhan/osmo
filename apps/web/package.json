@@ -11,13 +11,24 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hookform/resolvers": "^6.0.0",
     "@osmo/osmo-composer": "workspace:*",
     "@osmo/osmo-widgets": "workspace:*",
     "@sarchauhan/chat": "0.0.2",
     "@sarchauhan/protocol": "0.0.3",
+    "@tailwindcss/vite": "^4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "cuelume": "0.2.8",
+    "lucide-react": "^1.61.0",
+    "radix-ui": "^1.8.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.91.0",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22",

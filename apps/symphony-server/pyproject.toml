@@ -14,6 +14,8 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.9",
     "python-dotenv>=1.0",
+    "cryptography>=43",
+    "infisicalsdk>=1.0.17",
 ]
 
 [project.scripts]
@@ -38,3 +40,19 @@ testpaths = ["tests"]
 strict = true
 packages = ["symphony_server"]
 mypy_path = "src"
+# symphony-core's ModelRegistry.__init__ has no annotations (core_ai/registry.py, outside #166's scope).
+untyped_calls_exclude = ["core_ai.registry"]
+
+# infisicalsdk ships no type information (no py.typed); the store types the slice it uses as Protocols.
+[[tool.mypy.overrides]]
+module = ["infisical_sdk", "infisical_sdk.*"]
+ignore_missing_imports = true
+
+
+# `uv sync` resolves the symphony packages at the rev requirements.txt pins. core-server comes from
+# the same symphony rev (its core_server is byte-identical to the vendored a335957 copy), because
+# the vendored pyproject's `{ workspace = true }` sources only resolve inside symphony's workspace.
+[tool.uv.sources]
+core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "f2a29fc8e978b646300d626081c6e833759c0f58", subdirectory = "core_server" }
+symphony-core = { git = "https://github.com/Sarthakischauhan/symphony", rev = "f2a29fc8e978b646300d626081c6e833759c0f58", subdirectory = "core_ai" }
+symphony-harness = { git = "https://github.com/Sarthakischauhan/symphony", rev = "f2a29fc8e978b646300d626081c6e833759c0f58", subdirectory = "core_harness" }

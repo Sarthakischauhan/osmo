@@ -3,16 +3,39 @@ import { FREEZE_AFTER_SNAP_MS, RINGS, type RingKey, ringSpec, clampOffset, offse
 
 export const EFFORTS: readonly Effort[] = ["none", "low", "medium", "high"];
 
-export interface ProviderGroup {
+/** A provider the server knows (`GET /providers`), whether or not it serves voice models. */
+export interface PickerProvider {
   id: string;
-  models: VoiceModel[];
+  label: string;
 }
 
-/** Registry grouped by `provider`, in first-seen order. */
-export function groupProviders(registry: readonly VoiceModel[]): ProviderGroup[] {
-  const groups = new Map<string, VoiceModel[]>();
-  for (const model of registry) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
-  return [...groups].map(([id, models]) => ({ id, models }));
+/** Why a provider chip is locked. */
+export type LockReason = "not connected" | "No voice models yet";
+
+export interface ProviderGroup {
+  id: string;
+  /** The server's label, for providers the icon table does not know. */
+  label?: string;
+  models: VoiceModel[];
+  /** Nothing to pick: every model is locked (not connected), or the provider has no voice models. */
+  locked: boolean;
+  reason?: LockReason;
+}
+
+/** Registry grouped by `provider`, in first-seen order, then every other known provider as a
+ *  locked chip: only some providers have realtime voice models, and the rest stay visible. */
+export function groupProviders(registry: readonly VoiceModel[], providers: readonly PickerProvider[] = []): ProviderGroup[] {
+  const byId = new Map<string, VoiceModel[]>();
+  for (const model of registry) byId.set(model.provider, [...(byId.get(model.provider) ?? []), model]);
+  const label = (id: string) => providers.find((p) => p.id === id)?.label;
+  const withModels = [...byId].map(([id, models]): ProviderGroup => {
+    const locked = models.every((model) => model.locked === true);
+    return { id, label: label(id), models, locked, reason: locked ? "not connected" : undefined };
+  });
+  const withoutModels = providers
+    .filter((p) => !byId.has(p.id))
+    .map((p): ProviderGroup => ({ id: p.id, label: p.label, models: [], locked: true, reason: "No voice models yet" }));
+  return [...withModels, ...withoutModels];
 }
 
 /** Effort levels a model offers, in low → high order. */
@@ -21,10 +44,11 @@ export function effortsOf(model: VoiceModel | undefined): Effort[] {
   return EFFORTS.filter((level) => allowed.includes(level));
 }
 
-/** The selection after committing `model`: its default voice, and the current effort if it still applies. */
+/** The selection after committing `model`: its default voice, and the current effort if it still applies,
+ *  else "medium" or the highest level it offers (the server's default_effort rule). */
 export function pickModel(model: VoiceModel, current: VoiceSelection): VoiceSelection {
   const efforts = effortsOf(model);
-  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : model.capabilities.reasoningEffort?.[0];
+  const effort = current.effort !== undefined && efforts.includes(current.effort) ? current.effort : efforts.includes("medium") ? "medium" : efforts.at(-1);
   return effort === undefined ? { model: model.id, voice: model.defaultVoice } : { model: model.id, voice: model.defaultVoice, effort };
 }
 
@@ -115,7 +139,9 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
       return initialPicker;
     case "hoverProvider": {
       if (state.depth === 0 || state.provider === action.provider || isFrozen(state, "providers", action.now)) return state;
+      // A locked provider has nothing to pick yet: its models ring stays closed.
       const group = action.groups.find((g) => g.id === action.provider);
+      if (group?.locked) return state.depth > 1 ? { ...state, depth: 1, provider: undefined, model: undefined } : state;
       return group ? openModels(state, group, action) : state;
     }
     case "hoverModel": {

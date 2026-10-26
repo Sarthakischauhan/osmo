@@ -8,15 +8,20 @@ import {
   type VoiceModel,
   type VoiceSelection,
   orbMode,
-  serverEventSchema,
   sameOriginSocketUrl,
   useOsmoSession,
   usePersistedPick,
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
+import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
+
+const NO_PROVIDERS: ProviderInfo[] = [];
 
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
@@ -44,22 +49,35 @@ export function App() {
     effort: pick?.effort,
     onEvent,
   });
-  if (session.voiceModels !== registry && session.voiceModels.length > 0) setRegistry(session.voiceModels);
-  // The registry before any socket is open, so the picker works around the idle orb too.
+  // A new `models` event from the socket replaces the registry; later HTTP refreshes may override it.
+  const socketModels = useRef(session.voiceModels);
+  if (session.voiceModels !== socketModels.current) {
+    socketModels.current = session.voiceModels;
+    if (session.voiceModels.length > 0) setRegistry(session.voiceModels);
+  }
+  const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
+  const providers = catalog?.providers ?? NO_PROVIDERS;
+  const [connecting, setConnecting] = useState<ProviderInfo>();
+  // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/voice-models", { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : undefined))
-      .then((body: unknown) => {
-        const parsed = serverEventSchema.safeParse(body);
-        if (parsed.success && parsed.data.type === "models") {
-          const models = parsed.data.models;
-          setRegistry((current) => (current.length > 0 ? current : models));
-        }
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
+    if (catalog !== undefined) setRegistry(catalog.models);
+  }, [catalog]);
+  useEffect(() => {
+    // Back from an OAuth sign-in: the server redirects to `/#connected=<provider>`.
+    const connected = /^#connected=([\w-]+)$/.exec(window.location.hash)?.[1];
+    if (connected) {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      toast.success(`${connected} connected`);
+    }
   }, []);
+  const onLockedProvider = useCallback(
+    (id: string) => {
+      const action = lockedProviderAction(providers, id);
+      if (action.kind === "connect") setConnecting(action.provider);
+      else toast(action.message);
+    },
+    [providers],
+  );
   const { configure } = session;
   const onPick = useCallback(
     (next: VoiceSelection) => {
@@ -180,6 +198,12 @@ export function App() {
                   <span className="avatar" aria-hidden />
                   <div className="assistant-body">
                     <MessageContent parts={assistantParts(turn)} />
+                    {/* One element per widget keyed by its server id, so React state follows the
+                        widget itself and never shifts when text or activity rows are added above. */}
+                    {turn.widgets.map((widget) => {
+                      const part = toWidgetPart(widget.id, widget.type, widget.props);
+                      return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
+                    })}
                   </div>
                 </div>
               ),
@@ -193,6 +217,7 @@ export function App() {
         <OrbComposer
           session={session}
           awaitingChoice={pending !== undefined}
+          pickerError={catalogError}
           picker={
             pick && registry.length > 0
               ? {
@@ -203,11 +228,24 @@ export function App() {
                   onPreviewStop: session.stopPreview,
                   previewing: session.previewing,
                   previewDisabled: session.state !== "idle" && session.state !== "listening",
+                  providers,
+                  onLockedProvider,
                 }
               : undefined
           }
         />
       </footer>
+      <ConnectProviderDialog
+        provider={connecting}
+        onOpenChange={(open) => {
+          if (!open) setConnecting(undefined);
+        }}
+        onConnected={() => {
+          setConnecting(undefined);
+          refresh();
+        }}
+      />
+      <Toaster position="top-center" />
     </div>
   );
 }
@@ -224,7 +262,7 @@ function Clock({ since }: { since: number }) {
   return <span className="clock">{`${mm}:${ss}`}</span>;
 }
 
-/** One assistant turn as chat-sdk message parts: the spoken line, tool activity rows, then widgets. */
+/** One assistant turn's spoken line and tool activity rows as chat-sdk parts; widgets render separately, keyed by id. */
 function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[] {
   const parts: AgentPart[] = [];
   if (turn.text) parts.push({ type: "text", text: turn.text });
@@ -237,9 +275,5 @@ function assistantParts(turn: Extract<Turn, { role: "assistant" }>): AgentPart[]
       state: activity.done ? "output-available" : "input-available",
     }),
   );
-  for (const widget of turn.widgets) {
-    const part = toWidgetPart(widget.id, widget.type, widget.props);
-    if (part) parts.push(part);
-  }
   return parts;
 }

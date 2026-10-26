@@ -15,7 +15,7 @@ os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 import httpx
 import uvicorn
 
-from symphony_server.app import create_app, osmo_core_config, osmo_tools
+from symphony_server.app import create_app
 from symphony_server.settings import Settings
 
 
@@ -27,9 +27,7 @@ def main() -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
     settings = Settings.from_env()
-    client = httpx.AsyncClient(timeout=10)
-    tools = osmo_tools(client)
-    app = create_app(settings, core_config=osmo_core_config(settings, tools), tools=tools, http_client=client)
+    app = create_app(settings, http_client=httpx.AsyncClient(timeout=10))
     uvicorn.run(app, host=args.host, port=args.port)
 
 
