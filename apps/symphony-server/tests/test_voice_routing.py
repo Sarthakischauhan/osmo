@@ -8,7 +8,6 @@ import pytest
 from core_ai.types import Message
 
 from core_ai import ModelRegistry
-from core_ai.voice import VOICE_MODELS
 from core_harness.context.state import HarnessState
 
 from symphony_server.app import osmo_core_config
@@ -22,6 +21,7 @@ from symphony_server.voice_router import (
     VoiceSessionNotOpen,
 )
 from symphony_server.voice_turns import VoiceLinks
+from symphony_server.voices import core_model_id, voice_models
 
 VOICE_IDS = frozenset({"grok:grok-voice-latest"})
 
@@ -33,7 +33,7 @@ def run_context_limits(known: dict[str, int]) -> dict[str, int] | None:
 
 def test_voice_models_without_a_known_window_are_not_trimmed() -> None:
     state = HarnessState(context_limits=run_context_limits({}))
-    assert all(state.context_limit(m.full_id) is None for m in VOICE_MODELS)
+    assert all(state.context_limit(core_model_id(m)) is None for m in voice_models())
 
 
 def test_a_known_window_is_passed_through() -> None:
