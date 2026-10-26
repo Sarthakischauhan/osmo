@@ -1,0 +1,71 @@
+{
+  "name": "@osmo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Osmo voice assistant and computer support desktop app",
+  "author": "Sarthak Chauhan",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "node src/dev.js",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.js",
+    "pack": "bun run --filter @osmo/web build && electron-builder --dir",
+    "dist": "bun run --filter @osmo/web build && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "dev.sarchauhan.osmo",
+    "productName": "Osmo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/input.py",
+        "to": "input.py"
+      },
+      {
+        "from": "../web/dist",
+        "to": "web"
+      },
+      {
+        "from": "../symphony-server/src",
+        "to": "server/src"
+      },
+      {
+        "from": "../../vendor/core_server/src",
+        "to": "core-server/src"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Osmo listens to your voice while a session is active.",
+        "NSScreenCaptureUsageDescription": "Osmo captures your primary display only while computer support is enabled."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
+}

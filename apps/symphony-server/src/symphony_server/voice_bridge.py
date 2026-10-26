@@ -38,11 +38,14 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
+from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
+    DesktopConfigure,
+    DesktopResult,
     Interrupt,
     ModelsEvent,
     OsmoState,
@@ -125,9 +128,10 @@ class VoiceBridge:
         default_voice: str,
     ) -> None:
         self.browser, self.instructions = browser, instructions
+        self.desktop = DesktopSession(self.emit)
         self.agents, self.storage, self.access, self.board = agents, storage, access, board
         self.previews = SessionPreviews(access, previews)
-        self.desk = AgentDesk(agents)
+        self.desk = AgentDesk(agents, desktop=self.desktop)
         voice_tools = [*tools, RunAgentTool(self.desk), AgentStatusTool(self.desk), CancelAgentTool(self.desk)]
         self.tools = {tool.name: tool for tool in voice_tools}
         self.sink = VoiceToolSink(self)
@@ -191,7 +195,11 @@ class VoiceBridge:
         except ValidationError as exc:
             log.warning("bad client event: %s", exc.errors()[:1])
             return
-        if isinstance(event, SessionStart):
+        if isinstance(event, DesktopConfigure):
+            self.desktop.configure(event.enabled)
+        elif isinstance(event, DesktopResult):
+            self.desktop.resolve(event)
+        elif isinstance(event, SessionStart):
             await self.start(event)
         elif isinstance(event, SessionEnd):
             await self.close_voice()
@@ -311,6 +319,7 @@ class VoiceBridge:
         return True
 
     async def close_voice(self) -> None:
+        self.desktop.configure(False)
         voice, self.voice = self.voice, None
         self.idle.set()
         if voice is not None:
@@ -402,11 +411,14 @@ class VoiceBridge:
         if not isinstance(args, dict):
             return json.dumps({"error": "arguments must be a JSON object"})
         await self.set_state("working", activity_label(call.name, args))
+        token = RUN_DESKTOP.set(self.desktop)
         try:
             return tool_output(await tool.execute(sink=self.sink, args=args))
         except Exception as exc:  # a tool failure is the model's to explain, as in a harness run
             log.warning("voice tool %s failed: %s", call.name, exc)
             return json.dumps({"error": str(exc) or type(exc).__name__})
+        finally:
+            RUN_DESKTOP.reset(token)
 
     async def turn_over(self) -> None:
         """No answer is under way: speak a queued phase notice, or apply a deferred model switch."""

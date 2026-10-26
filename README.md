@@ -105,6 +105,13 @@ auth kind (`api_key` or `oauth`); for example `/osmo/default/openrouter/KEY`. Th
 `default` today; it is a parameter of the store so per-user keys can come later. The folders are
 created on first use, and disconnecting a provider deletes its folder.
 
+## Desktop voice assistant and computer support
+
+Osmo also runs in Electron with the same voice UI and opt-in primary-screen inspection, mouse,
+keyboard and scroll tools. Run `make install`, `make build`, then `bun run desktop`. Computer support
+requires PyAutoGUI and a connected vision model. See [desktop setup and packaging](apps/desktop/README.md)
+for the complete setup, OS permissions, shortcuts and current distribution limits.
+
 ## Contributing
 
 ## Development

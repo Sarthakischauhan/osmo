@@ -373,16 +373,7 @@ describe("model ring labels", () => {
   });
 });
 
-describe("summary font", () => {
-  it("uses the ring pills' sans (inherited from .rp), not a monospace", () => {
-    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
-    const summary = css.match(/\.rp-summary \{([^}]*)\}/)?.[1] ?? "";
-    expect(summary).toMatch(/font-family: inherit/);
-    expect(summary).toMatch(/font-weight: 500/);
-    expect(summary).not.toMatch(/mono/i);
-    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: var\(--font-sans\)/);
-  });
-});
+
 
 describe("a 28-voice ring (xAI's documented roster)", () => {
   it("shows a window with … markers, fades mid-glide and settles on whole slots", () => {

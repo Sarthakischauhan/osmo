@@ -22,6 +22,7 @@ export const cardPropsSchema = z
     title: z.string().min(1).max(120),
     body: z.string().max(4000),
     image: cardImageSchema.optional(),
+    art: z.enum(["sun", "moon", "cloud", "rain", "snow", "storm", "wind", "stars"]).optional(),
     actions: z.array(widgetActionSchema).max(4).optional(),
   })
   .strict();

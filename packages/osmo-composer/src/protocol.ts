@@ -75,6 +75,8 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     model: z.string().min(1),
     voice: z.string().min(1),
   }),
+  z.object({ type: z.literal("desktop.configure"), enabled: z.boolean() }),
+  z.object({ type: z.literal("desktop.result"), requestId: z.string(), result: z.record(z.unknown()).optional(), error: z.string().max(2000).optional() }),
   z.object({ type: z.literal("session.end") }),
   z.object({ type: z.literal("interrupt") }),
   z.object({
@@ -87,6 +89,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
 export const serverEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
   z.object({
     type: z.literal("transcript.delta"),

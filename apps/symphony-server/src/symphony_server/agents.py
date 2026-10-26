@@ -24,6 +24,7 @@ from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRe
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
     APPROVAL_RESOLVED,
@@ -88,8 +89,9 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str) -> None:
+    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, *, desktops: dict[str, DesktopSession] | None = None) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
+        self.desktops = desktops if desktops is not None else {}
         self.runs: dict[str, AgentRunRecord] = {}
         self.sessions: dict[str, str] = {}
         self.observers: dict[str, AgentObserver] = {}
@@ -104,17 +106,20 @@ class AgentRuns:
         if self.observers.get(thread_id) is observer:
             del self.observers[thread_id]
 
-    async def start(self, thread_id: str, task: str) -> AgentRunRecord | str:
+    async def start(self, thread_id: str, task: str, *, desktop: DesktopSession | None = None) -> AgentRunRecord | str:
         """Submit `task` as a run for `thread_id`; the record, or why it could not start."""
         provider = provider_of(self.model_id)
         if provider is None or not await self.access.prepare(provider):
             label = provider_label(provider) if provider is not None else self.model_id
             return f"the agent model ({self.model_id}) needs {label} connected"
         session_id = f"agent-{secrets.token_hex(8)}"
+        if desktop is not None:
+            self.desktops[session_id] = desktop
         request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=self.model_id)
         try:
             state = await self.backend.submit(RunSubmission(RunContext(session_id=session_id), request))
         except RunCapacityError as exc:
+            self.desktops.pop(session_id, None)
             return f"the server is busy: {exc}"
         now = time.time()
         record = AgentRunRecord(runId=state.run_id, threadId=thread_id, task=task, status="running", createdAt=now, updatedAt=now)
@@ -160,6 +165,8 @@ class AgentRuns:
     async def on_event(self, run_id: str, event: ControlPlaneEvent) -> None:
         record = self.runs[run_id]
         kind = event.event_type
+        if kind in ("run_completed", "run_failed", "run_limit_exceeded", "run_cancelled"):
+            self.desktops.pop(self.sessions.get(run_id, ""), None)
         if kind == "tool_execution_started":
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
@@ -235,6 +242,7 @@ class AgentDesk:
 
     runs: AgentRuns
     thread_id: str = ""
+    desktop: DesktopSession | None = None
 
     def mine(self, run_id: str) -> AgentRunRecord | None:
         record = self.runs.get(run_id)
@@ -262,7 +270,7 @@ class RunAgentTool(Tool):
         task = str(args.get("task", "")).strip()
         if not task:
             return json.dumps({"error": "task must say what to do"})
-        started = await self.desk.runs.start(self.desk.thread_id, task)
+        started = await self.desk.runs.start(self.desk.thread_id, task, desktop=self.desk.desktop)
         if isinstance(started, str):
             return json.dumps({"error": started})
         return json.dumps({"run_id": started.runId, "status": started.status, "say": "Say in one line that you started on it."})

@@ -133,20 +133,7 @@
   box-shadow: none;
 }
 
-.rp-summary {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 7px 14px;
-  border-radius: var(--radius, 3px);
-  background: color-mix(in srgb, var(--foreground) 4%, transparent);
-  color: var(--muted-foreground);
-  /* Same sans as the ring pills (inherited from .rp). */
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
+
 
 @keyframes rp-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 @keyframes rp-eq { from { transform: scaleY(0.3); } to { transform: scaleY(1); } }

@@ -1,4 +1,4 @@
-.PHONY: install dev dev-web dev-server build typecheck test server-test server-check start
+.PHONY: install dev dev-web dev-server build typecheck test server-test server-check start dev-desktop desktop dist-desktop
 
 install:
 	bun install
@@ -29,3 +29,12 @@ server-test:
 
 server-check:
 	cd apps/symphony-server && .venv/bin/mypy
+
+dev-desktop:
+	bun run dev:desktop
+
+desktop:
+	bun run desktop
+
+dist-desktop:
+	bun run dist:desktop

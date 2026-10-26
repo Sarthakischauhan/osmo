@@ -6,7 +6,10 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "build": "bun run --filter @osmo/web build",
-    "dev:web": "bun run --filter @osmo/web dev"
+    "dev:web": "bun run --filter @osmo/web dev",
+    "dev:desktop": "bun run --filter @osmo/desktop dev",
+    "desktop": "bun run --filter @osmo/desktop start",
+    "dist:desktop": "bun run --filter @osmo/desktop dist"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
@@ -15,5 +18,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
+  ],
+  "trustedDependencies": [
+    "electron"
   ]
 }

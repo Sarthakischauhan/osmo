@@ -22,6 +22,7 @@ dependencies = [
 symphony-server = "symphony_server.__main__:main"
 
 [project.optional-dependencies]
+desktop = ["pyautogui>=0.9.54,<1"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

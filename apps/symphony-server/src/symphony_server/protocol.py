@@ -59,8 +59,26 @@ class WidgetAction(_Event):
     value: str | None = None
 
 
+class DesktopConfigure(_Event):
+    type: Literal["desktop.configure"]
+    enabled: bool
+
+
+class DesktopResult(_Event):
+    type: Literal["desktop.result"]
+    requestId: str = Field(min_length=1, max_length=64)
+    result: dict[str, Any] | None = None
+    error: str | None = Field(default=None, max_length=2000)
+
+
+class DesktopRequest(_Event):
+    type: Literal["desktop.request"] = "desktop.request"
+    requestId: str
+    action: dict[str, Any]
+
+
 ClientEvent = Annotated[
-    Union[SessionStart, SessionEnd, Interrupt, WidgetAction, SessionConfigure, VoicePreviewRequest],
+    Union[SessionStart, SessionEnd, Interrupt, WidgetAction, SessionConfigure, VoicePreviewRequest, DesktopConfigure, DesktopResult],
     Field(discriminator="type"),
 ]
 client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
@@ -179,4 +197,5 @@ ServerEvent = Union[
     AgentUpdate,
     ApprovalRequest,
     ApprovalResolved,
+    DesktopRequest,
 ]

@@ -26,7 +26,6 @@ import {
   RING_LABELS,
   effortLabel,
   modelLabel,
-  pickSummary,
   providerLabel,
   voiceLabel,
 } from "./ringLabels";
@@ -38,8 +37,6 @@ import { type Context, type PickerProvider, effortsOf, groupProviders, initialPi
 export interface RadialPickerProps {
   registry: VoiceModel[];
   value: VoiceSelection;
-  /** Shown in the summary pill instead of the pick while the models fail to (re)load. */
-  loadError?: string;
   /** Fires once per commit (click, Enter or Space). Send `session.configure` from here. */
   onChange: (next: VoiceSelection) => void;
   orbSize?: number;
@@ -80,7 +77,6 @@ interface Glide {
 export function RadialPicker({
   registry,
   value,
-  loadError,
   onChange,
   orbSize = 96,
   providerIcons = defaultIcons,
@@ -409,7 +405,6 @@ export function RadialPicker({
 
   // ---------------------------------------------------------------- render
 
-  const summary = pickSummary(registry, value, providerIcons);
 
   const renderRing = (key: RingKey) => {
     const ring = ringSpec(key, counts[key]);
@@ -561,9 +556,6 @@ export function RadialPicker({
       </button>
       {/* After the orb in DOM order so Tab goes orb → providers → models → voices → effort. */}
       <div className="rp-dial">{openRings.map(renderRing)}</div>
-      <output className="rp-summary" data-error={loadError !== undefined} style={{ top: cy + orbSize / 2 + 18 }} aria-live="polite">
-        {loadError ?? summary}
-      </output>
     </div>
   );
 }

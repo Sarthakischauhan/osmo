@@ -120,6 +120,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
           ? withAssistant(feed, finishActivities)
           : feed;
       }
+    case "desktop.request":
     case "models":
     case "voice.configured":
     case "voice.preview":

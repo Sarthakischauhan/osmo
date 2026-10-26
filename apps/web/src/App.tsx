@@ -1,3 +1,6 @@
+import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
+import { AppearanceSwitch } from "./AppearanceSwitch";
+import { useAppearance, type Theme } from "./appearance";
 import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
@@ -18,7 +21,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/components/ApprovalPrompt";
-import { OrbDock } from "@/components/OrbDock";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
 import { RunsList } from "@/components/home/RunsList";
 import { AsciiHome } from "@/components/home/AsciiHome";
@@ -32,7 +34,7 @@ import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState 
 import { type Feed, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
-const SDK_ORB = import.meta.env.VITE_SDK_ORB === "1";
+
 const USER_NAME: string | undefined = import.meta.env.VITE_OSMO_USER_NAME || undefined;
 const api = threadApi();
 
@@ -41,25 +43,12 @@ function feedReducer(state: Feed, action: FeedAction): Feed {
   return action.kind === "load" ? action.feed : reduceFeed(state, action.event);
 }
 
-/** `?theme=light|dark` forces a theme; otherwise the system's (tailwind.css). */
-function forcedTheme(): "light" | "dark" | undefined {
-  const theme = new URLSearchParams(window.location.search).get("theme");
-  return theme === "light" || theme === "dark" ? theme : undefined;
-}
-
-function systemTheme(): "light" | "dark" {
-  return forcedTheme() ?? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-}
-
 export function App() {
-  useEffect(() => {
-    const theme = forcedTheme();
-    if (theme) document.documentElement.classList.add(theme);
-  }, []);
+  const [theme, setTheme] = useAppearance();
   return (
     <TooltipProvider delayDuration={300}>
       <SidebarProvider>
-        <Osmo />
+        <Osmo theme={theme} setTheme={setTheme} />
       </SidebarProvider>
     </TooltipProvider>
   );
@@ -74,7 +63,8 @@ function useNow(): number {
   return now;
 }
 
-function Osmo() {
+function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
+  const desktop = useDesktopSupport();
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadId, setThreadId] = useState<string>();
@@ -111,6 +101,7 @@ function Osmo() {
     effort: pick?.effort,
     threadId,
     onEvent,
+    desktop: desktop.adapter,
   });
   const { end } = session;
   useEffect(() => {
@@ -119,6 +110,7 @@ function Osmo() {
   const openThread = useCallback(
     async (id: string | undefined) => {
       end();
+      void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
       if (id === undefined) {
         dispatchFeed({ kind: "load", feed: emptyFeed });
@@ -255,13 +247,6 @@ function Osmo() {
     },
     [choose, configure],
   );
-  const onPickModel = useCallback(
-    (model: VoiceModel) => {
-      if (session.connection === "connected") toast("Switches after current turn");
-      onPick({ model: model.id, voice: model.defaultVoice });
-    },
-    [onPick, session.connection],
-  );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -270,6 +255,11 @@ function Osmo() {
   }, [feed]);
 
   const connected = session.connection === "connected";
+  const previousConnection = useRef(session.connection);
+  useEffect(() => {
+    if (previousConnection.current !== "disconnected" && session.connection === "disconnected") void window.osmoDesktop?.setEnabled(false);
+    previousConnection.current = session.connection;
+  }, [session.connection]);
   const { sendWidgetAction } = session;
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
@@ -308,7 +298,7 @@ function Osmo() {
       speaking: "Speaking",
     };
     const opacity: Record<typeof mode, number> = { connecting: 0.4, idle: 0.6, listening: 1, awaiting: 1, thinking: 0.8, speaking: 1 };
-    const fill = systemTheme() === "light" ? "#171717" : "#ededed";
+    const fill = theme === "light" ? "#171717" : "#ededed";
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="${fill}" opacity="${opacity[mode]}"/></svg>`;
     const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
     const previousTitle = document.title;
@@ -319,7 +309,7 @@ function Osmo() {
       document.title = previousTitle;
       if (icon && previousHref) icon.href = previousHref;
     };
-  }, [mode]);
+  }, [mode, theme]);
   useEffect(() => cues.current?.onAmber(amber ? pending : undefined), [amber, pending]);
   const onFeedChange = useCallback((event: ChangeEvent<HTMLElement>) => {
     const target = event.target;
@@ -344,6 +334,15 @@ function Osmo() {
         onFork={forkThread}
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
+        footer={<>
+          {desktop.available && <DesktopSupport desktop={desktop} />}
+          <details className="osmo-provider-connections"><summary>Providers</summary>
+            {providers.map(provider => <button key={provider.id} type="button" onClick={() => setConnecting(provider)}>
+              {provider.label}<span>{provider.connected ? "Connected" : "Connect"}</span>
+            </button>)}
+          </details>
+          <AppearanceSwitch theme={theme} setTheme={setTheme} />
+        </>}
       />
       <SidebarInset className="app">
         <header className="topbar">
@@ -352,6 +351,7 @@ function Osmo() {
             <strong>{threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
+            {(sidebar.state === "collapsed" || sidebar.isMobile) && <DesktopSupport desktop={desktop} />}
             {session.startedAt !== undefined && <Clock since={session.startedAt} />}
             {connected && (
               <button type="button" className="end" onClick={session.end}>
@@ -362,7 +362,7 @@ function Osmo() {
         </header>
 
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-          <main className="canvas chat-root" data-theme={systemTheme()} onChange={onFeedChange}>
+          <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
             {feed.turns.length === 0 ? (
               <AsciiHome />
             ) : (
@@ -378,9 +378,7 @@ function Osmo() {
         </WidgetProvider>
 
         <footer className="dock">
-          {SDK_ORB ? (
-            <OrbDock session={session} mode={mode} thinking={session.detail} steps={steps} />
-          ) : (
+
             <OrbComposer
               session={session}
               awaitingChoice={pending !== undefined}
@@ -401,7 +399,6 @@ function Osmo() {
                   : undefined
               }
             />
-          )}
         </footer>
       </SidebarInset>
       <ConnectProviderDialog
@@ -414,7 +411,7 @@ function Osmo() {
           refresh();
         }}
       />
-      <Toaster position="top-center" />
+      <Toaster position="top-center" theme={theme} />
     </>
   );
 }

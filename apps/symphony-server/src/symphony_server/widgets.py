@@ -29,6 +29,7 @@ class CardProps(_Strict):
     title: str = Field(min_length=1, max_length=120)
     body: str = Field(max_length=4000)
     image: HttpUrl | DataImageUrl | None = None
+    art: Literal["sun", "moon", "cloud", "rain", "snow", "storm", "wind", "stars"] | None = None
     actions: list[WidgetButton] | None = Field(default=None, max_length=4)
 
 
@@ -124,7 +125,7 @@ RENDER_WIDGET_PARAMETERS: dict[str, Any] = {
         "props": {
             "type": "object",
             "description": (
-                "card: {title, body (markdown), image?, actions?: [{id,label}]}; "
+                "card: {title, body (markdown), image?, art?: sun|moon|cloud|rain|snow|storm|wind|stars, actions?: [{id,label}]}; "
                 "options: {prompt, choices: [{id,label,detail?}]}; "
                 "chart: {kind: 'line'|'bar', series: [{name, points: [{x, y}]}]}; "
                 "html: {html, title?} (a complete self-contained document shown under a header bar with "

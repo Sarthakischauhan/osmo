@@ -137,7 +137,6 @@ button { font: inherit; color: inherit; }
 .dock .rp { margin-top: -268px; margin-bottom: -38px; }
 .dock .rp[data-open="false"] { pointer-events: none; }
 .dock .rp[data-open="false"] .rp-orb { pointer-events: auto; }
-.dock .rp[data-open="false"] .rp-summary { opacity: 0; }
 /* Scrim behind the open dial over the feed; on home the art dims instead (below). */
 .app:not(:has(.osmo-ascii-home)) .dock .rp[data-open="true"]::before {
   content: "";
@@ -148,8 +147,6 @@ button { font: inherit; color: inherit; }
   pointer-events: none;
   z-index: -1;
 }
-/* While the dial is open its summary pill sits where the caption is. */
-.dock .orb-composer:has(.rp[data-open="true"]) .orb-caption { visibility: hidden; }
 
 /* ---- Thread sidebar and voice home (osmo-design spec) ---- */
 /* Tailwind's preflight is off, so the shadcn primitives get the resets they assume here. */
@@ -223,16 +220,7 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-home { display: flex; flex-direction: column; gap: 32px; width: min(560px, calc(100% - 32px)); margin: 72px auto 0; }
 .osmo-greeting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .osmo-greeting { font-size: 24px; line-height: 32px; font-weight: 600; }
-.osmo-pill { display: inline-flex; flex: none; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius, 3px); background: var(--accent); color: var(--foreground); font-size: 13px; cursor: pointer; }
-span.osmo-pill { cursor: default; }
 .osmo-popover { width: 280px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--popover); color: var(--popover-foreground); }
-.osmo-model-picker { background: transparent; padding: 4px; }
-.osmo-model-picker [cmdk-input-wrapper], .osmo-model-picker [data-slot="command-input-wrapper"] { height: 32px; padding: 0 8px; border: 0; }
-.osmo-model-picker input { border: 0; background: none; color: var(--foreground); font-size: 13px; outline: none; }
-.osmo-model-picker [cmdk-group-heading] { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--fg-tertiary); }
-.osmo-model-picker [cmdk-item] { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius, 3px); font-size: 13px; color: var(--muted-foreground); }
-.osmo-model-picker [cmdk-item][data-selected="true"] { background: var(--accent); color: var(--foreground); }
-.osmo-model-picker [cmdk-item][data-current="true"] { background: var(--sidebar-accent); color: var(--foreground); font-weight: 500; }
 .osmo-section { display: flex; flex-direction: column; }
 .osmo-section-label { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
 .osmo-list-row { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 -8px; padding: 0 8px; border: 0; border-radius: var(--radius, 3px); background: none; color: var(--foreground); font-size: 13px; text-align: left; transition: background .15s ease-out; }
@@ -281,3 +269,21 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-ascii[data-fading="true"] { opacity: 0; }
 /* Dial open on home: dim the art rather than drawing a scrim. */
 .app:has(.rp[data-open="true"]) .osmo-ascii { opacity: .15; }
+
+/* Native capabilities share the existing persistent thread sidebar. */
+.osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
+[data-state="collapsed"] .osmo-desktop-footer { display: none; }
+.desktop-support { display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--accent); padding: 8px 10px; font-size: 12px; cursor: pointer; }
+.desktop-support.active { color: var(--foreground); border-color: var(--foreground); }
+.desktop-support-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted-foreground); }
+.desktop-support.active .desktop-support-dot { background: var(--foreground); }
+.desktop-support:disabled { opacity: .5; cursor: wait; }
+.osmo-provider-connections summary { color: var(--muted-foreground); font-size: 12px; padding: 4px 0; cursor: pointer; }
+.osmo-provider-connections button { display: flex; justify-content: space-between; width: 100%; border: 0; background: none; padding: 6px 0; font-size: 12px; cursor: pointer; }
+.osmo-provider-connections button span { color: var(--fg-tertiary); font-size: 11px; }
+.osmo-appearance { display: flex; gap: 8px; }
+.osmo-appearance button { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1; border: 1px solid transparent; border-radius: var(--radius); background: none; color: var(--muted-foreground); padding: 7px; font-size: 12px; cursor: pointer; }
+.osmo-appearance button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); border-color: var(--border); }
+.osmo-appearance .osmo-ascii { font-size: 2.5px; line-height: 1.15; opacity: 1; }
+.osmo-card-art { float: right; font-size: 9px; margin: 0 0 12px 20px; }
+@media (max-width: 600px) { .osmo-ascii-home .osmo-ascii { font-size: clamp(6px, 1.8vw, 9px); } }

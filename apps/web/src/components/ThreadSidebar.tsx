@@ -1,6 +1,6 @@
 import type { Thread } from "@osmo/osmo-composer";
 import { History, MoreHorizontal, PanelLeft, Plus } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type ReactNode, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarHeader,
@@ -44,10 +45,11 @@ export interface ThreadSidebarProps {
   /** Start a thread in rename mode (screenshots and tests). */
   initialRenaming?: string;
   now?: number;
+  footer?: ReactNode;
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -118,6 +120,7 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
           </>
         )}
       </SidebarContent>
+      {footer && <SidebarFooter className="osmo-desktop-footer">{footer}</SidebarFooter>}
       <SidebarRail />
       <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
         <AlertDialogContent className="osmo-delete-dialog">
