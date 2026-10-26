@@ -128,7 +128,7 @@ def voice_model(info: VoiceModelSpec) -> VoiceModel:
         label=label,
         shortLabel=short_label,
         capabilities=Capabilities.model_validate(
-            {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts) or None}
+            {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts)}
         ),
         voices=[Voice(id=v.id, label=v.label, traits=list(v.traits)) for v in info.voices],
         defaultVoice=info.default_voice,

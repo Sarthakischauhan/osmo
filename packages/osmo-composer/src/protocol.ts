@@ -29,7 +29,7 @@ export const voiceModelSchema = z.object({
     tools: z.boolean(),
     interrupt: z.boolean(),
     customVoices: z.boolean(),
-    reasoningEffort: z.array(effortSchema).optional(),
+    reasoningEffort: z.array(effortSchema).nullish(),
   }),
   voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
   defaultVoice: z.string(),
