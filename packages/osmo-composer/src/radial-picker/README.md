@@ -39,7 +39,7 @@ const [pick, save, choose] = usePersistedPick(session.voiceModels);
 | `onOrbActivate` | `() => void` | — | Orb click runs this (e.g. start talking); the dial then opens on hover/focus only. |
 | `orbLabel` | `string` | — | Accessible name for the orb's own action, prefixed to the picker label. |
 
-`VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "none" | "low" | "medium" | "high"` (xAI documents `reasoning.effort` as `"high"` or `"none"`).
+`VoiceModel = { id, provider, label, capabilities: { tools, interrupt, customVoices, reasoningEffort?: Effort[] }, voices: { id, label, traits }[], defaultVoice }`, `Effort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"` (every value the core_ai voice catalog's sources publish; xAI documents `"high"` or `"none"`).
 
 ## Model labels
 

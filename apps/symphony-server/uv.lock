@@ -413,7 +413,7 @@ wheels = [
 [[package]]
 name = "core-server"
 version = "0.4.0"
-source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_server&rev=f2a29fc8e978b646300d626081c6e833759c0f58#f2a29fc8e978b646300d626081c6e833759c0f58" }
+source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_server&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289#00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" }
 dependencies = [
     { name = "dotenv" },
     { name = "fastapi" },
@@ -1246,7 +1246,7 @@ wheels = [
 [[package]]
 name = "symphony-core"
 version = "0.0.1"
-source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=f2a29fc8e978b646300d626081c6e833759c0f58#f2a29fc8e978b646300d626081c6e833759c0f58" }
+source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289#00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" }
 dependencies = [
     { name = "dotenv" },
     { name = "httpx" },
@@ -1257,7 +1257,7 @@ dependencies = [
 [[package]]
 name = "symphony-harness"
 version = "0.0.1"
-source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_harness&rev=f2a29fc8e978b646300d626081c6e833759c0f58#f2a29fc8e978b646300d626081c6e833759c0f58" }
+source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_harness&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289#00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" }
 dependencies = [
     { name = "pydantic" },
     { name = "symphony-core" },
@@ -1290,7 +1290,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "core-server", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_server&rev=f2a29fc8e978b646300d626081c6e833759c0f58" },
+    { name = "core-server", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_server&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -1300,8 +1300,8 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "symphony-core", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=f2a29fc8e978b646300d626081c6e833759c0f58" },
-    { name = "symphony-harness", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_harness&rev=f2a29fc8e978b646300d626081c6e833759c0f58" },
+    { name = "symphony-core", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" },
+    { name = "symphony-harness", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_harness&rev=00aceba84d5abedcb79cb8d46c9cf2dbd13a6289" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },
 ]

@@ -1,7 +1,7 @@
 import type { Effort, VoiceModel, VoiceSelection } from "../protocol";
 import { FREEZE_AFTER_SNAP_MS, RINGS, type RingKey, ringSpec, clampOffset, offsetFor, nearestSlot, slotAngle, snapOffset } from "./geometry";
 
-export const EFFORTS: readonly Effort[] = ["none", "low", "medium", "high"];
+export const EFFORTS: readonly Effort[] = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
 /** A provider the server knows (`GET /providers`), whether or not it serves voice models. */
 export interface PickerProvider {
