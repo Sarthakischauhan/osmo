@@ -115,7 +115,10 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert session["voice"] == "eve"
         assert session["turn_detection"] == {"type": "server_vad"}
         names = {tool["name"] for tool in session["tools"]}
-        assert names == {"web_search", "create_image", "render_widget", "update_widget", "set_voice", "get_weather", "get_stock_history"}
+        assert names == {
+            "web_search", "render_widget", "update_widget", "set_voice", "get_weather", "get_stock_history",
+            "run_agent", "agent_status", "cancel_agent",
+        }
         assert all(tool["type"] == "function" for tool in session["tools"])
 
         ws.send_bytes(b"\x01\x00\x02\x00")
@@ -140,9 +143,8 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
         wait_listening(ws)
 
 
-def test_a_model_switch_replays_the_harness_history(client: TestClient, grok: FakeGrok) -> None:
-    """History lives in the harness (keyed by the bridge's session id): a new voice session on
-    another model is seeded from it on its first turn."""
+def test_a_model_switch_replays_the_thread(client: TestClient, grok: FakeGrok) -> None:
+    """History lives in the stored thread: a new voice session on another model is seeded from it."""
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
         widget_id = render(ws, grok, DINNER, "h1")
@@ -152,11 +154,9 @@ def test_a_model_switch_replays_the_harness_history(client: TestClient, grok: Fa
         grok.next_of("session.update")
 
         ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
-        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(5)]
+        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(3)]
         assert [replayed_entry(item) for item in replayed] == [
             ("user", "show me"),
-            ("function_call", "render_widget"),
-            ("function_call_output", "h1"),
             ("assistant", "Done."),
             ("user", f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"),
         ]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -12,6 +12,11 @@ from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_U
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
+DEFAULT_DATABASE_FILE = "~/.config/osmo/osmo.db"
+# The text model background agents (run_agent) run on: core_ai's default xAI model.
+DEFAULT_AGENT_MODEL = "grok:grok-4.7"
+# Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
+DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("create_image",)
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -25,9 +30,14 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - Use chart (line) for stock history; use card for weather or summaries; use html for calculators, mini apps or anything custom. html must be a complete, self-contained document with inline CSS and JS, dark background (#111), light text.
 - To change a widget already on screen, call update_widget with its id.
 
+# Background agent
+- For anything that takes several steps (research, comparisons, drafting, pictures), call run_agent with a full, self-contained task and say one line that you started. Keep talking with the user meanwhile.
+- Messages starting with [agent <run id>] report on a run: when it is done, summarize the result in one or two sentences; when it needs approval, ask the user to tap Approve or Deny on screen; never approve for them.
+- agent_status tells you where a run is; cancel_agent stops one the user no longer wants.
+
 # Tools
 - set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): choose a voice id and label from the catalog, then confirm in one short line.
-- get_weather for forecasts, get_stock_history for tickers, web_search for anything current (places, news, facts), create_image for pictures.
+- get_weather for forecasts, get_stock_history for tickers, web_search for a quick current fact. Pictures are drawn by the agent (run_agent).
 """
 
 
@@ -44,6 +54,36 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "get_weather": "osmo",
     "get_stock_history": "osmo",
 }
+
+
+@dataclass(frozen=True)
+class OAuthClient:
+    """An OAuth app registered with a provider (client id, and secret for confidential clients)."""
+
+    client_id: str
+    client_secret: SecretStr | None = None
+
+    def form(self) -> dict[str, str]:
+        """Client authentication for a token request (`client_secret_post`)."""
+        form = {"client_id": self.client_id}
+        if self.client_secret is not None:
+            form["client_secret"] = self.client_secret.get_secret_value()
+        return form
+
+
+# The environment variables of each provider's registered OAuth app (id, secret).
+OAUTH_CLIENT_ENV: dict[str, tuple[str, str]] = {
+    "vercel": ("OSMO_VERCEL_OAUTH_CLIENT_ID", "OSMO_VERCEL_OAUTH_CLIENT_SECRET"),
+}
+
+
+def oauth_clients_from_env() -> dict[str, OAuthClient]:
+    clients: dict[str, OAuthClient] = {}
+    for provider, (id_env, secret_env) in OAUTH_CLIENT_ENV.items():
+        client_id, secret = os.getenv(id_env), os.getenv(secret_env)
+        if client_id:
+            clients[provider] = OAuthClient(client_id, SecretStr(secret) if secret else None)
+    return clients
 
 
 @dataclass(frozen=True)
@@ -65,6 +105,11 @@ class Settings:
     image_model: str = DEFAULT_IMAGE_MODEL
     # Optional Exa key for web_search; without one Exa answers at a low shared rate limit.
     exa_api_key: str | None = None
+    # SQLite file for threads, messages, agent runs and provider connections; None keeps them in memory.
+    database_file: Path | None = None
+    agent_model: str = DEFAULT_AGENT_MODEL
+    approval_tools: tuple[str, ...] = DEFAULT_APPROVAL_TOOLS
+    oauth_clients: dict[str, OAuthClient] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -82,7 +127,18 @@ class Settings:
             tool_categories=tool_categories(os.getenv("OSMO_TOOLS")),
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
+            database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
+            agent_model=os.getenv("OSMO_AGENT_MODEL", DEFAULT_AGENT_MODEL),
+            approval_tools=approval_tools(os.getenv("OSMO_APPROVAL_TOOLS")),
+            oauth_clients=oauth_clients_from_env(),
         )
+
+
+def approval_tools(value: str | None) -> tuple[str, ...]:
+    """OSMO_APPROVAL_TOOLS: comma-separated agent tool names; unset means the default; empty means none."""
+    if value is None:
+        return DEFAULT_APPROVAL_TOOLS
+    return tuple(name.strip() for name in value.split(",") if name.strip())
 
 
 def tool_categories(value: str | None) -> tuple[ToolCategory, ...]:

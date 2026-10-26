@@ -140,7 +140,7 @@ def test_voice_and_effort_change_is_a_session_update_on_the_live_upstream(client
         assert grok.closed.empty()
 
 
-def test_model_change_opens_a_new_voice_session_seeded_from_the_harness(client: TestClient, grok: FakeGrok) -> None:
+def test_model_change_opens_a_new_voice_session_seeded_from_the_thread(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
         assert grok.paths.get(timeout=5).endswith("model=grok-voice-latest")
@@ -150,7 +150,13 @@ def test_model_change_opens_a_new_voice_session_seeded_from_the_harness(client: 
 
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
         assert grok.paths.get(timeout=5).endswith("model=grok-voice-3.0")
-        assert grok.next_of("session.update")["session"]["voice"] == "ara"
+        # The new session is configured and seeded with the stored thread before it hears anything.
+        opened = [grok.next_json() for _ in range(3)]
+        assert opened[0]["type"] == "session.update" and opened[0]["session"]["voice"] == "ara"
+        assert [event["item"] for event in opened[1:]] == [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "My name is Ada."}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Nice to meet you, Ada."}]},
+        ]
         assert grok.closed.get(timeout=5).endswith("model=grok-voice-latest")
         configured = next_event(ws, "voice.configured")
         assert configured["selection"] == {"model": "grok-voice-3.0", "voice": "ara", "effort": "high"}
@@ -158,14 +164,6 @@ def test_model_change_opens_a_new_voice_session_seeded_from_the_harness(client: 
         # The browser socket never dropped: audio keeps flowing to the new session.
         ws.send_bytes(b"\x02\x00" * 8)
         assert grok.next_bytes() == b"\x02\x00" * 8
-
-        # Its first turn replays the harness history before the speech it just heard.
-        say(grok, "What's my name?")
-        items = [grok.next_of("conversation.item.create")["item"] for _ in range(2)]
-        assert items == [
-            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "My name is Ada."}]},
-            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Nice to meet you, Ada."}]},
-        ]
 
 
 def test_set_voice_model_switch_happens_after_the_confirming_turn(client: TestClient, grok: FakeGrok) -> None:

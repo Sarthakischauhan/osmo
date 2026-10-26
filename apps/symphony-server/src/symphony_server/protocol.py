@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from symphony_server.storage import AgentRunStatus, ThreadRecord
 from symphony_server.voices import Effort, Selection, VoiceModel
 
 OsmoState = Literal["idle", "listening", "thinking", "speaking", "working"]
@@ -23,6 +24,8 @@ class SessionStart(_Event):
     voice: str | None = None
     model: str | None = None
     effort: Effort | None = None
+    # Continue a stored thread (its messages are replayed into the voice session); a new one when unset.
+    threadId: str | None = None
 
 
 class SessionConfigure(_Event):
@@ -128,6 +131,52 @@ WidgetEvent = Annotated[Union[WidgetRender, WidgetUpdate], Field(discriminator="
 # The payload of an `osmo.widget` run event (see canvas.py).
 widget_event_adapter: TypeAdapter[WidgetEvent] = TypeAdapter(WidgetEvent)
 
+class ThreadEvent(_Event):
+    """The stored thread this session reads and writes (sent on start and when its title changes)."""
+
+    type: Literal["thread"] = "thread"
+    thread: ThreadRecord
+
+
+class AgentUpdate(_Event):
+    """A background agent run started by `run_agent` changed status or phase."""
+
+    type: Literal["agent.update"] = "agent.update"
+    runId: str
+    task: str
+    status: AgentRunStatus
+    phase: str | None = None
+    result: str | None = None
+
+
+class ApprovalRequest(_Event):
+    """An agent run waits for the user to approve a risky step (`POST /api/approvals/{approvalId}`)."""
+
+    type: Literal["approval.request"] = "approval.request"
+    approvalId: str
+    runId: str
+    tool: str
+    summary: str
+    arguments: str
+
+
+class ApprovalResolved(_Event):
+    type: Literal["approval.resolved"] = "approval.resolved"
+    approvalId: str
+    runId: str
+    approved: bool
+
+
 ServerEvent = Union[
-    StateEvent, TranscriptDelta, WidgetRender, WidgetUpdate, ModelsEvent, VoiceConfigured, VoicePreviewResult
+    StateEvent,
+    TranscriptDelta,
+    WidgetRender,
+    WidgetUpdate,
+    ModelsEvent,
+    VoiceConfigured,
+    VoicePreviewResult,
+    ThreadEvent,
+    AgentUpdate,
+    ApprovalRequest,
+    ApprovalResolved,
 ]

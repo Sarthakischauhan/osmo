@@ -11,6 +11,8 @@ export interface OsmoSessionOptions {
   /** Voice model and reasoning effort to start with (the picker's value). */
   model?: string;
   effort?: Effort;
+  /** The stored thread to continue when the session starts; a new one when unset. */
+  threadId?: string;
   onEvent?: (event: ServerEvent) => void;
 }
 
@@ -48,7 +50,7 @@ interface Runtime {
   preview: PcmPlayer;
 }
 
-export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessionOptions): OsmoSession {
+export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }: OsmoSessionOptions): OsmoSession {
   const [voiceModels, setVoiceModels] = useState<VoiceModel[]>([]);
   const [selection, setSelection] = useState<VoiceSelection | undefined>();
   const [previewing, setPreviewing] = useState<{ model: string; voice: string } | undefined>();
@@ -124,7 +126,7 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
     try {
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
-      client.send({ type: "session.start", voice, model, effort });
+      client.send({ type: "session.start", voice, model, effort, threadId });
       // A preview plays on the speakers: keep it out of the mic so it is not heard as the user.
       await mic.start((frame) => {
         if (!previewingRef.current) client.sendAudio(frame);
@@ -136,7 +138,7 @@ export function useOsmoSession({ url, voice, model, effort, onEvent }: OsmoSessi
       teardown();
       setConnection("disconnected");
     }
-  }, [teardown, url, voice, model, effort]);
+  }, [teardown, url, voice, model, effort, threadId]);
 
   const end = useCallback(() => {
     runtime.current?.client.send({ type: "session.end" });

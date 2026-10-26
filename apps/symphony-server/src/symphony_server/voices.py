@@ -97,6 +97,11 @@ OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in
 LATEST = "latest"
 
 
+def provider_of(model_id: str) -> str | None:
+    """The Osmo provider serving a core_ai model id (`namespace:model`), if it is one of ours."""
+    return OSMO_PROVIDERS.get(model_id.split(":", 1)[0])
+
+
 def voice_models() -> tuple[VoiceModel, ...]:
     """The picker's models: every realtime model in the core_ai voice catalog that has voices to
     pick from (a selection always names one), latest first, then in catalog order. Voices and

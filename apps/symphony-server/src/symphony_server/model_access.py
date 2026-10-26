@@ -2,7 +2,7 @@
 
 Keys come only from the SecretStore (the provider auth flow, `/providers/{id}/key` or OAuth);
 the environment is never read for them. `connect` hands the current key to core_ai:
-the provider's core_ai text provider behind the `VoiceRouter` registered for its namespace on the
+the provider's core_ai text provider behind the `ProviderRouter` registered for its namespace on the
 text/image `ModelRegistry`, and `open_voice` opens core_ai voice sessions
 (`core_ai.voice.open_voice_session`, which dispatches by provider) on that key."""
 
@@ -12,10 +12,10 @@ from collections.abc import Callable
 
 from core_ai import GeminiProvider, GrokProvider, ModelRegistry, OpenAIProvider, VercelProvider
 from core_ai.providers.base import BaseProvider
-from core_ai.voice import VOICE_MODELS, VoiceConfig, VoiceSession, open_voice_session, voice_model
+from core_ai.voice import VoiceConfig, VoiceSession, open_voice_session, voice_model
 
-from symphony_server.providers import CredentialStore, with_locks
-from symphony_server.voice_router import VoiceRouter
+from symphony_server.provider_router import ProviderRouter
+from symphony_server.providers import CredentialStore, TokenRefresher, with_locks
 from symphony_server.voices import CORE_NAMESPACES, VoiceModel, core_model_id, voice_models
 
 
@@ -34,14 +34,13 @@ class ModelAccess:
     right before using it; that (re)registers its core_ai providers with the current key."""
 
     def __init__(
-        self, registry: ModelRegistry, credentials: CredentialStore, xai_base_url: str
+        self, registry: ModelRegistry, credentials: CredentialStore, xai_base_url: str, refresher: TokenRefresher | None = None
     ) -> None:
         self.registry, self.credentials, self.xai_base_url = registry, credentials, xai_base_url
+        self.refresher = refresher
         self.keys: dict[str, str] = {}
-        # One router per namespace, registered once: voice model turns go to the run's voice link,
-        # text and images to the provider's current key (None while it has none).
-        voice_ids = frozenset(model.full_id for model in VOICE_MODELS)
-        self.routers = {namespace: VoiceRouter(namespace, voice_ids) for namespace in CORE_NAMESPACES.values()}
+        # One router per namespace, registered once, on the provider's current key (None while it has none).
+        self.routers = {namespace: ProviderRouter(namespace) for namespace in CORE_NAMESPACES.values()}
         for namespace, router in self.routers.items():
             registry.register(namespace, router)
 
@@ -58,6 +57,12 @@ class ModelAccess:
         self.routers[namespace].text = TEXT_PROVIDERS[provider](key, self.xai_base_url)
         self.keys[provider] = key
         return True
+
+    async def prepare(self, provider: str) -> bool:
+        """`connect`, after refreshing the provider's OAuth access token if it is about to expire."""
+        if self.refresher is not None:
+            await self.refresher.refresh_if_due(provider)
+        return self.connect(provider)
 
     def models(self) -> tuple[VoiceModel, ...]:
         """The picker's models, locked where the provider has no key."""
