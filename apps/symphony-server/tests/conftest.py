@@ -15,12 +15,35 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from websockets.asyncio.server import ServerConnection, serve
 
+from dataclasses import replace
+
+from core_ai.voice import VOICE_MODELS, VoiceInfo, VoiceModelSpec
+
+import symphony_server.voices
 from symphony_server.app import create_app
 from symphony_server.file_store import FileSecretStore
 from symphony_server.secret_store import DEFAULT_OWNER, ProviderAuth, SecretStore
 from symphony_server.settings import Settings
 
 # Hermetic per-model context windows (xAI documents none; the server requires them configured).
+
+
+# A recorded `GET https://api.x.ai/v1/tts/voices` (trimmed). The shipped catalog lists only the
+# realtime spec's example voice unless it was generated with XAI_API_KEY; tests need several.
+XAI_TTS_VOICES = (VoiceInfo("eve", "Eve"), VoiceInfo("ara", "Ara"), VoiceInfo("sal", "Sal"), VoiceInfo("rex", "Rex"))
+
+
+@pytest.fixture(autouse=True)
+def grok_voices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catalog as generated with XAI_API_KEY: grok models carry the recorded voices."""
+
+    def keyed(model: VoiceModelSpec) -> VoiceModelSpec:
+        if model.provider != "grok":
+            return model
+        assert model.sources is not None
+        return replace(model, voices=XAI_TTS_VOICES, sources=replace(model.sources, voices="https://api.x.ai/v1/tts/voices"))
+
+    monkeypatch.setattr(symphony_server.voices, "VOICE_MODELS", tuple(keyed(m) for m in VOICE_MODELS))
 
 
 class FakeGrok:

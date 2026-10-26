@@ -15,7 +15,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from core_ai.voice import VOICE_MODELS, AudioDelta, VoiceModelSpec, VoiceClosed, VoiceConfig, VoiceSession
 from core_harness import EventSink, Tool
@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("symphony.voices")
 
-# xAI documents `reasoning.effort` as "high" (default) or "none"; low/medium stay for other providers.
-Effort = Literal["none", "low", "medium", "high"]
+# Every reasoning effort the core_ai voice catalog's sources publish (xAI: none/high; OpenAI and
+# Gemini via models.dev: minimal..xhigh; AI Gateway Google models: low/high).
+Effort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
 SET_VOICE = "set_voice"
 # Sink event carrying a checked `set_voice` change (SetVoiceArgs) for the voice bridge.
@@ -131,7 +132,8 @@ def voice_model(info: VoiceModelSpec) -> VoiceModel:
             {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts)}
         ),
         voices=[Voice(id=v.id, label=v.label, traits=list(v.traits)) for v in info.voices],
-        defaultVoice=info.default_voice,
+        # Google publishes no default voice; its catalog entries leave it empty.
+        defaultVoice=info.default_voice or info.voices[0].id,
     )
 
 
@@ -145,7 +147,7 @@ SET_VOICE_PARAMETERS: dict[str, Any] = {
     "properties": {
         "model": {"type": "string", "description": "Voice model id; omit to keep the current one."},
         "voice": {"type": "string", "description": "Voice id from the catalog (ids and labels)."},
-        "effort": {"type": "string", "enum": ["none", "low", "medium", "high"], "description": "Only for models that list reasoning effort."},
+        "effort": {"type": "string", "enum": list(get_args(Effort)), "description": "Only for models that list reasoning effort."},
     },
     "additionalProperties": False,
 }
@@ -195,12 +197,19 @@ def find_model(models: tuple[VoiceModel, ...], model_id: str) -> VoiceModel | No
     return next((m for m in models if m.id == model_id), None)
 
 
+def find_voice(model: VoiceModel, voice_id: str) -> Voice | None:
+    """`voice_id` among the model's voices, ignoring case (xAI ids are lowercase, Gemini's are
+    capitalized names; the catalog id is what gets sent)."""
+    wanted = voice_id.lower()
+    return next((v for v in model.voices if v.id.lower() == wanted), None)
+
+
 def preview_error(models: tuple[VoiceModel, ...], model_id: str, voice_id: str) -> str | None:
     """Why (model, voice) cannot be previewed, or None when both are in the registry."""
     model = find_model(models, model_id)
     if model is None:
         return f"unknown model {model_id!r}"
-    if not any(v.id == voice_id for v in model.voices):
+    if find_voice(model, voice_id) is None:
         return f"unknown voice {voice_id!r} for {model.id}"
     return None
 
@@ -256,8 +265,8 @@ def resolve_selection(models: tuple[VoiceModel, ...], change: SetVoiceArgs, curr
     if model.locked:
         return f"{model.id} is locked: connect {model.provider} first"
     model_changed = model.id != current.model
-    voice_id = (change.voice or (model.defaultVoice if model_changed else current.voice)).lower()
-    voice = next((v for v in model.voices if v.id == voice_id), None)
+    voice_id = change.voice or (model.defaultVoice if model_changed else current.voice)
+    voice = find_voice(model, voice_id)
     if voice is None:
         return f"unknown voice {voice_id!r} for {model.id}; choose one of {', '.join(v.id for v in model.voices)}"
     allowed = model.capabilities.reasoningEffort or []
@@ -292,7 +301,7 @@ def default_selection(models: tuple[VoiceModel, ...], voice: str) -> Selection:
     # Computed here too, so a locked first model (which `resolve_selection` refuses) still gets a valid effort.
     effort = default_effort(allowed) if allowed else None
     base = Selection(model=model.id, voice=model.defaultVoice, effort=effort)
-    change = SetVoiceArgs(voice=voice) if any(v.id == voice for v in model.voices) else SetVoiceArgs()
+    change = SetVoiceArgs(voice=voice) if find_voice(model, voice) is not None else SetVoiceArgs()
     picked = resolve_selection(models, change, base)
     return picked if isinstance(picked, Selection) else base
 

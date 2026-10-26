@@ -218,3 +218,23 @@ def test_model_labels_come_from_any_providers_ids() -> None:
     assert model_labels("gpt-realtime") == ("Gpt Realtime", None)
     assert model_labels("gpt-realtime-2.1-mini") == ("Gpt Realtime 2.1 Mini", "2.1 Mini")
     assert model_labels("google/gemini-3.8-live") == ("Gemini 3.8 Live", "3.8 Live")
+
+
+def test_gemini_models_are_listed_with_the_published_voice_table() -> None:
+    models = {(m.provider, m.id): m for m in voice_models()}
+    gemini = [m for (provider, _), m in models.items() if provider == "gemini"]
+    assert gemini, "the catalog's Gemini Live models have voices from Google's prebuilt voice table"
+    live = gemini[0]
+    # Google publishes no default voice: the picker starts on the table's first voice.
+    assert live.defaultVoice == live.voices[0].id == "Zephyr"
+    assert live.voices[0].traits == ["Bright"]
+    gateway = models[("vercel", "google/gemini-3.8-live")]
+    assert [v.id for v in gateway.voices] == [v.id for v in live.voices]
+    assert gateway.capabilities.reasoningEffort == ["low", "high"]
+
+
+def test_voice_ids_match_ignoring_case() -> None:
+    models = tuple(m for m in voice_models() if m.provider == "gemini")
+    current = Selection(model=models[0].id, voice=models[0].defaultVoice)
+    picked = resolve_selection(models, SetVoiceArgs(voice="kore"), current)
+    assert isinstance(picked, Selection) and picked.voice == "Kore"
