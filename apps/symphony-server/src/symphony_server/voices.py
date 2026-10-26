@@ -129,7 +129,7 @@ SET_VOICE_PARAMETERS: dict[str, Any] = {
     "type": "object",
     "properties": {
         "model": {"type": "string", "description": "Voice model id; omit to keep the current one."},
-        "voice": {"type": "string", "description": "Voice id from the catalog; pick by traits when asked for a kind of voice."},
+        "voice": {"type": "string", "description": "Voice id from the catalog (ids and labels)."},
         "effort": {"type": "string", "enum": ["none", "low", "medium", "high"], "description": "Only for models that list reasoning effort."},
     },
     "additionalProperties": False,
@@ -164,7 +164,7 @@ def voice_entry(voice: Voice) -> str:
 
 
 def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
-    """Tool description carrying the catalog, so 'a deeper voice' can be resolved from traits."""
+    """Tool description carrying the catalog (voice ids and labels, plus traits where published)."""
     lines = []
     for model in models:
         voices = "; ".join(voice_entry(v) for v in model.voices)

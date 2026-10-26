@@ -55,7 +55,7 @@ export function App() {
     socketModels.current = session.voiceModels;
     if (session.voiceModels.length > 0) setRegistry(session.voiceModels);
   }
-  const [catalog, refresh] = useServerCatalog();
+  const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
   const providers = catalog?.providers ?? NO_PROVIDERS;
   const [connecting, setConnecting] = useState<ProviderInfo>();
   // The registry (with `locked` models) before any socket is open and after a connect.
@@ -217,6 +217,7 @@ export function App() {
         <OrbComposer
           session={session}
           awaitingChoice={pending !== undefined}
+          pickerError={catalogError}
           picker={
             pick && registry.length > 0
               ? {

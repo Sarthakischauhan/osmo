@@ -1,5 +1,5 @@
 import { type VoiceModel, serverEventSchema } from "@osmo/osmo-composer";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type ProviderInfo, providersResponseSchema } from "./ConnectProvider";
 
 /** What the picker is built from: the server's voice models (`GET /voice-models`) and providers (`GET /providers`). */
@@ -32,16 +32,37 @@ export async function fetchCatalog(fetcher: Fetcher, signal?: AbortSignal): Prom
   return { models: models.models, providers: providersResponseSchema.parse(providersBody).providers };
 }
 
-/** Load attempts until one succeeds or `signal` aborts; resolves undefined only when aborted. */
+/** The hook's state: the last loaded catalog, and the failure of the latest attempt (cleared on success). */
+export interface CatalogState {
+  catalog: ServerCatalog | undefined;
+  error: string | undefined;
+}
+
+export type CatalogOutcome = { kind: "loaded"; catalog: ServerCatalog } | { kind: "failed"; error: string };
+
+export function nextCatalogState(state: CatalogState, outcome: CatalogOutcome): CatalogState {
+  return outcome.kind === "loaded" ? { catalog: outcome.catalog, error: undefined } : { ...state, error: outcome.error };
+}
+
+function failureMessage(error: unknown): string {
+  return `Can't reach symphony-server (${error instanceof Error ? error.message : String(error)}); retrying…`;
+}
+
+/** Load attempts until one succeeds or `signal` aborts, reporting each outcome; resolves undefined only when aborted. */
 export async function loadCatalog(
   fetcher: Fetcher,
   signal: AbortSignal,
   wait: (ms: number, signal: AbortSignal) => Promise<void>,
+  report: (outcome: CatalogOutcome) => void,
 ): Promise<ServerCatalog | undefined> {
   for (let attempt = 0; !signal.aborted; attempt++) {
     try {
-      return await fetchCatalog(fetcher, signal);
-    } catch {
+      const catalog = await fetchCatalog(fetcher, signal);
+      report({ kind: "loaded", catalog });
+      return catalog;
+    } catch (error) {
+      if (signal.aborted) break;
+      report({ kind: "failed", error: failureMessage(error) });
       await wait(retryDelay(attempt), signal);
     }
   }
@@ -61,19 +82,18 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 /**
  * The server catalog, kept loading until the server answers: a page opened before
  * symphony-server is up (or while it restarts) fills in once it is reachable.
+ * `error` is the latest failed attempt while it retries, cleared once both requests succeed.
  * `refresh` reloads it, e.g. after a provider is connected.
  */
-export function useServerCatalog(fetcher: Fetcher = (url, init) => fetch(url, init)): [ServerCatalog | undefined, () => void] {
-  const [catalog, setCatalog] = useState<ServerCatalog>();
+export function useServerCatalog(fetcher: Fetcher = (url, init) => fetch(url, init)): [CatalogState, () => void] {
+  const [state, report] = useReducer(nextCatalogState, { catalog: undefined, error: undefined });
   const [generation, setGeneration] = useState(0);
   const fetcherRef = useRef(fetcher);
   useEffect(() => {
     const controller = new AbortController();
-    void loadCatalog(fetcherRef.current, controller.signal, sleep).then((loaded) => {
-      if (loaded !== undefined) setCatalog(loaded);
-    });
+    void loadCatalog(fetcherRef.current, controller.signal, sleep, report);
     return () => controller.abort();
   }, [generation]);
   const refresh = useCallback(() => setGeneration((n) => n + 1), []);
-  return [catalog, refresh];
+  return [state, refresh];
 }

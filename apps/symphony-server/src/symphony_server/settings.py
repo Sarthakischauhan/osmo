@@ -26,7 +26,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - To change a widget already on screen, call update_widget with its id.
 
 # Tools
-- set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): pick from the catalog by traits, then confirm in one short line.
+- set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): choose a voice id and label from the catalog, then confirm in one short line.
 - get_weather for forecasts, get_stock_history for tickers, web_search for anything current (places, news, facts), create_image for pictures.
 """
 

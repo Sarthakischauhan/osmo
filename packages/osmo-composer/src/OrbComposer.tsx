@@ -23,21 +23,23 @@ export interface OrbComposerProps {
    * Wrap the orb in the radial voice picker: hovering or focusing the orb opens the
    * dial, a tap still starts or interrupts the conversation.
    */
-  picker?: Omit<RadialPickerProps, "orb" | "orbSize" | "onOrbActivate" | "orbLabel">;
+  picker?: Omit<RadialPickerProps, "orb" | "orbSize" | "onOrbActivate" | "orbLabel" | "loadError">;
+  /** Why the picker's models could not be loaded (shown while the app retries). */
+  pickerError?: string;
 }
 
 /**
  * The orb: the only input surface. Tap to connect, tap while speaking to
  * interrupt. Shaped as a chat SDK composer so it can drop into that slot later.
  */
-export function OrbComposer({ session, awaitingChoice = false, className, style, picker }: OrbComposerProps) {
+export function OrbComposer({ session, awaitingChoice = false, className, style, picker, pickerError }: OrbComposerProps) {
   const { connection, state, detail, error, outputLevel } = session;
   const shown: OsmoState = connection === "connected" ? state : "idle";
   const mode = orbMode(connection, shown, awaitingChoice);
   const caption =
     connection === "connecting"
       ? "Connecting…"
-      : (error ?? detail ?? (mode === "awaiting" ? "Waiting for your choice" : CAPTIONS[shown]));
+      : (error ?? (picker ? undefined : pickerError) ?? detail ?? (mode === "awaiting" ? "Waiting for your choice" : CAPTIONS[shown]));
 
   const onTap = () => {
     if (connection === "disconnected") void session.start();
@@ -49,7 +51,7 @@ export function OrbComposer({ session, awaitingChoice = false, className, style,
   return (
     <div className={`orb-composer ${className ?? ""}`} style={style} data-state={shown} data-mode={mode} data-connection={connection}>
       {picker ? (
-        <RadialPicker {...picker} orb={orb} orbSize={64} onOrbActivate={onTap} orbLabel={label} />
+        <RadialPicker {...picker} loadError={pickerError} orb={orb} orbSize={64} onOrbActivate={onTap} orbLabel={label} />
       ) : (
         <button type="button" className="orb" data-state={shown} data-mode={mode} data-connection={connection} aria-label={label} onClick={onTap}>
           {orb}
