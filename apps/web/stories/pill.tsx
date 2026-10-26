@@ -11,7 +11,16 @@ import "@/styles.css";
 
 const STATES: readonly PillState[] = ["connected", "connecting", "error", "none"];
 const PROVIDERS: ProviderInfo[] = [{ id: "xai", label: "xAI", authKinds: ["api_key"], connected: true }];
-const REGISTRY: VoiceModel[] = [];
+const REGISTRY: VoiceModel[] = [
+  {
+    id: "grok-voice-latest",
+    provider: "xai",
+    label: "Grok Voice",
+    capabilities: { tools: true, interrupt: true, customVoices: false },
+    voices: [{ id: "ara", label: "Ara", traits: [] }],
+    defaultVoice: "ara",
+  },
+];
 const noop = () => undefined;
 
 function Column({ theme }: { theme: "dark" | "light" }) {

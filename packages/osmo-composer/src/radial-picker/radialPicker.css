@@ -10,7 +10,7 @@
      OPTION_TOKENS in geometry.ts, which drives the ring radii; the values here mirror it. */
   --rp-option-height: 36px;
   --rp-option-padding-x: 12px;
-  --rp-option-radius: 999px;
+  --rp-option-radius: 3px;
   --rp-option-gap: 6px;
   --rp-option-font-size: 12px;
   --rp-option-hit: 44px;
@@ -88,7 +88,7 @@
 /* Full model id on hover/focus: white alphas, no border. */
 .rp-tip {
   position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
-  padding: 4px 8px; border: 0; border-radius: 6px;
+  padding: 4px 8px; border: 0; border-radius: var(--radius, 3px);
   background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.92);
   -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; pointer-events: none; z-index: 3;
@@ -144,7 +144,7 @@
   left: 50%;
   transform: translateX(-50%);
   padding: 7px 14px;
-  border-radius: 999px;
+  border-radius: var(--radius, 3px);
   background: rgba(255, 255, 255, 0.04);
   color: #b5b5b5;
   /* Same sans as the ring pills (inherited from .rp). */

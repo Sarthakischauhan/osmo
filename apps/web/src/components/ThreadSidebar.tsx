@@ -202,7 +202,7 @@ function ThreadRow({ thread, active, renaming, onSelect, onStartRename, onRename
       </ContextMenu>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <SidebarMenuAction showOnHover={!active} aria-label={`Thread actions for ${thread.title}`} className="osmo-thread-action">
+          <SidebarMenuAction showOnHover aria-label={`Thread actions for ${thread.title}`} className="osmo-thread-action">
             <MoreHorizontal size={16} />
           </SidebarMenuAction>
         </DropdownMenuTrigger>

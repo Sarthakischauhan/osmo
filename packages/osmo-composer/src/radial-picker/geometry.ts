@@ -27,8 +27,8 @@ export const OPTION_TOKENS = {
   height: 36,
   /** Horizontal padding inside every option. */
   paddingX: 12,
-  /** Corner radius (full pill). */
-  radius: 999,
+  /** Corner radius: 3px, per the app-wide 2-3px rule. */
+  radius: 3,
   /** Gap between an option's label and its glyph (logo, meter, playing bars). */
   gap: 6,
   fontSize: 12,
