@@ -10,7 +10,7 @@
      OPTION_TOKENS in geometry.ts, which drives the ring radii; the values here mirror it. */
   --rp-option-height: 36px;
   --rp-option-padding-x: 12px;
-  --rp-option-radius: 3px;
+  --rp-option-radius: 999px; /* Options stay fully round (Sarthak); the 3px rule covers everything else. */
   --rp-option-gap: 6px;
   --rp-option-font-size: 12px;
   --rp-option-hit: 44px;

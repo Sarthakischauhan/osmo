@@ -92,7 +92,7 @@ inline and the CSS defaults mirror them (a unit test keeps the two equal).
 | --- | --- | --- |
 | `--rp-option-height` | 36px | visual height of every option |
 | `--rp-option-padding-x` | 12px | horizontal padding of every option |
-| `--rp-option-radius` | 3px | corner radius |
+| `--rp-option-radius` | 999px | corner radius (pill) |
 | `--rp-option-gap` | 6px | gap between label and glyph (logo, meter, playing bars) |
 | `--rp-option-font-size` | 12px | label size |
 | `--rp-option-hit` | 44px | minimum hit height; `::before` extends the 36px pill to it |
