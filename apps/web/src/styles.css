@@ -108,7 +108,7 @@ button { font: inherit; color: inherit; }
 .osmo-html-zoom { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
 .osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius, 3px); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
 .osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
-.osmo-icon-button:focus-visible { outline: none; background: var(--surface-3); color: var(--foreground); box-shadow: 0 0 0 2px var(--ring); }
+.osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
 .osmo-icon-button:disabled { opacity: .35; cursor: default; }
 .osmo-html-viewport { position: relative; overflow: hidden; background: #111; }
 .osmo-html-viewport iframe { display: block; border: 0; background: #111; transform-origin: 0 0; }
@@ -119,7 +119,7 @@ button { font: inherit; color: inherit; }
 .dock { padding: 18px 0 22px; background: var(--background); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .orb { position: relative; width: 64px; height: 64px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }
-.orb:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.orb:focus-visible { outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
 /* The canvas draws every state as a solid --foreground blob (osmo-composer orbVisual.ts); it overhangs the button so the wobble has room. */
 .orb-canvas { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 .orb-caption { margin: 0; font-size: 11px; color: var(--muted-foreground); }
@@ -271,7 +271,9 @@ button.osmo-list-row { cursor: pointer; }
 }
 
 /* Home: time-of-day ASCII (GUI spec, frames in lib/asciiFrames.ts). The only home content. */
-.osmo-ascii-home { align-items: center; margin-top: 48px; }
+.osmo-ascii-home { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; margin-top: 0; }
+/* The canvas is a block scroller for the feed; on home it becomes a column so the frame can fill and centre above the orb. */
+.canvas.chat-root:has(> .osmo-ascii-home) { display: flex; flex-direction: column; }
 .osmo-ascii { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; line-height: 1.15; white-space: pre; letter-spacing: normal; color: var(--muted-foreground); opacity: .7; transition: opacity 200ms; background: none; }
 .light .osmo-ascii { opacity: .85; }
 @media (prefers-color-scheme: light) { :root:not(.dark) .osmo-ascii { opacity: .85; } }

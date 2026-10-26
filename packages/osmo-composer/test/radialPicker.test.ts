@@ -367,7 +367,9 @@ describe("model ring labels", () => {
     const rule = (sel: string) => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
     expect(rule(".rp-option")).not.toMatch(/ellipsis|max-width|overflow/);
     expect(rule(".rp-tip")).toMatch(/border: 0/);
-    expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
+    expect(rule(".rp-tip")).toMatch(/background: var\(--accent\)/);
+    expect(css).not.toMatch(/backdrop-filter|radial-gradient/);
+    expect(css).not.toMatch(/box-shadow: (?!none)/);
   });
 });
 
@@ -378,7 +380,7 @@ describe("summary font", () => {
     expect(summary).toMatch(/font-family: inherit/);
     expect(summary).toMatch(/font-weight: 500/);
     expect(summary).not.toMatch(/mono/i);
-    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: Inter/);
+    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: var\(--font-sans\)/);
   });
 });
 

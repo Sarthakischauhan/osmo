@@ -1,4 +1,4 @@
-/* Radial picker. White alphas only on #0A0A0A; state is fill + soft glow, never lines or borders.
+/* Radial picker. Theme tokens only (foreground alphas, solid accent); state is fill, never lines, glows or blur.
    Arcs are implied by spacing alone (no tracks).
    Borders are off by default; set --picker-border (e.g. 1px solid rgba(255, 255, 255, 0.12)) on .rp
    (e.g. a .dock .rp rule) to bring them back on pills and provider discs. */
@@ -16,8 +16,8 @@
   --rp-option-hit: 44px;
   --rp-ring-spacing: 76px;
   position: relative;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #b5b5b5;
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
   user-select: none;
   touch-action: none;
 }
@@ -46,13 +46,12 @@
   line-height: 1;
   border: var(--picker-border);
   border-radius: var(--rp-option-radius);
-  background: rgba(255, 255, 255, 0.04);
-  color: #b5b5b5;
+  background: var(--accent);
+  color: var(--muted-foreground);
   white-space: nowrap;
   cursor: pointer;
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  transition: background-color 120ms ease-out, color 120ms ease-out, box-shadow 160ms ease-out;
+  box-shadow: none;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
   animation: rp-in 200ms ease-out both;
 }
 /* Hit areas stay at least --rp-option-hit tall whatever the visual height. */
@@ -64,52 +63,51 @@
 }
 .rp-option[data-state="hover"] {
   border: var(--picker-border-hover);
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
-  box-shadow: 0 0 14px rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+  color: var(--foreground);
+  box-shadow: none;
 }
 .rp-option[data-state="selected"] {
   border: var(--picker-border-selected);
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.1), 0 0 20px rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--foreground) 16%, transparent);
+  color: var(--foreground);
+  box-shadow: none;
 }
-.rp-ring:focus-visible .rp-option[data-state="hover"] { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08), 0 0 18px rgba(255, 255, 255, 0.1); }
+.rp-ring:focus-visible .rp-option[data-state="hover"] { box-shadow: none; outline: 1px solid var(--ring); outline-offset: 0; }
 
 .rp-monogram { display: inline-block; width: 20px; text-align: center; font-size: 15px; font-weight: 600; }
 /* Remote logos are drawn pure white whatever their own colours. */
 .rp-logo { display: block; width: 20px; height: 20px; object-fit: contain; filter: brightness(0) invert(1); opacity: 0.85; pointer-events: none; }
 .rp-option[data-state="hover"] .rp-logo, .rp-option[data-state="selected"] .rp-logo { opacity: 1; }
 /* Locked (not connected) providers are dimmed; no pins or badges. */
-.rp-option[data-locked="true"] { background: rgba(255, 255, 255, 0.02); color: rgba(255, 255, 255, 0.4); }
+.rp-option[data-locked="true"] { background: color-mix(in srgb, var(--foreground) 2%, transparent); color: color-mix(in srgb, var(--foreground) 40%, transparent); }
 .rp-option[data-locked="true"] .rp-logo { opacity: 0.32; }
-.rp-option[data-locked="true"][data-state="hover"] { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.7); }
+.rp-option[data-locked="true"][data-state="hover"] { background: color-mix(in srgb, var(--foreground) 6%, transparent); color: color-mix(in srgb, var(--foreground) 70%, transparent); }
 .rp-option[data-locked="true"][data-state="hover"] .rp-logo { opacity: 0.6; }
-/* Full model id on hover/focus: white alphas, no border. */
+/* Full model id on hover/focus: solid accent, no border. */
 .rp-tip {
   position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
   padding: 4px 8px; border: 0; border-radius: var(--radius, 3px);
-  background: rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.92);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  background: var(--accent); color: var(--foreground);
   font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; pointer-events: none; z-index: 3;
 }
 
 .rp-meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
-.rp-meter i { width: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.18); }
+.rp-meter i { width: 3px; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 18%, transparent); }
 .rp-meter i:nth-child(1) { height: 4px; }
 .rp-meter i:nth-child(2) { height: 7px; }
 .rp-meter i:nth-child(3) { height: 10px; }
-.rp-meter i[data-on="true"] { background: rgba(255, 255, 255, 0.85); }
+.rp-meter i[data-on="true"] { background: color-mix(in srgb, var(--foreground) 85%, transparent); }
 
 .rp-playing { display: inline-flex; align-items: center; gap: 2px; height: 10px; }
-.rp-playing i { width: 2px; height: 10px; border-radius: 1px; background: rgba(255, 255, 255, 0.9); animation: rp-eq 600ms ease-in-out infinite alternate; }
+.rp-playing i { width: 2px; height: 10px; border-radius: 1px; background: color-mix(in srgb, var(--foreground) 90%, transparent); animation: rp-eq 600ms ease-in-out infinite alternate; }
 .rp-playing i:nth-child(2) { animation-delay: -200ms; }
 .rp-playing i:nth-child(3) { animation-delay: -400ms; }
 
 .rp-more {
   position: absolute;
   transform: translate(-50%, -50%);
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, var(--foreground) 45%, transparent);
   font-size: 14px;
   letter-spacing: 1px;
   pointer-events: none;
@@ -125,18 +123,14 @@
   cursor: pointer;
   outline: none;
 }
-.rp-orb:focus-visible { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.08); }
+.rp-orb:focus-visible { box-shadow: none; outline: 1px solid var(--ring); outline-offset: 0; }
 .rp-glass {
   display: block;
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 32%),
-    radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03) 70%);
-  box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.12), 0 0 34px rgba(255, 255, 255, 0.07);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  background: var(--foreground);
+  box-shadow: none;
 }
 
 .rp-summary {
@@ -145,8 +139,8 @@
   transform: translateX(-50%);
   padding: 7px 14px;
   border-radius: var(--radius, 3px);
-  background: rgba(255, 255, 255, 0.04);
-  color: #b5b5b5;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--muted-foreground);
   /* Same sans as the ring pills (inherited from .rp). */
   font-family: inherit;
   font-size: 12px;
@@ -161,3 +155,6 @@
   .rp-option { animation: none; transition: none; }
   .rp-playing i { animation: none; }
 }
+/* Logos are drawn in the foreground colour: white on dark, black on light. */
+.light .rp-logo { filter: brightness(0); }
+@media (prefers-color-scheme: light) { :root:not(.dark) .rp-logo { filter: brightness(0); } }
