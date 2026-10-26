@@ -20,10 +20,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/components/ApprovalPrompt";
 import { OrbDock } from "@/components/OrbDock";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
-import { ProviderPill, pillState } from "@/components/home/ProviderPill";
-import { RecentThreads } from "@/components/home/RecentThreads";
 import { RunsList } from "@/components/home/RunsList";
-import { VoiceHome } from "@/components/home/VoiceHome";
+import { AsciiHome } from "@/components/home/AsciiHome";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
@@ -334,26 +332,6 @@ function Osmo() {
   const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
   const lastAssistant = [...feed.turns].reverse().find((turn): turn is AssistantTurn => turn.role === "assistant");
   const steps = lastAssistant?.activities.map((activity) => activity.label) ?? [];
-  const retry = () => {
-    const current = registry.find((model) => model.id === pick?.model);
-    if (current) onLockedProvider(current.provider);
-  };
-  const connectProvider = (id: string) => {
-    const provider = providers.find((p) => p.id === id);
-    if (provider) setConnecting(provider);
-    else onLockedProvider(id);
-  };
-  const pill = (
-    <ProviderPill
-      state={pillState(providers, session.connection, session.error ?? catalogError)}
-      registry={registry}
-      providers={providers}
-      current={pick?.model}
-      onPick={onPickModel}
-      onConnect={connectProvider}
-      onRetry={retry}
-    />
-  );
 
   return (
     <>
@@ -386,13 +364,7 @@ function Osmo() {
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <main className="canvas chat-root" data-theme={systemTheme()} onChange={onFeedChange}>
             {feed.turns.length === 0 ? (
-              <VoiceHome
-                name={USER_NAME}
-                now={now}
-                pill={pill}
-                runs={runsList}
-                recent={<RecentThreads threads={threads} now={now} onResume={(id) => void openThread(id)} onViewAll={() => sidebar.setOpen(true)} />}
-              />
+              <AsciiHome />
             ) : (
               <div className="feed">
                 {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}

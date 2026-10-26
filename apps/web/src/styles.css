@@ -200,15 +200,16 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-new-thread span { flex: 1; text-align: left; }
 .osmo-thread-group { padding: 0 8px; }
 .osmo-thread-group-label { height: auto; padding: 16px 8px 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
-.osmo-thread-button { height: 32px; padding: 0 8px; border-radius: var(--radius, 3px); font-size: 13px; color: var(--muted-foreground); }
-.osmo-thread-button:hover { background: var(--accent); color: var(--foreground); }
-/* Rows are plain text: a box only on hover; the open thread reads by text colour and weight alone. */
+/* Sidebar rows (GUI spec): plain text 13px/400 muted; a box only on hover; the open thread is foreground/500. */
+.osmo-thread-button { height: 30px; padding: 6px 8px; border: 0; border-radius: 3px; box-shadow: none; font-size: 13px; font-weight: 400; color: var(--muted-foreground); background: none; transition: background-color 120ms; }
+.osmo-thread-button:hover { background: var(--accent); }
 .osmo-thread-button[data-active="true"] { background: none; color: var(--foreground); font-weight: 500; }
 .osmo-thread-button[data-active="true"]:hover { background: var(--accent); }
+.osmo-thread-button:focus-visible, .osmo-thread-action:focus-visible { outline: 1px solid var(--ring); outline-offset: 0; border-radius: 3px; box-shadow: none; }
 .osmo-thread-row .osmo-thread-button { padding-right: 32px; }
 .osmo-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .osmo-thread-action { color: var(--muted-foreground); border-radius: var(--radius, 3px); }
-.osmo-rename { box-sizing: border-box; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius, 3px); outline: none; background: var(--background); box-shadow: inset 0 0 0 1px var(--fg-tertiary); color: var(--foreground); font: 13px var(--font-sans); }
+.osmo-rename { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 2px; outline: none; background: var(--background); box-shadow: inset 0 0 0 1px var(--fg-tertiary); color: var(--foreground); font: 13px var(--font-sans); }
 .osmo-sidebar-empty { padding: 16px 16px; color: var(--muted-foreground); font-size: 13px; }
 .osmo-sidebar-empty-title { margin-bottom: 2px; color: var(--foreground); font-size: 14px; font-weight: 500; }
 .osmo-menu { width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--popover); color: var(--popover-foreground); }
@@ -268,3 +269,10 @@ button.osmo-list-row { cursor: pointer; }
   .osmo-orb[data-mode="listening"], .osmo-orb[data-mode="speaking"] { animation: none; opacity: 1; }
   * { transition: none !important; }
 }
+
+/* Home: time-of-day ASCII (GUI spec, frames in lib/asciiFrames.ts). The only home content. */
+.osmo-ascii-home { align-items: center; margin-top: 48px; }
+.osmo-ascii { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; line-height: 1.15; white-space: pre; letter-spacing: normal; color: var(--muted-foreground); opacity: .7; transition: opacity 200ms; background: none; }
+.light .osmo-ascii { opacity: .85; }
+@media (prefers-color-scheme: light) { :root:not(.dark) .osmo-ascii { opacity: .85; } }
+.osmo-ascii[data-fading="true"] { opacity: 0; }
