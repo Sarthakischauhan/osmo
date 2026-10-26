@@ -20,8 +20,9 @@ export interface ProviderPillProps {
 }
 
 export function pillState(providers: readonly ProviderInfo[], connection: "disconnected" | "connecting" | "connected", error: string | undefined): PillState {
-  if (!providers.some((provider) => provider.connected)) return "none";
+  // A failed /voice-models or session is an error even when it leaves no provider listed as connected.
   if (error !== undefined) return "error";
+  if (!providers.some((provider) => provider.connected)) return "none";
   return connection === "connecting" ? "connecting" : "connected";
 }
 

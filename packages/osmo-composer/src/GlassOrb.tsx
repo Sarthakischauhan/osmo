@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { type OrbMode, drawOrb, initialFrame, step } from "./orbVisual";
 
-/** Canvas size in CSS pixels; larger than the 64px button so the glow has room. */
+/** Canvas size in CSS pixels; larger than the 64px button so the wobble has room. */
 export const ORB_CANVAS = 140;
 
 export interface GlassOrbProps {
@@ -11,9 +11,8 @@ export interface GlassOrbProps {
 }
 
 /**
- * The periwinkle glass orb: a canvas redrawn every frame from `mode` and the
- * playback level (amber while a choice is pending). It draws only; the parent
- * owns the button and what a tap does.
+ * The orb: a solid `--foreground` canvas blob redrawn every frame from `mode` and the
+ * playback level. It draws only; the parent owns the button and what a tap does.
  */
 export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -38,7 +37,7 @@ export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
       last = now;
       const level = outputLevel();
       step(frame, modeRef.current, motion.matches ? 0 : level, motion.matches ? 1 : dt, motion.matches);
-      drawOrb(ctx, size, frame, modeRef.current);
+      drawOrb(ctx, size, frame, getComputedStyle(element).getPropertyValue("--foreground").trim() || "currentColor");
       element.dataset.level = frame.level.toFixed(2);
       handle = requestAnimationFrame(tick);
     };
