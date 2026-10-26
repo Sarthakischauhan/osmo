@@ -8,7 +8,6 @@ import {
   type VoiceModel,
   type VoiceSelection,
   orbMode,
-  serverEventSchema,
   sameOriginSocketUrl,
   useOsmoSession,
   usePersistedPick,
@@ -16,10 +15,13 @@ import {
 import "@osmo/osmo-composer/radial-picker.css";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction, providersResponseSchema } from "./ConnectProvider";
+import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
+import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { type Feed, type Turn, emptyFeed, pendingChoice, reduceFeed } from "./feed";
+
+const NO_PROVIDERS: ProviderInfo[] = [];
 
 export function App() {
   const [feed, dispatch] = useReducer((state: Feed, event: ServerEvent) => reduceFeed(state, event), emptyFeed);
@@ -53,36 +55,21 @@ export function App() {
     socketModels.current = session.voiceModels;
     if (session.voiceModels.length > 0) setRegistry(session.voiceModels);
   }
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [catalog, refresh] = useServerCatalog();
+  const providers = catalog?.providers ?? NO_PROVIDERS;
   const [connecting, setConnecting] = useState<ProviderInfo>();
-  // The registry (with `locked` models) and the providers, before any socket is open and after a connect.
-  const refresh = useCallback((signal?: AbortSignal) => {
-    fetch("/voice-models", { signal })
-      .then((response) => (response.ok ? response.json() : undefined))
-      .then((body: unknown) => {
-        const parsed = serverEventSchema.safeParse(body);
-        if (parsed.success && parsed.data.type === "models") setRegistry(parsed.data.models);
-      })
-      .catch(() => undefined);
-    fetch("/providers", { signal })
-      .then((response) => (response.ok ? response.json() : undefined))
-      .then((body: unknown) => {
-        const parsed = providersResponseSchema.safeParse(body);
-        if (parsed.success) setProviders(parsed.data.providers);
-      })
-      .catch(() => undefined);
-  }, []);
+  // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
-    const controller = new AbortController();
-    refresh(controller.signal);
+    if (catalog !== undefined) setRegistry(catalog.models);
+  }, [catalog]);
+  useEffect(() => {
     // Back from an OAuth sign-in: the server redirects to `/#connected=<provider>`.
     const connected = /^#connected=([\w-]+)$/.exec(window.location.hash)?.[1];
     if (connected) {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
       toast.success(`${connected} connected`);
     }
-    return () => controller.abort();
-  }, [refresh]);
+  }, []);
   const onLockedProvider = useCallback(
     (id: string) => {
       const action = lockedProviderAction(providers, id);
