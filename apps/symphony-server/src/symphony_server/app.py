@@ -46,6 +46,7 @@ from symphony_server.voices import (
     PREVIEW_SAMPLE_RATE,
     KeyedRateLimiter,
     PreviewCache,
+    CORE_NAMESPACES,
     SetVoiceTool,
     core_model_id,
     default_selection,
@@ -102,7 +103,8 @@ def create_app(
 ) -> FastAPI:
     credentials = CredentialStore(secret_store or open_secret_store(settings))
     access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url)
-    access.connect("xai")
+    for provider in CORE_NAMESPACES:
+        access.connect(provider)
     board = WidgetBoard()
     links = VoiceLinks()
     core_config = osmo_core_config(

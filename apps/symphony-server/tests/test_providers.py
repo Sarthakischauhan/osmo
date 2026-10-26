@@ -10,6 +10,8 @@ from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from typing import Any
+
 import httpx
 import pytest
 from cryptography.fernet import Fernet
@@ -40,6 +42,9 @@ class FakeProviders:
         if request.method == "GET" and request.url.path in ("/v1/models", "/api/v1/key", "/v1/credits"):
             ok = request.headers.get("Authorization") == f"Bearer {GOOD_KEY}"
             return httpx.Response(200, json={"data": []}) if ok else httpx.Response(401, json={"error": "invalid key"})
+        if request.method == "GET" and str(request.url) == "https://generativelanguage.googleapis.com/v1beta/models":
+            ok = request.headers.get("x-goog-api-key") == GOOD_KEY and "Authorization" not in request.headers
+            return httpx.Response(200, json={"models": []}) if ok else httpx.Response(400, json={"error": "invalid key"})
         if request.method == "POST" and str(request.url) == "https://openrouter.ai/api/v1/auth/keys":
             body = json.loads(request.content)
             digest = hashlib.sha256(body["code_verifier"].encode()).digest()
@@ -67,7 +72,7 @@ def test_providers_lists_auth_kinds_and_openrouter_alone_offers_oauth(tmp_path: 
     with make_client(settings(tmp_path), fake) as client:
         body = client.get("/providers").json()
     kinds = {p["id"]: p["authKinds"] for p in body["providers"]}
-    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"]}
+    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"], "gemini": ["api_key"]}
     assert all(p["connected"] is False for p in body["providers"])
     assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected"}
 
@@ -88,15 +93,41 @@ def test_valid_key_connects_unlocks_models_and_delete_disconnects(tmp_path: Path
         assert models and all(m["locked"] is True for m in models)
         assert client.post("/providers/xai/key", json={"key": GOOD_KEY}).status_code == 204
         assert connected(client.get("/providers"))["xai"] is True
-        assert all(m["locked"] is False for m in client.get("/voice-models").json()["models"])
+        assert unlocked(client.get("/voice-models").json()["models"]) == {"xai"}
         with client.websocket_connect("/ws") as ws:
             event = json.loads(ws.receive_text())
-            assert event["type"] == "models" and all(m["locked"] is False for m in event["models"])
+            assert event["type"] == "models" and unlocked(event["models"]) == {"xai"}
         assert client.delete("/providers/xai").status_code == 204
         assert connected(client.get("/providers"))["xai"] is False
         with client.websocket_connect("/ws") as ws:
             event = json.loads(ws.receive_text())
             assert all(m["locked"] is True for m in event["models"])
+
+
+def unlocked(models: list[dict[str, Any]]) -> set[str]:
+    return {m["provider"] for m in models if not m["locked"]}
+
+
+def test_voice_models_serve_openai_and_gateway_models_unlocked_by_their_keys(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        models = client.get("/voice-models").json()["models"]
+        served = {(m["provider"], m["id"]) for m in models}
+        assert {("openai", "gpt-realtime"), ("openai", "gpt-realtime-mini"), ("vercel", "openai/gpt-realtime-2")} <= served
+        assert unlocked(models) == set()
+        gpt = next(m for m in models if m["id"] == "gpt-realtime-2.1")
+        assert (gpt["label"], gpt["shortLabel"], gpt["defaultVoice"]) == ("Gpt Realtime 2.1", "2.1", "alloy")
+        assert {"marin", "cedar"} <= {v["id"] for v in gpt["voices"]}
+        assert client.post("/providers/openai/key", json={"key": GOOD_KEY}).status_code == 204
+        assert unlocked(client.get("/voice-models").json()["models"]) == {"openai"}
+        assert client.post("/providers/vercel/key", json={"key": GOOD_KEY}).status_code == 204
+        assert unlocked(client.get("/voice-models").json()["models"]) == {"openai", "vercel"}
+
+
+def test_gemini_key_is_checked_in_its_own_header(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        assert client.post("/providers/gemini/key", json={"key": BAD_KEY}).status_code == 400
+        assert client.post("/providers/gemini/key", json={"key": GOOD_KEY}).status_code == 204
+        assert connected(client.get("/providers"))["gemini"] is True
 
 
 def test_xai_api_key_in_the_environment_is_not_a_credential(

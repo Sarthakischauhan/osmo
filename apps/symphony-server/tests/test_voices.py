@@ -21,6 +21,7 @@ from symphony_server.voices import (
     parse_voice_change,
     resolve_selection,
     set_voice_description,
+    model_labels,
     voice_models,
 )
 from test_session import answer, call, next_event, say, start, tool_output, wait_listening
@@ -185,17 +186,17 @@ def test_set_voice_model_switch_happens_after_the_confirming_turn(client: TestCl
 def test_voice_models_endpoint_serves_the_catalog_before_any_socket(client: TestClient) -> None:
     body = client.get("/voice-models").json()
     assert body["type"] == "models"
-    assert [m["id"] for m in body["models"]] == ["grok-voice-latest", "grok-voice-3.0", "grok-voice-2.0"]
+    assert [m["id"] for m in body["models"]][:3] == ["grok-voice-latest", "grok-voice-3.0", "grok-voice-2.0"]
     assert body["models"][0]["capabilities"]["reasoningEffort"] == ["none", "high"]
     assert body["selection"] == {"model": "grok-voice-latest", "voice": "eve", "effort": "high"}
 
 
 def test_model_ring_short_labels_are_distinct_and_served(client: TestClient) -> None:
-    shorts = [m.shortLabel for m in voice_models()]
+    shorts = [m.shortLabel for m in voice_models() if m.provider == "xai"]
     assert shorts == ["Latest", "3.0", "2.0"]
     assert len(set(shorts)) == len(shorts)
     served = client.get("/voice-models").json()["models"]
-    assert [(m["id"], m["shortLabel"]) for m in served] == [
+    assert [(m["id"], m["shortLabel"]) for m in served if m["provider"] == "xai"] == [
         ("grok-voice-latest", "Latest"),
         ("grok-voice-3.0", "3.0"),
         ("grok-voice-2.0", "2.0"),
@@ -209,3 +210,11 @@ def test_set_voice_description_lists_traits_only_where_the_catalog_has_them() ->
     text = set_voice_description((plain, described))
     assert f"- {model.id}: voices eve;" in text
     assert f"- {model.id}: voices sal (deep);" in text
+
+
+def test_model_labels_come_from_any_providers_ids() -> None:
+    assert model_labels("grok-voice-latest") == ("Grok Voice", "latest".title())
+    assert model_labels("grok-voice-3.0") == ("Grok Voice 3.0", "3.0")
+    assert model_labels("gpt-realtime") == ("Gpt Realtime", None)
+    assert model_labels("gpt-realtime-2.1-mini") == ("Gpt Realtime 2.1 Mini", "2.1 Mini")
+    assert model_labels("google/gemini-3.8-live") == ("Gemini 3.8 Live", "3.8 Live")

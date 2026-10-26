@@ -90,28 +90,43 @@ class SetVoiceArgs(_Wire):
     effort: Effort | None = None
 
 
-# The core_ai provider namespace serving each Osmo provider id, and back.
-CORE_NAMESPACES: dict[str, str] = {"xai": "grok"}
+# The core_ai voice provider (also its ModelRegistry namespace) serving each Osmo provider id, and back.
+CORE_NAMESPACES: dict[str, str] = {"xai": "grok", "openai": "openai", "vercel": "vercel", "gemini": "gemini"}
 OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in CORE_NAMESPACES.items()}
 LATEST = "latest"
 
 
 def voice_models() -> tuple[VoiceModel, ...]:
-    """The picker's models: every realtime model in the core_ai voice catalog, latest first, then
-    in catalog order (xAI's, newest first). Voices and reasoning efforts come from each model's
-    VoiceModelSpec."""
-    specs = [m for m in VOICE_MODELS if m.provider in OSMO_PROVIDERS]
+    """The picker's models: every realtime model in the core_ai voice catalog that has voices to
+    pick from (a selection always names one), latest first, then in catalog order. Voices and
+    reasoning efforts come from each model's VoiceModelSpec."""
+    specs = [m for m in VOICE_MODELS if m.provider in OSMO_PROVIDERS and m.voices]
     return tuple(voice_model(m) for m in sorted(specs, key=lambda m: not m.id.endswith(LATEST)))
 
 
+def model_labels(model_id: str) -> tuple[str, str | None]:
+    """(label, ring label) from a catalog id: the leading words name the family and the rest
+    (from the first token with a digit, or "latest") the version, e.g. "grok-voice-3.0" ->
+    ("Grok Voice 3.0", "3.0"), "google/gemini-3.8-live" -> ("Gemini 3.8 Live", "3.8 Live"),
+    "gpt-realtime" -> ("Gpt Realtime", None). An AI Gateway id's owner prefix is dropped."""
+    tokens = model_id.rsplit("/", 1)[-1].split("-")
+    start = next(
+        (i for i, token in enumerate(tokens) if token == LATEST or any(c.isdigit() for c in token)), len(tokens)
+    )
+    family = " ".join(token.title() for token in tokens[:start])
+    version = " ".join(token if any(c.isdigit() for c in token) else token.title() for token in tokens[start:])
+    if not version:
+        return family, None
+    return (family if tokens[start:] == [LATEST] else f"{family} {version}"), version
+
+
 def voice_model(info: VoiceModelSpec) -> VoiceModel:
-    family, version = info.id.rsplit("-", 1)
-    name = family.replace("-", " ").title()
+    label, short_label = model_labels(info.id)
     return VoiceModel(
         id=info.id,
         provider=OSMO_PROVIDERS[info.provider],
-        label=name if version == LATEST else f"{name} {version}",
-        shortLabel=version.capitalize() if version == LATEST else version,
+        label=label,
+        shortLabel=short_label,
         capabilities=Capabilities.model_validate(
             {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts) or None}
         ),

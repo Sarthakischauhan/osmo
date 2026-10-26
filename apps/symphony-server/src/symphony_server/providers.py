@@ -46,6 +46,9 @@ class ProviderSpec:
     # One cheap authenticated GET that succeeds only with a valid key.
     validate_url: str
     oauth: OAuthSpec | None = None
+    # The header `validate_url` takes the key in, and the prefix before the key.
+    key_header: str = "Authorization"
+    key_prefix: str = "Bearer "
 
     @property
     def kinds(self) -> list[AuthKind]:
@@ -69,11 +72,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # https://vercel.com/docs/ai-gateway/sdks-and-apis/rest-api#check-credit-balance), which needs
     # the key; `GET /v1/models` is public and would accept any key.
     ProviderSpec(id="vercel", label="Vercel AI Gateway", validate_url="https://ai-gateway.vercel.sh/v1/credits"),
+    # Gemini API keys come from Google AI Studio (api_key only) and go in `x-goog-api-key`
+    # (https://ai.google.dev/api#authentication); listing models needs the key.
+    ProviderSpec(
+        id="gemini",
+        label="Gemini",
+        validate_url="https://generativelanguage.googleapis.com/v1beta/models",
+        key_header="x-goog-api-key",
+        key_prefix="",
+    ),
 )
 
 
 def find_provider(provider_id: str) -> ProviderSpec | None:
     return next((p for p in PROVIDERS if p.id == provider_id), None)
+
+
+def provider_label(provider_id: str) -> str:
+    """The display name of a provider in PROVIDERS."""
+    return next(p.label for p in PROVIDERS if p.id == provider_id)
 
 
 class CredentialStore:
@@ -193,7 +210,7 @@ def create_provider_router(store: CredentialStore, client: httpx.AsyncClient) ->
         try:
             response = await client.get(
                 spec.validate_url,
-                headers={"Authorization": f"Bearer {body.key.get_secret_value()}"},
+                headers={spec.key_header: spec.key_prefix + body.key.get_secret_value()},
                 timeout=VALIDATE_TIMEOUT_S,
             )
         except httpx.HTTPError as exc:

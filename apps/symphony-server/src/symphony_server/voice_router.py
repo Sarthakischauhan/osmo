@@ -1,5 +1,6 @@
-"""The `grok` provider every harness run streams from: voice models answer on the run's open
-voice link, every other model (and image generation) on core_ai's GrokProvider.
+"""The provider namespaces every harness run streams from (`grok`, `openai`, `vercel`, `gemini`):
+voice models answer on the run's open voice link, every other model (and image generation) on
+the namespace's core_ai text provider.
 
 The harness has no per-run model-call hook, so the run's link travels in a ContextVar that
 VoiceRunLink (a core_server addon_factories entry, built per run) sets in `before_run`; each run
@@ -11,7 +12,6 @@ from collections.abc import AsyncGenerator
 from contextvars import ContextVar
 from typing import Any
 
-from core_ai import GrokProvider
 from core_ai.providers.base import BaseProvider
 from core_ai.types import Message, StreamEvent
 from core_harness import Addon
@@ -26,7 +26,7 @@ class VoiceSessionNotOpen(LookupError):
 
 
 class ProviderNotConnected(LookupError):
-    """A text or image call reached the grok namespace while the server holds no xAI key."""
+    """A text or image call reached a namespace whose provider has no key on the server."""
 
 
 class VoiceRunLink(Addon):
@@ -42,12 +42,12 @@ class VoiceRunLink(Addon):
         RUN_LINK.set(self.link)
 
 
-class GrokRouter(BaseProvider):
-    """Registered once under `grok`; ModelAccess swaps `text` when the key changes."""
+class VoiceRouter(BaseProvider):
+    """Registered once per namespace; ModelAccess swaps `text` when the provider's key changes."""
 
     def __init__(self, namespace: str, voice_model_ids: frozenset[str]) -> None:
         self.namespace, self.voice_model_ids = namespace, voice_model_ids
-        self.text: GrokProvider | None = None
+        self.text: BaseProvider | None = None
 
     async def stream(
         self,
@@ -83,9 +83,9 @@ class GrokRouter(BaseProvider):
     ) -> tuple[bytes, str]:
         return await self.connected().generate_image(model_name, prompt, output_format)
 
-    def connected(self) -> GrokProvider:
+    def connected(self) -> BaseProvider:
         if self.text is None:
             raise ProviderNotConnected(
-                f"{self.namespace}: no xAI key; connect xAI in the Providers panel"
+                f"{self.namespace}: no key; connect its provider in the Providers panel"
             )
         return self.text

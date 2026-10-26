@@ -34,6 +34,7 @@ from websockets.exceptions import WebSocketException
 
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
 from symphony_server.model_access import ModelAccess
+from symphony_server.providers import provider_label
 from symphony_server.protocol import (
     Interrupt,
     ModelsEvent,
@@ -179,13 +180,14 @@ class VoiceBridge:
     async def start(self, event: SessionStart) -> None:
         if self.voice is not None:
             return
-        if not self.access.connect("xai"):
-            await self.set_state("idle", "xAI is not connected: add a key in Providers")
-            return
         change = SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)
         picked = resolve_selection(self.access.models(), change, self.selection)
         if isinstance(picked, Selection):
             self.selection = picked
+        provider = self.model().provider
+        if not self.access.connect(provider):
+            await self.set_state("idle", f"{provider_label(provider)} is not connected: add a key in Providers")
+            return
         if not await self.open_voice():
             await self.set_state("idle", "could not reach the voice model")
             return
