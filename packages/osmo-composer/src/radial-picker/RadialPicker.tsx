@@ -4,6 +4,7 @@ import {
   optionTokenVars,
   CLOSE_GRACE_MS,
   FREEZE_AFTER_SNAP_MS,
+  HOVER_INTENT_MS,
   PREVIEW_HOVER_MS,
   PX_PER_SLOT,
   ringSpec,
@@ -31,13 +32,27 @@ import {
 import { useReducedMotion } from "./useReducedMotion";
 
 export { modelRingLabel } from "./ringLabels";
-import { type Context, type PickerProvider, effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "./reducer";
+import {
+  type Context,
+  type PickMemory,
+  type PickerProvider,
+  effortsOf,
+  emptyMemory,
+  groupProviders,
+  initialPicker,
+  isFrozen,
+  recallModel,
+  recallProvider,
+  reducePicker,
+} from "./reducer";
 
 export interface RadialPickerProps {
   registry: VoiceModel[];
   value: VoiceSelection;
-  /** Fires once per commit (click, Enter or Space). Send `session.configure` from here. */
+  /** Fires once per commit (click, Enter or Space) with the full path. Send `session.configure` from here. */
   onChange: (next: VoiceSelection) => void;
+  /** Last picks per provider and model (`usePersistedPick`): a provider or model commit recalls the rest of its path. */
+  memory?: PickMemory;
   orbSize?: number;
   /** Provider glyphs and labels keyed by `VoiceModel.provider`; unknown providers get a monogram. */
   providerIcons?: Record<string, ProviderIcon>;
@@ -77,6 +92,7 @@ export function RadialPicker({
   registry,
   value,
   onChange,
+  memory = emptyMemory,
   orbSize = 96,
   providerIcons = defaultIcons,
   orb,
@@ -101,10 +117,10 @@ export function RadialPicker({
   const orbButton = useRef<HTMLButtonElement>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const ctx: Context = { groups, value };
+  const ctx: Context = { groups, value, memory };
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
-  const timers = useRef<{ close?: number; snap?: number; thaw?: number; preview?: number; frame?: number }>({});
+  const timers = useRef<{ close?: number; snap?: number; thaw?: number; preview?: number; frame?: number; intent?: number }>({});
   const lastPointer = useRef<{ x: number; y: number } | undefined>();
   const wheelCarry = useRef(0);
   const drag = useRef<{ ring: RingKey; angle: number; id: number } | undefined>();
@@ -143,6 +159,7 @@ export function RadialPicker({
     window.clearTimeout(t.snap);
     window.clearTimeout(t.thaw);
     window.clearTimeout(t.preview);
+    window.clearTimeout(t.intent);
     if (t.frame !== undefined) cancelAnimationFrame(t.frame);
     setGlide(undefined);
     setHover(undefined);
@@ -170,25 +187,33 @@ export function RadialPicker({
       window.clearTimeout(t.snap);
       window.clearTimeout(t.thaw);
       window.clearTimeout(t.preview);
+      window.clearTimeout(t.intent);
       if (t.frame !== undefined) cancelAnimationFrame(t.frame);
     };
   }, []);
 
   // ---------------------------------------------------------------- hover
 
-  const hoverItem = useCallback((ring: RingKey, index: number | undefined) => {
+  /** Hover an item. With the next ring already open, a pointer switches it only after resting
+   *  HOVER_INTENT_MS on the item, so crossing neighbours on the way outward leaves the path alone. */
+  const hoverItem = useCallback((ring: RingKey, index: number | undefined, immediate = false) => {
     setHover(index === undefined ? undefined : { ring, index });
-    if (index === undefined) return;
-    const now = performance.now();
-    const { groups: gs } = ctxRef.current;
-    const current = stateRef.current;
-    if (ring === "providers") {
-      const target = gs[index];
-      if (target) dispatch({ type: "hoverProvider", provider: target.id, now, ...ctxRef.current });
-    } else if (ring === "models") {
-      const target = gs.find((g) => g.id === current.provider)?.models[index];
-      if (target) dispatch({ type: "hoverModel", model: target.id, now, ...ctxRef.current });
-    }
+    window.clearTimeout(timers.current.intent);
+    if (index === undefined || (ring !== "providers" && ring !== "models")) return;
+    const switchPath = () => {
+      const now = performance.now();
+      const { groups: gs } = ctxRef.current;
+      if (ring === "providers") {
+        const target = gs[index];
+        if (target) dispatch({ type: "hoverProvider", provider: target.id, now, ...ctxRef.current });
+      } else {
+        const target = gs.find((g) => g.id === stateRef.current.provider)?.models[index];
+        if (target) dispatch({ type: "hoverModel", model: target.id, now, ...ctxRef.current });
+      }
+    };
+    const outerOpen = stateRef.current.depth > (ring === "providers" ? 1 : 2);
+    if (immediate || !outerOpen) switchPath();
+    else timers.current.intent = window.setTimeout(switchPath, HOVER_INTENT_MS);
   }, []);
 
   const pointAt = useCallback(
@@ -336,17 +361,26 @@ export function RadialPicker({
       if (target?.locked) {
         close();
         onLockedProvider?.(target.id);
-      } else if (target) dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
+      } else if (target) {
+        window.clearTimeout(timers.current.intent);
+        dispatch({ type: "hoverProvider", provider: target.id, now: Number.POSITIVE_INFINITY, ...ctx });
+        const next = recallProvider(target, memory, value);
+        if (next) onChange(next);
+      }
       return;
     }
     if (ring === "models") {
       const model = group?.models[index];
       // A transcription-only model cannot answer, so it is shown but never becomes the selection.
-      if (model && model.capabilities.speaks !== false) onChange(pickModel(model, value));
+      if (model && model.capabilities.speaks !== false) {
+        window.clearTimeout(timers.current.intent);
+        dispatch({ type: "hoverModel", model: model.id, now: Number.POSITIVE_INFINITY, ...ctx });
+        onChange(recallModel(model, memory, value));
+      }
       return;
     }
     if (!pathModel) return;
-    const base = pathModel.id === value.model ? value : pickModel(pathModel, value);
+    const base = recallModel(pathModel, memory, value);
     if (ring === "voices") {
       const voice = pathModel.voices[index];
       if (voice) onChange({ ...base, voice: voice.id });
@@ -375,7 +409,7 @@ export function RadialPicker({
       if (ring === "providers" || ring === "models") {
         // Keyboard moves count as hover for opening the next ring.
         const now = performance.now();
-        if (!isFrozen(stateRef.current, ring, now)) hoverItem(ring, next);
+        if (!isFrozen(stateRef.current, ring, now)) hoverItem(ring, next, true);
         setHover(undefined);
       }
       return;
@@ -391,7 +425,7 @@ export function RadialPicker({
     const selected = selectedIndex(ring);
     const start = selected >= 0 ? selected : Math.max(0, Math.ceil(state.offsets[ring]));
     setActive((previous) => ({ ...previous, [ring]: start }));
-    if (ring === "providers" || ring === "models") hoverItem(ring, start);
+    if (ring === "providers" || ring === "models") hoverItem(ring, start, true);
     setHover(undefined);
   };
 

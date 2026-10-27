@@ -7,5 +7,5 @@ export {
   type LogoFetch,
   type ProviderIcon,
 } from "./providerIcons";
-export { groupProviders, type LockReason, type PickerProvider, type ProviderGroup } from "./reducer";
-export { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick, usePersistedPick } from "./persistence";
+export { groupProviders, type LockReason, type PickMemory, type PickerProvider, type ProviderGroup } from "./reducer";
+export { MEMORY_STORAGE_KEY, PICK_STORAGE_KEY, defaultPick, readSavedPick, restoreMemory, restorePick, usePersistedPick } from "./persistence";

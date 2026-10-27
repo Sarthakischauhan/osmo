@@ -78,6 +78,8 @@ export const SNAP_MS = 180;
 export const FREEZE_AFTER_SNAP_MS = 150;
 export const CLOSE_GRACE_MS = 250;
 export const PREVIEW_HOVER_MS = 400;
+/** A pointer rests this long on a provider or model before it replaces the open path. */
+export const HOVER_INTENT_MS = 160;
 /** Wheel/trackpad pixels per slot. */
 export const PX_PER_SLOT = 60;
 

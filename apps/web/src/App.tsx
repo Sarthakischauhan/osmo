@@ -74,7 +74,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const speaking = useRef(false);
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
-  const pickSetters = useRef<{ save: (next: VoiceSelection) => void; choose: (next: VoiceSelection) => void }>();
+  const savePick = useRef<(next: VoiceSelection) => void>();
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -83,16 +83,12 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       setThreads((previous) => [event.thread, ...previous.filter((t) => t.id !== event.thread.id)]);
     }
     cues.current?.onServerEvent(event);
-    // The server confirmed a pick (session start, picker, or `set_voice`): only now is it saved.
-    // On error the picker snaps back to what is still in effect, and nothing is saved.
-    if (event.type === "voice.configured") {
-      if (event.error === undefined) pickSetters.current?.save(event.selection);
-      else pickSetters.current?.choose(event.selection);
-    }
+    // What the server applied (session start, picker, or `set_voice`), or on error what is still in effect.
+    if (event.type === "voice.configured") savePick.current?.(event.selection);
   }, []);
   const [registry, setRegistry] = useState<VoiceModel[]>([]);
-  const [pick, save, choose] = usePersistedPick(registry);
-  pickSetters.current = { save, choose };
+  const [pick, save, pickMemory] = usePersistedPick(registry);
+  savePick.current = save;
   const session = useOsmoSession({
     url: sameOriginSocketUrl(window.location),
     model: pick?.model,
@@ -239,12 +235,12 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const { configure } = session;
   const onPick = useCallback(
     (next: VoiceSelection) => {
-      // Shown right away; saved once `voice.configured` confirms it (on session start if idle).
-      // Live: voice/effort via session.update, a model change by hot-swap.
-      choose(next);
+      // Saved right away (idle, nothing confirms it until the next start); `voice.configured`
+      // overwrites it if the server rejects it. Live: voice/effort via session.update, a model change by hot-swap.
+      save(next);
       configure(next);
     },
-    [choose, configure],
+    [save, configure],
   );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
@@ -379,6 +375,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
                   ? {
                       registry,
                       value: pick,
+                      memory: pickMemory,
                       onChange: onPick,
                       onPreview: session.previewVoice,
                       onPreviewStop: session.stopPreview,

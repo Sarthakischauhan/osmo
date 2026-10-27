@@ -20,7 +20,7 @@ import {
   ringSpec,
   snapOffset,
 } from "../src/radial-picker/geometry";
-import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
+import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restoreMemory, restorePick } from "../src/radial-picker/persistence";
 import { focusVisible, modelRingLabel } from "../src/radial-picker/RadialPicker";
 import { modelLabel } from "../src/radial-picker/ringLabels";
 import {
@@ -30,7 +30,18 @@ import {
   resetLogoChecks,
   resolveLogo,
 } from "../src/radial-picker/providerIcons";
-import { effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "../src/radial-picker/reducer";
+import {
+  effortsOf,
+  emptyMemory,
+  groupProviders,
+  initialPicker,
+  isFrozen,
+  pickModel,
+  recallModel,
+  recallProvider,
+  reducePicker,
+  remember,
+} from "../src/radial-picker/reducer";
 
 const voice = (id: string) => ({ id, label: id.toUpperCase(), traits: [] });
 const model = (provider: string, id: string, voices: string[], reasoningEffort?: VoiceModel["capabilities"]["reasoningEffort"]): VoiceModel => ({
@@ -238,6 +249,49 @@ describe("selection rules", () => {
   it("orders efforts low → high and hides them when absent", () => {
     expect(effortsOf(REGISTRY.find((m) => m.id === "m4"))).toEqual(["low", "high"]);
     expect(effortsOf(REGISTRY[0])).toEqual([]);
+  });
+});
+
+describe("remembered paths", () => {
+  const xai = [model("xai", "grok-voice-latest", ["eve", "ara"], ["none", "high"]), model("xai", "grok-voice-3.0", ["eve", "ara", "sal"], ["none", "high"])];
+  const registry = [...xai, ...REGISTRY.slice(1)];
+  const providers = groupProviders(registry);
+  const xaiGroup = providers.find((g) => g.id === "xai");
+  const openaiGroup = providers.find((g) => g.id === "openai");
+  if (!xaiGroup || !openaiGroup) throw new Error("fixture");
+  const chosen = { model: "grok-voice-3.0", voice: "sal", effort: "none" as const };
+  const memory = remember(emptyMemory, registry, chosen);
+  const elsewhere = { model: "m1", voice: "b" };
+
+  it("a provider commit recalls its last model with that model's voice and effort", () => {
+    expect(recallProvider(xaiGroup, memory, elsewhere)).toEqual(chosen);
+    expect(recallProvider(xaiGroup, emptyMemory, elsewhere)).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+  });
+  it("a model commit recalls its own voice and effort, not its defaults", () => {
+    const three = xai[1];
+    if (!three) throw new Error("fixture");
+    expect(recallModel(three, memory, elsewhere)).toEqual(chosen);
+    expect(recallModel(three, emptyMemory, elsewhere)).toEqual({ model: "grok-voice-3.0", voice: "eve", effort: "high" });
+  });
+  it("the current pick wins over memory for its own provider and model", () => {
+    const current = { model: "grok-voice-latest", voice: "ara", effort: "none" as const };
+    expect(recallProvider(xaiGroup, memory, current)).toEqual(current);
+  });
+  it("opening a remembered model's ring centres its remembered voice", () => {
+    const opened = reducePicker(initialPicker, { type: "open", groups: providers, value: elsewhere, memory });
+    const r2 = reducePicker(opened, { type: "hoverProvider", provider: "xai", now: 0, groups: providers, value: elsewhere, memory });
+    const r3 = reducePicker(r2, { type: "hoverModel", model: "grok-voice-3.0", now: 0, groups: providers, value: elsewhere, memory });
+    expect(r3.offsets.voices).toBe(offsetFor(RINGS.voices, 3, 2));
+  });
+  it("memory survives storage as JSON and junk reads as empty", () => {
+    expect(restoreMemory(JSON.stringify(memory))).toEqual(memory);
+    expect(restoreMemory("{nope")).toEqual(emptyMemory);
+    expect(restoreMemory(null)).toEqual(emptyMemory);
+  });
+  it("forgets nothing about other providers", () => {
+    const both = remember(memory, registry, { model: "m4", voice: "b", effort: "low" });
+    expect(recallProvider(xaiGroup, both, elsewhere)).toEqual(chosen);
+    expect(recallProvider(openaiGroup, both, { model: "deep", voice: "v1" })).toEqual({ model: "m4", voice: "b", effort: "low" });
   });
 });
 
