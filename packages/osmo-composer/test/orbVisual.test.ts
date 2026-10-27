@@ -13,10 +13,10 @@ describe("orbMode", () => {
     expect(orbMode("connecting", "idle", false)).toBe("connecting");
   });
 
-  it("tells states apart by opacity and motion: dim when idle or connecting, full when live", () => {
-    expect(PRESETS.idle.opacity).toBeLessThan(PRESETS.listening.opacity);
-    expect(PRESETS.connecting.opacity).toBeLessThan(PRESETS.speaking.opacity);
-    expect(PRESETS.thinking.opacity).toBeLessThan(1);
+  it("uses distinct colors and glow for each state while preserving state-specific motion", () => {
+    expect(PRESETS.idle.colors[1]).not.toEqual(PRESETS.listening.colors[1]);
+    expect(PRESETS.awaiting.colors[1]).toEqual([251, 191, 36]);
+    expect(PRESETS.speaking.glow).toBeGreaterThan(PRESETS.idle.glow);
     expect(PRESETS.thinking.speed).not.toBe(PRESETS.speaking.speed);
   });
 });
@@ -38,6 +38,7 @@ describe("step", () => {
     const frame = initialFrame("speaking");
     step(frame, "speaking", 0, 1, true);
     expect(frame.time).toBe(0);
-    expect(frame.preset.opacity).toBe(PRESETS.speaking.opacity);
+    expect(frame.preset.colors).toEqual(PRESETS.speaking.colors);
+    expect(frame.preset.glow).toBe(PRESETS.speaking.glow);
   });
 });

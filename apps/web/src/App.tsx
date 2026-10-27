@@ -1,5 +1,4 @@
 import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
-import { AppearanceSwitch } from "./AppearanceSwitch";
 import { useAppearance, type Theme } from "./appearance";
 import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
@@ -334,15 +333,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onFork={forkThread}
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
-        footer={<>
-          {desktop.available && <DesktopSupport desktop={desktop} />}
-          <details className="osmo-provider-connections"><summary>Providers</summary>
-            {providers.map(provider => <button key={provider.id} type="button" onClick={() => setConnecting(provider)}>
-              {provider.label}<span>{provider.connected ? "Connected" : "Connect"}</span>
-            </button>)}
-          </details>
-          <AppearanceSwitch theme={theme} setTheme={setTheme} />
-        </>}
+        footer={desktop.available ? <DesktopSupport desktop={desktop} /> : undefined}
       />
       <SidebarInset className="app">
         <header className="topbar">
@@ -426,7 +417,6 @@ function FeedTurn({ turn, step, onDecide }: { turn: Turn; step: number | undefin
           <div className="bubble">
             <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
           </div>
-          <span className="spoken">🎙 spoken</span>
         </div>
       );
     case "approval":

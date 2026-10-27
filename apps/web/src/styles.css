@@ -16,17 +16,17 @@ button { font: inherit; color: inherit; }
 .brand strong { font-size: 15px; font-weight: 600; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
 .clock { font: 11px var(--font-mono); color: var(--muted-foreground); }
-.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: var(--radius, 3px); background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
 .end:hover { background: var(--surface-3); }
 
 .feed { max-width: 608px; margin: 0 auto; padding: 24px 0 160px; display: flex; flex-direction: column; gap: 18px; }
 
 .turn.user { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 75%; animation: rise .25s ease-out; }
-.bubble { margin: 0; padding: 9px 14px; border-radius: var(--radius, 3px); background: var(--surface-3); font-size: 13px; }
+.bubble { margin: 0; padding: 9px 14px; border-radius: 18px; background: var(--surface-3); font-size: 13px; }
 .spoken { font-size: 10px; color: var(--muted-foreground); }
 
 .turn.assistant { display: grid; grid-template-columns: 28px 1fr; gap: 0; animation: rise .25s ease-out; }
-.avatar { width: 8px; height: 8px; margin: 6px 0 0 6px; border-radius: 50%; background: var(--foreground); }
+.avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
 .assistant-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 
 /* chat-sdk (@sarchauhan/chat) renders text, tool rows and card/options widgets.
@@ -64,21 +64,21 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question button,
 .canvas.chat-root .chat-widget-header,
 .canvas.chat-root .chat-widget-meta { border: 0; box-shadow: none; outline: none; }
-.canvas.chat-root .chat-widget-card { border-radius: var(--radius, 3px); background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-widget-card { border-radius: 20px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-widget-header { padding: 0 0 6px; background: none; }
 .canvas.chat-root .chat-widget-body { padding: 0; }
 .canvas.chat-root .chat-widget-label-row { display: none; }
 .canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
-.canvas.chat-root .chat-question { border-radius: var(--radius, 3px); background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-question { border-radius: 20px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-question-eyebrow { display: none; }
 .canvas.chat-root .chat-question h3 { font-size: 12px; margin: 0; }
 .canvas.chat-root .chat-question-description { font-size: 10px; color: var(--foreground); }
-.canvas.chat-root .chat-question-option { border-radius: var(--radius, 3px); background: var(--surface-2); transition: background .2s ease; }
+.canvas.chat-root .chat-question-option { border-radius: 14px; background: var(--surface-2); transition: background .2s ease; }
 .canvas.chat-root .chat-question-option:hover,
 .canvas.chat-root .chat-question-option[data-selected="true"] { background: var(--surface-3); }
 .canvas.chat-root .chat-question footer { background: none; }
-.canvas.chat-root .chat-question button { border-radius: var(--radius, 3px); background: var(--surface-3); color: var(--foreground); }
-.canvas.chat-root .agent-tool { border-radius: var(--radius, 3px); background: var(--surface-1); font-size: 10px; }
+.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--surface-3); color: var(--foreground); }
+.canvas.chat-root .agent-tool { border-radius: 14px; background: var(--surface-1); font-size: 10px; }
 .canvas.chat-root .agent-tool-complete .agent-tool-state,
 .canvas.chat-root .agent-tool-complete .agent-tool-dot,
 .canvas.chat-root .agent-tool-complete .agent-tool-chevron { display: none; }

@@ -14,7 +14,6 @@ import {
   hitTest,
   itemAt,
   itemPresence,
-  moreMarkers,
   polar,
   slotAngle,
 } from "./geometry";
@@ -411,7 +410,6 @@ export function RadialPicker({
     const offset = offsetOf(key);
     const count = counts[key];
     const selected = selectedIndex(key);
-    const markers = moreMarkers(ring, count, offset);
     const labelFor = (index: number): OptionLabel => {
       if (key === "providers") return providerLabel(groups[index], providerIcons);
       if (key === "models") return modelLabel(group?.models[index]);
@@ -459,14 +457,6 @@ export function RadialPicker({
         </div>,
       );
     }
-    const marker = (position: number, side: string) => {
-      const { x, y } = polar(cx, cy, ring.radius, slotAngle(ring, position));
-      return (
-        <span key={side} className="rp-more" aria-hidden style={{ left: x, top: y }}>
-          …
-        </span>
-      );
-    };
     const activeIndex = active[key];
     return (
       <div
@@ -483,8 +473,7 @@ export function RadialPicker({
         onFocus={() => onRingFocus(key)}
       >
         {items}
-        {markers.before && marker(-0.8, "before")}
-        {markers.after && marker(ring.visible - 0.2, "after")}
+
       </div>
     );
   };

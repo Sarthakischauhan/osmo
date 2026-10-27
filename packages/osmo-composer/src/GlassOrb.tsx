@@ -37,7 +37,7 @@ export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
       last = now;
       const level = outputLevel();
       step(frame, modeRef.current, motion.matches ? 0 : level, motion.matches ? 1 : dt, motion.matches);
-      drawOrb(ctx, size, frame, getComputedStyle(element).getPropertyValue("--foreground").trim() || "currentColor");
+      drawOrb(ctx, size, frame, modeRef.current);
       element.dataset.level = frame.level.toFixed(2);
       handle = requestAnimationFrame(tick);
     };

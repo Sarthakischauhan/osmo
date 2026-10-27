@@ -78,9 +78,9 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
           <DialogDescription>Its models unlock once the server holds a working credential. Keys stay on the server.</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="api_key">
-          <TabsList aria-label="How to connect">
-            <TabsTrigger value="api_key">API key</TabsTrigger>
-            <TabsTrigger value="oauth">OAuth</TabsTrigger>
+          <TabsList aria-label="How to connect" className="rounded-full">
+            <TabsTrigger value="api_key" className="rounded-full">API key</TabsTrigger>
+            <TabsTrigger value="oauth" className="rounded-full">OAuth</TabsTrigger>
           </TabsList>
           <TabsContent value="api_key" className="pt-4">
             <Form {...form}>
@@ -99,7 +99,7 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={form.formState.isSubmitting} className="justify-self-end">
+                <Button type="submit" disabled={form.formState.isSubmitting} className="justify-self-end rounded-full">
                   {form.formState.isSubmitting ? "Checking…" : "Connect"}
                 </Button>
               </form>
@@ -109,7 +109,7 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
             {oauth ? (
               <>
                 <p className="m-0 text-sm text-foreground/60">Sign in to {provider?.label} and approve Osmo; it hands the server a key for your account.</p>
-                <Button className="justify-self-end" onClick={() => provider && startOAuth(`/providers/${encodeURIComponent(provider.id)}/oauth/start`)}>
+                <Button className="justify-self-end rounded-full" onClick={() => provider && startOAuth(`/providers/${encodeURIComponent(provider.id)}/oauth/start`)}>
                   Continue with {provider?.label}
                 </Button>
               </>
