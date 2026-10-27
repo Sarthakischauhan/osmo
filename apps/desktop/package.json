@@ -11,8 +11,9 @@
     "start": "electron .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.js",
-    "pack": "bun run --filter @osmo/web build && electron-builder --dir",
-    "dist": "bun run --filter @osmo/web build && electron-builder"
+    "pack": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder --dir",
+    "dist": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder",
+    "prepare:python": "node scripts/prepare-python.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",
@@ -44,6 +45,10 @@
       {
         "from": "../../vendor/core_server/src",
         "to": "core-server/src"
+      },
+      {
+        "from": "build/python",
+        "to": "python"
       }
     ],
     "mac": {

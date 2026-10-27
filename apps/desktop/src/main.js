@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, M
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { localAppUrl, trustedFrame, validateAction } from './policy.js';
+import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
 import { pythonExecutable, startServer } from './server.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -104,10 +104,9 @@ function createWindow() {
   const contents = window.webContents;
   const session = contents.session;
   session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
-    wc === contents && details.isMainFrame && trustedFrame(requestingOrigin, origin) && permission === 'media' && details.mediaType === 'audio');
+    allowMicrophone(wc, contents, permission, requestingOrigin, details, origin));
   session.setPermissionRequestHandler((wc, permission, callback, details) => {
-    callback(wc === contents && details.isMainFrame && trustedFrame(details.requestingUrl, origin)
-      && permission === 'media' && 'mediaTypes' in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio');
+    callback(allowMicrophone(wc, contents, permission, '', details, origin));
   });
   contents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);

@@ -12,6 +12,15 @@ export function trustedFrame(url, origin) {
   try { return new URL(url).origin === origin; } catch { return false; }
 }
 
+/** Microphone checks only. Electron passes the page URL, not a bare origin, as `requestingOrigin`. */
+export function allowMicrophone(webContents, contents, permission, requestingOrigin, details, origin) {
+  if (webContents !== contents || !details?.isMainFrame || permission !== 'media') return false;
+  if (details.mediaType !== undefined && details.mediaType !== 'audio') return false;
+  if (details.mediaTypes && !(details.mediaTypes.length === 1 && details.mediaTypes[0] === 'audio')) return false;
+  const page = details.securityOrigin || details.requestingUrl || requestingOrigin;
+  return trustedFrame(page, origin);
+}
+
 export function validateAction(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid desktop action');
   const action = value.action;

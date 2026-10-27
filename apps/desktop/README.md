@@ -89,11 +89,10 @@ bun run --filter @osmo/desktop pack
 ```
 
 Build on the target OS. Electron Builder emits DMG, NSIS, or AppImage under `apps/desktop/release`.
-Web assets and Python server source are included. **Python and its dependencies are not bundled**:
-install the server requirements and PyAutoGUI in a local Python environment and set
-`OSMO_DESKTOP_PYTHON` to its absolute interpreter path when launching the packaged app.
-This is a developer distribution, not yet a standalone consumer installer. Signing, notarization,
-a bundled Python runtime and automatic updates are follow-up release work.
+Web assets, Python server source, and a uv-managed CPython 3.12 runtime with the server and
+PyAutoGUI dependencies are included. The packaged app uses that runtime unless
+`OSMO_DESKTOP_PYTHON` overrides it. Signing, notarization, and automatic updates are still
+follow-up release work.
 
 `OSMO_DESKTOP_URL` attaches to an already-running loopback HTTP origin and disables managed server
 startup; remote origins are rejected. `OSMO_DESKTOP_PYTHON` overrides the Python used for both
