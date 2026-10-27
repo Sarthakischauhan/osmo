@@ -38,6 +38,7 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
+from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
@@ -158,6 +159,8 @@ class VoiceBridge:
         # stops and filled in later, keeping it above that answer.
         self.utterances = 0
         self.unheard: list[str] = []
+        # The open Langfuse turn, keyed by utterance id. Closed when its transcript is stored.
+        self.traces: dict[str, Any] = {}
         # Answers held back from storage until the utterances they reply to are stored.
         self.held: list[tuple[frozenset[str], str]] = []
         self.configure_lock = asyncio.Lock()
@@ -266,6 +269,52 @@ class VoiceBridge:
             self.unheard.remove(utterance)
             await self.emit(TranscriptDelta(role="user", text="", itemId=utterance, final=True))
             self.store_held()
+
+    def open_trace(self, utterance: str) -> None:
+        """Start the turn before its transcript exists. The transcript fills the input later."""
+        if not tracing.enabled() or utterance in self.traces:
+            return
+        model = self.model()
+        history = []
+        if self.thread is not None:
+            history = [(message.role, message.text) for message in self.storage.messages(self.thread.id)]
+        context = tracing.turn(
+            session_id=self.thread.id if self.thread is not None else None,
+            user_text="",
+            instructions=self.instructions,
+            history=history,
+            model=tracing.model_name(model),
+            voice=self.selection.voice,
+        )
+        span, generation = context.__enter__()
+        self.traces[utterance] = (context, span, generation)
+
+    def finish_trace(self, utterance: str, user_text: str) -> None:
+        open_trace = self.traces.pop(utterance, None)
+        if open_trace is None:
+            return
+        context, span, generation = open_trace
+        if span is not None:
+            span.update(input=user_text)
+        if generation is not None:
+            generation.update(input=tracing.messages(self.instructions, self.trace_history(), user_text))
+        context.__exit__(None, None, None)
+
+    def note_answer(self, after: frozenset[str] | None, text: str) -> None:
+        """The answer belongs to the utterance it replies to, which is still open."""
+        utterance = next((item for item in (after or ()) if item in self.traces), None)
+        if utterance is None:
+            return
+        _, span, generation = self.traces[utterance]
+        if span is not None:
+            span.update(output=text)
+        if generation is not None:
+            generation.update(output=text)
+
+    def trace_history(self) -> list[tuple[Any, str]]:
+        if self.thread is None:
+            return []
+        return [(message.role, message.text) for message in self.storage.messages(self.thread.id)]
 
     def store_held(self) -> None:
         """Store held answers, in order, once nothing they reply to is still unheard."""
@@ -378,6 +427,7 @@ class VoiceBridge:
             self.idle.clear()
             utterance = self.next_utterance()
             self.unheard.append(utterance)
+            self.open_trace(utterance)
             await self.emit(TranscriptDelta(role="user", text="", itemId=utterance))
             self.spawn(self.expire(utterance))
             await self.set_state("thinking")
@@ -387,6 +437,7 @@ class VoiceBridge:
             if event.text:
                 self.record("user", event.text)
                 await self.title_from(event.text)
+            self.finish_trace(utterance, event.text)
             self.store_held()
             if not event.text:
                 # Noise, not words: drop whatever the model started saying about it.
@@ -411,7 +462,9 @@ class VoiceBridge:
             if response.done is None or self.voice is not voice:
                 return
             if response.text:
-                self.held.append((response.after or frozenset(), "".join(response.text)))
+                text = "".join(response.text)
+                self.note_answer(response.after, text)
+                self.held.append((response.after or frozenset(), text))
                 self.store_held()
             if response.calls and response.done.error is None:
                 await self.run_tools(voice, response.calls)
@@ -454,10 +507,17 @@ class VoiceBridge:
         await self.set_state("working", activity_label(call.name, args))
         token = RUN_DESKTOP.set(self.desktop)
         try:
-            return tool_output(await tool.execute(sink=self.sink, args=args))
-        except Exception as exc:  # a tool failure is the model's to explain, as in a harness run
-            log.warning("voice tool %s failed: %s", call.name, exc)
-            return json.dumps({"error": str(exc) or type(exc).__name__})
+            with tracing.tool_call(call.name, args) as observation:
+                try:
+                    result = tool_output(await tool.execute(sink=self.sink, args=args))
+                except Exception as exc:  # a tool failure is the model's to explain, as in a harness run
+                    log.warning("voice tool %s failed: %s", call.name, exc)
+                    result = json.dumps({"error": str(exc) or type(exc).__name__})
+                    if observation is not None:
+                        observation.update(level="ERROR", status_message=type(exc).__name__)
+                if observation is not None:
+                    observation.update(output=result[:4000])
+                return result
         finally:
             RUN_DESKTOP.reset(token)
 

@@ -40,6 +40,7 @@ from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
 from symphony_server.settings import TOOL_CATEGORIES, Settings
 from symphony_server.tools import StockTool, WeatherTool
+from symphony_server import tracing
 from symphony_server.storage import SQLiteStorage
 from symphony_server.threads import create_thread_router
 from symphony_server.voice_bridge import VoiceBridge
@@ -142,6 +143,7 @@ def create_app(
         await backend.shutdown()
         storage.close()
         await http_client.aclose()
+        tracing.flush()
 
     app = FastAPI(title="symphony-server", lifespan=lifespan)
     install_middlewares(app, core_config, prefix="/api")
