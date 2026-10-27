@@ -30,6 +30,8 @@ export const voiceModelSchema = z.object({
     interrupt: z.boolean(),
     customVoices: z.boolean(),
     reasoningEffort: z.array(effortSchema).nullish(),
+    /** False for a transcription-only model (Sarvam's realtime STT): listed, never selectable. */
+    speaks: z.boolean().optional(),
   }),
   voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
   defaultVoice: z.string(),

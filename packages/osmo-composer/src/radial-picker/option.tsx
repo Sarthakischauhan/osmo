@@ -16,6 +16,7 @@ export interface RadialOptionProps {
   /** Accessible name (also the native tooltip unless the option draws its own `tip`). */
   label: string;
   title?: string;
+  /** A locked provider opens its connect dialog; a locked model (transcription only) does nothing. */
   locked?: boolean;
   delayMs: number;
   onCommit: () => void;
@@ -30,7 +31,8 @@ export function RadialOption({ id, ring, state, selected, label, title, locked, 
       role="option"
       aria-selected={selected}
       aria-label={label}
-      aria-haspopup={locked ? "dialog" : undefined}
+      aria-haspopup={locked && ring === "providers" ? "dialog" : undefined}
+      aria-disabled={locked && ring !== "providers" ? true : undefined}
       title={title}
       className="rp-option"
       data-ring={ring}

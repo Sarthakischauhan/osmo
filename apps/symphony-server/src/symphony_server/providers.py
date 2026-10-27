@@ -77,6 +77,8 @@ class ProviderSpec:
 #   (https://developers.openai.com/siwc/token-sharing-open-source), not the Realtime API Osmo talks to.
 # - Gemini: API key only. Google OAuth works for the Gemini API (https://ai.google.dev/gemini-api/docs/oauth),
 #   but core_ai's Gemini text and Live clients send only `x-goog-api-key` / `?key=`.
+# - Sarvam: API key only. Its OpenAPI spec (https://docs.sarvam.ai/openapi/apis.json) documents the
+#   `api-subscription-key` header (and a bearer key), no OAuth flow.
 PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(id="xai", label="xAI", validate_url="https://api.x.ai/v1/models"),
     ProviderSpec(id="openai", label="OpenAI", validate_url="https://api.openai.com/v1/models"),
@@ -108,6 +110,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         label="Gemini",
         validate_url="https://generativelanguage.googleapis.com/v1beta/models",
         key_header="x-goog-api-key",
+        key_prefix="",
+    ),
+    # Sarvam keys come from its dashboard and go in `api-subscription-key`. `GET /v2/models`
+    # ("List Models V2", ApiKeyAuth in https://docs.sarvam.ai/openapi/apis.json) needs the key.
+    ProviderSpec(
+        id="sarvam",
+        label="Sarvam AI",
+        validate_url="https://api.sarvam.ai/v2/models",
+        key_header="api-subscription-key",
         key_prefix="",
     ),
 )

@@ -39,8 +39,9 @@ class ModelAccess:
         self.registry, self.credentials, self.xai_base_url = registry, credentials, xai_base_url
         self.refresher = refresher
         self.keys: dict[str, str] = {}
-        # One router per namespace, registered once, on the provider's current key (None while it has none).
-        self.routers = {namespace: ProviderRouter(namespace) for namespace in CORE_NAMESPACES.values()}
+        # One router per text namespace, registered once, on the provider's current key (None while it
+        # has none). Sarvam serves voice only: core_ai has no Sarvam text provider.
+        self.routers = {CORE_NAMESPACES[p]: ProviderRouter(CORE_NAMESPACES[p]) for p in TEXT_PROVIDERS}
         for namespace, router in self.routers.items():
             registry.register(namespace, router)
 
@@ -49,12 +50,14 @@ class ModelAccess:
         key = self.credentials.secret(provider)
         if key == self.keys.get(provider):
             return key is not None
-        namespace = CORE_NAMESPACES[provider]
+        router = self.routers.get(CORE_NAMESPACES[provider])
         if key is None:
-            self.routers[namespace].text = None
+            if router is not None:
+                router.text = None
             del self.keys[provider]
             return False
-        self.routers[namespace].text = TEXT_PROVIDERS[provider](key, self.xai_base_url)
+        if router is not None:
+            router.text = TEXT_PROVIDERS[provider](key, self.xai_base_url)
         self.keys[provider] = key
         return True
 

@@ -6,9 +6,9 @@ import { effortsOf, pickModel } from "./reducer";
  *  ("none" for xAI), saved on the first `voice.configured` as if chosen; they are not read. */
 export const PICK_STORAGE_KEY = "osmo.voice-pick.v2";
 
-/** The registry's default pick: the first model with its default voice. */
+/** The registry's default pick: the first model that speaks, with its default voice. */
 export function defaultPick(registry: readonly VoiceModel[]): VoiceSelection | undefined {
-  const first = registry[0];
+  const first = registry.find((m) => m.capabilities.speaks !== false);
   return first ? pickModel(first, { model: first.id, voice: first.defaultVoice }) : undefined;
 }
 
@@ -28,7 +28,8 @@ export function restorePick(saved: string | null, registry: readonly VoiceModel[
   }
   const parsed = voiceSelectionSchema.safeParse(raw);
   if (!parsed.success) return fallback;
-  const model = registry.find((m) => m.id === parsed.data.model);
+  // A transcription-only model cannot be the pick, so a saved one falls back like a missing one.
+  const model = registry.find((m) => m.id === parsed.data.model && m.capabilities.speaks !== false);
   if (!model) return fallback;
   const base = pickModel(model, parsed.data);
   const voice = model.voices.some((v) => v.id === parsed.data.voice) ? parsed.data.voice : model.defaultVoice;

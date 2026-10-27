@@ -236,3 +236,17 @@ def test_voice_ids_match_ignoring_case() -> None:
     current = Selection(model=models[0].id, voice=models[0].defaultVoice)
     picked = resolve_selection(models, SetVoiceArgs(voice="kore"), current)
     assert isinstance(picked, Selection) and picked.voice == "Kore"
+
+
+def test_sarvam_realtime_models_are_listed_transcription_only_and_never_selected() -> None:
+    models = tuple(voice_models())
+    sarvam = [m for m in models if m.provider == "sarvam"]
+    assert [m.id for m in sarvam] == ["saaras:v3-realtime", "saaras:v4"]
+    for model in sarvam:
+        assert model.capabilities.speaks is False and model.capabilities.tools is False
+        assert model.voices == [] and model.defaultVoice == ""
+    assert all(m.capabilities.speaks for m in models if m.provider != "sarvam")
+    current = Selection(model="grok-voice-latest", voice="eve")
+    refused = resolve_selection(models, SetVoiceArgs(model="saaras:v4"), current)
+    assert "only transcribes" in str(refused)
+    assert "saaras" not in set_voice_description(models)

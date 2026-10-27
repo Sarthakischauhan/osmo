@@ -22,6 +22,7 @@ import {
 } from "../src/radial-picker/geometry";
 import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
 import { focusVisible, modelRingLabel } from "../src/radial-picker/RadialPicker";
+import { modelLabel } from "../src/radial-picker/ringLabels";
 import {
   type LogoFetch,
   isPlaceholderLogo,
@@ -265,6 +266,34 @@ describe("persistence", () => {
   });
 });
 
+describe("transcription-only models (Sarvam realtime STT)", () => {
+  const saaras: VoiceModel = {
+    ...model("sarvam", "saaras:v4", []),
+    capabilities: { tools: false, interrupt: false, customVoices: false, reasoningEffort: [], speaks: false },
+  };
+  const withSarvam = [saaras, ...REGISTRY];
+  it("parses speaks from the wire and keeps it optional", () => {
+    expect(voiceModelSchema.parse(saaras).capabilities.speaks).toBe(false);
+    expect(voiceModelSchema.parse(REGISTRY[0]).capabilities.speaks).toBeUndefined();
+  });
+  it("groups Sarvam as an unlocked provider with its models listed", () => {
+    const sarvam = groupProviders(withSarvam).find((g) => g.id === "sarvam");
+    expect(sarvam?.locked).toBe(false);
+    expect(sarvam?.models.map((m) => m.id)).toEqual(["saaras:v4"]);
+  });
+  it("labels the model ring entry transcription only", () => {
+    expect(modelLabel(saaras).tip).toBe("saaras:v4 · transcription only");
+    expect(modelLabel(REGISTRY[0]).tip).toBe("grok-voice-latest");
+  });
+  it("never defaults to or restores a transcription-only model", () => {
+    expect(defaultPick(withSarvam)).toEqual({ model: "grok-voice-latest", voice: "eve" });
+    expect(restorePick(JSON.stringify({ model: "saaras:v4", voice: "x" }), withSarvam)).toEqual(defaultPick(withSarvam));
+  });
+  it("uses Sarvam's official logomark at runtime and bundles none", () => {
+    expect(providerIcons.sarvam).toEqual({ label: "Sarvam AI", logo: "https://assets.sarvam.ai/assets/brand/logos/sarvam-logo-black.svg" });
+  });
+});
+
 describe("provider logo fallback chain", () => {
   const real = '<svg><path d="M12.4579 15.6036" fill="currentColor"/></svg>';
   const placeholder = '<svg><path d="M9.8132 15.9038L9 18.75" stroke="currentColor"/></svg>';
@@ -311,7 +340,10 @@ describe("provider logo fallback chain", () => {
   it("bundles fallbacks only for providers models.dev really has", () => {
     const bundledFor = Object.entries(providerIcons).filter(([, icon]) => icon.fallback !== undefined).map(([id]) => id);
     expect(bundledFor).toEqual(["xai", "openai", "google", "anthropic", "mistral"]);
-    for (const icon of Object.values(providerIcons)) expect(icon.logo).toMatch(/^https:\/\/models\.dev\/logos\/.+\.svg$/);
+    // Every runtime logo is models.dev's, except Sarvam's official logomark (models.dev has none).
+    for (const [id, icon] of Object.entries(providerIcons)) {
+      if (id !== "sarvam") expect(icon.logo).toMatch(/^https:\/\/models\.dev\/logos\/.+\.svg$/);
+    }
   });
 });
 

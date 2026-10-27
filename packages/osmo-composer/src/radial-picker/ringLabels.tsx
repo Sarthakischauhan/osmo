@@ -48,7 +48,8 @@ export function providerLabel(group: ProviderGroup | undefined, icons: Record<st
 
 export function modelLabel(model: VoiceModel | undefined): OptionLabel {
   const text = model ? modelRingLabel(model) : "";
-  return { text, title: model?.id ?? "", node: text, tip: model?.id };
+  const tip = model?.capabilities.speaks === false ? `${model.id} · transcription only` : model?.id;
+  return { text, title: model?.id ?? "", node: text, tip };
 }
 
 /** Hover title: the label, plus its traits when the catalog publishes any. */

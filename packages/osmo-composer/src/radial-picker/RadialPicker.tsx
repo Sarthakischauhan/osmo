@@ -341,7 +341,8 @@ export function RadialPicker({
     }
     if (ring === "models") {
       const model = group?.models[index];
-      if (model) onChange(pickModel(model, value));
+      // A transcription-only model cannot answer, so it is shown but never becomes the selection.
+      if (model && model.capabilities.speaks !== false) onChange(pickModel(model, value));
       return;
     }
     if (!pathModel) return;
@@ -440,7 +441,10 @@ export function RadialPicker({
             id={`${ids}-${key}-${index}`}
             ring={key}
             selected={isSelected}
-            locked={key === "providers" && groups[index]?.locked === true}
+            locked={
+              (key === "providers" && groups[index]?.locked === true) ||
+              (key === "models" && group?.models[index]?.capabilities.speaks === false)
+            }
             title={label.tip === undefined ? label.title : undefined}
             label={label.tip === undefined ? label.title : `${label.text}, ${label.tip}`}
             state={isSelected ? "selected" : isHover || isPath ? "hover" : "idle"}
