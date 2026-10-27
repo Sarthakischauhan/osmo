@@ -16,12 +16,14 @@ dependencies = [
     "python-dotenv>=1.0",
     "cryptography>=43",
     "infisicalsdk>=1.0.17",
+    "langfuse==5.0.4",
 ]
 
 [project.scripts]
 symphony-server = "symphony_server.__main__:main"
 
 [project.optional-dependencies]
+desktop = ["pyautogui>=0.9.54,<1"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
@@ -53,6 +55,6 @@ ignore_missing_imports = true
 # the same symphony rev (its core_server is byte-identical to the vendored a335957 copy), because
 # the vendored pyproject's `{ workspace = true }` sources only resolve inside symphony's workspace.
 [tool.uv.sources]
-core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "00aceba84d5abedcb79cb8d46c9cf2dbd13a6289", subdirectory = "core_server" }
-symphony-core = { git = "https://github.com/Sarthakischauhan/symphony", rev = "00aceba84d5abedcb79cb8d46c9cf2dbd13a6289", subdirectory = "core_ai" }
-symphony-harness = { git = "https://github.com/Sarthakischauhan/symphony", rev = "00aceba84d5abedcb79cb8d46c9cf2dbd13a6289", subdirectory = "core_harness" }
+core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_server" }
+symphony-core = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_ai" }
+symphony-harness = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_harness" }

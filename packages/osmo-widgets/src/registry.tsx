@@ -1,5 +1,6 @@
 import { MessageContent, QuestionWidget, defineWidget, type WidgetComponentProps } from "@sarchauhan/chat";
 import type { AgentWidgetPart } from "@sarchauhan/protocol";
+import { AsciiArt } from "./asciiArt";
 import { ChartWidget } from "./chart";
 import { HtmlWidget } from "./html";
 import { cardPropsSchema, chartPropsSchema, htmlPropsSchema, optionsPropsSchema, widgetSchema } from "./schema";
@@ -13,9 +14,10 @@ export const OPTION_SELECT = "select";
 function CardBody({ widget, ...raw }: WidgetComponentProps) {
   const parsed = cardPropsSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const { body, image, actions } = parsed.data;
+  const { body, image, actions, art } = parsed.data;
   return (
     <>
+      {art && !image && <AsciiArt name={art} className="osmo-card-art" label={art} />}
       {image && <img className="osmo-card-image" src={image} alt="" />}
       <MessageContent parts={[{ type: "text", text: body }]} />
       {actions && (

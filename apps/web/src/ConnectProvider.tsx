@@ -78,9 +78,9 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
           <DialogDescription>Its models unlock once the server holds a working credential. Keys stay on the server.</DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="api_key">
-          <TabsList aria-label="How to connect">
-            <TabsTrigger value="api_key">API key</TabsTrigger>
-            <TabsTrigger value="oauth">OAuth</TabsTrigger>
+          <TabsList aria-label="How to connect" className="rounded-full">
+            <TabsTrigger value="api_key" className="rounded-full">API key</TabsTrigger>
+            <TabsTrigger value="oauth" className="rounded-full">OAuth</TabsTrigger>
           </TabsList>
           <TabsContent value="api_key" className="pt-4">
             <Form {...form}>
@@ -90,16 +90,16 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
                   name="key"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-white/80">{provider?.label} API key</FormLabel>
+                      <FormLabel className="text-foreground/80">{provider?.label} API key</FormLabel>
                       <FormControl>
                         <Input type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" {...field} />
                       </FormControl>
-                      <FormDescription className="text-white/40">Checked with one request to {provider?.label}, then stored encrypted.</FormDescription>
-                      <FormMessage className="text-white/80" />
+                      <FormDescription className="text-foreground/40">Checked with one request to {provider?.label}, then stored encrypted.</FormDescription>
+                      <FormMessage className="text-foreground/80" />
                     </FormItem>
                   )}
                 />
-                <Button type="submit" disabled={form.formState.isSubmitting} className="justify-self-end">
+                <Button type="submit" disabled={form.formState.isSubmitting} className="justify-self-end rounded-full">
                   {form.formState.isSubmitting ? "Checking…" : "Connect"}
                 </Button>
               </form>
@@ -108,13 +108,13 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
           <TabsContent value="oauth" className="grid gap-4 pt-4">
             {oauth ? (
               <>
-                <p className="m-0 text-sm text-white/60">Sign in to {provider?.label} and approve Osmo; it hands the server a key for your account.</p>
-                <Button className="justify-self-end" onClick={() => provider && startOAuth(`/providers/${encodeURIComponent(provider.id)}/oauth/start`)}>
+                <p className="m-0 text-sm text-foreground/60">Sign in to {provider?.label} and approve Osmo; it hands the server a key for your account.</p>
+                <Button className="justify-self-end rounded-full" onClick={() => provider && startOAuth(`/providers/${encodeURIComponent(provider.id)}/oauth/start`)}>
                   Continue with {provider?.label}
                 </Button>
               </>
             ) : (
-              <p className="m-0 text-sm text-white/60">{provider?.label} does not offer OAuth for API access. Create a key in its console and use the API key tab.</p>
+              <p className="m-0 text-sm text-foreground/60">{provider?.label} does not offer OAuth for API access. Create a key in its console and use the API key tab.</p>
             )}
           </TabsContent>
         </Tabs>

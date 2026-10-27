@@ -1,4 +1,4 @@
-import type { ServerEvent } from "@osmo/osmo-composer";
+import { BARGE_IN, type ServerEvent } from "@osmo/osmo-composer";
 import { isActionableWidget } from "@osmo/osmo-widgets";
 
 /** The canvas feed: what the user said, and each assistant turn's line, tool activity and widgets. */
@@ -13,9 +13,31 @@ export interface CanvasWidget {
   props: Record<string, unknown>;
 }
 
+/** A background agent's risky step waiting in the feed for Approve / Deny; `resolved` once answered. */
+export interface ApprovalTurn {
+  role: "approval";
+  key: string;
+  approvalId: string;
+  runId: string;
+  tool: string;
+  summary: string;
+  arguments: string;
+  resolved?: { approved: boolean; at: number };
+}
+
 export type Turn =
-  | { role: "user"; key: string; text: string }
-  | { role: "assistant"; key: string; text: string; activities: Activity[]; widgets: CanvasWidget[] };
+  | UserTurn
+  | { role: "assistant"; key: string; text: string; activities: Activity[]; widgets: CanvasWidget[] }
+  | ApprovalTurn;
+
+/** `pending` while the utterance's transcript is still on its way. */
+export interface UserTurn {
+  role: "user";
+  key: string;
+  text: string;
+  itemId?: string;
+  pending?: boolean;
+}
 
 type AssistantTurn = Extract<Turn, { role: "assistant" }>;
 
@@ -41,10 +63,50 @@ function finishActivities(turn: AssistantTurn): AssistantTurn {
     : turn;
 }
 
-export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
+/** A stored thread's conversation as feed turns (agent notices are the voice model's, not shown). */
+export function feedFromMessages(messages: readonly { role: "user" | "assistant" | "agent"; text: string }[]): Feed {
+  let feed = emptyFeed;
+  for (const message of messages) {
+    if (message.role === "user") {
+      feed = { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: message.text }] };
+    } else if (message.role === "assistant") {
+      const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: message.text, activities: [], widgets: [] };
+      feed = { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+    }
+  }
+  return feed;
+}
+
+export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.now()): Feed {
   switch (event.type) {
+    case "approval.request": {
+      const turn: ApprovalTurn = {
+        role: "approval",
+        key: `p${feed.seq}`,
+        approvalId: event.approvalId,
+        runId: event.runId,
+        tool: event.tool,
+        summary: event.summary,
+        arguments: event.arguments,
+      };
+      return { seq: feed.seq + 1, turns: [...feed.turns, turn] };
+    }
+    case "approval.resolved":
+      return {
+        ...feed,
+        turns: feed.turns.map((turn) =>
+          turn.role === "approval" && turn.approvalId === event.approvalId && turn.resolved === undefined
+            ? { ...turn, resolved: { approved: event.approved, at: now } }
+            : turn,
+        ),
+      };
+    case "thread":
+    case "agent.update":
+      // The sidebar and the Running list show these.
+      return feed;
     case "transcript.delta":
       if (event.role === "user") {
+        if (event.itemId !== undefined) return heard(feed, event.itemId, event.text, event.final === true);
         return { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: event.text }] };
       }
       return withAssistant(feed, (turn) => ({ ...turn, text: turn.text + event.text }));
@@ -56,6 +118,8 @@ export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
     case "widget.update":
       return updateWidget(feed, event.id, event.patch);
     case "state":
+      // BARGE_IN only tells the client to flush queued audio; it is neither a step nor the end of one.
+      if (event.detail === BARGE_IN) return feed;
       if (event.state === "working" && event.detail) {
         const label = event.detail;
         return withAssistant(feed, (turn) => ({ ...turn, activities: [...turn.activities, { label, done: false }] }));
@@ -66,12 +130,31 @@ export function reduceFeed(feed: Feed, event: ServerEvent): Feed {
           ? withAssistant(feed, finishActivities)
           : feed;
       }
+    case "desktop.request":
     case "models":
     case "voice.configured":
     case "voice.preview":
       // Voice picker events; the feed has nothing to show for them.
       return feed;
   }
+}
+
+/**
+ * An utterance's turn opens (empty, pending) as soon as speech stops, so it sits above the answer
+ * even though its transcript usually lands after that answer has started. Deltas append; the
+ * final one replaces with the whole transcript, and drops the turn if nothing was said.
+ */
+function heard(feed: Feed, itemId: string, text: string, final: boolean): Feed {
+  const at = feed.turns.findIndex((turn) => turn.role === "user" && turn.itemId === itemId);
+  const turn = feed.turns[at];
+  if (turn?.role !== "user") {
+    if (final && !text) return feed;
+    const fresh: UserTurn = { role: "user", key: `u${feed.seq}`, text, itemId, pending: !final };
+    return { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+  }
+  const full = final ? text : turn.text + text;
+  if (final && !full) return { ...feed, turns: feed.turns.filter((_, i) => i !== at) };
+  return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, text: full, pending: !final } : existing)) };
 }
 
 /**
@@ -109,6 +192,7 @@ export function pendingChoice(feed: Feed, answered: ReadonlySet<string>): string
     const turn = feed.turns[t];
     if (!turn) continue;
     if (turn.role === "user") return undefined;
+    if (turn.role === "approval") continue;
     for (let w = turn.widgets.length - 1; w >= 0; w--) {
       const widget = turn.widgets[w];
       if (widget && isActionableWidget(widget.type, widget.props)) {

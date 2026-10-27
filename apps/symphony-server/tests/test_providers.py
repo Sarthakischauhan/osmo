@@ -45,6 +45,9 @@ class FakeProviders:
         if request.method == "GET" and str(request.url) == "https://generativelanguage.googleapis.com/v1beta/models":
             ok = request.headers.get("x-goog-api-key") == GOOD_KEY and "Authorization" not in request.headers
             return httpx.Response(200, json={"models": []}) if ok else httpx.Response(400, json={"error": "invalid key"})
+        if request.method == "GET" and str(request.url) == "https://api.sarvam.ai/v2/models":
+            ok = request.headers.get("api-subscription-key") == GOOD_KEY and "Authorization" not in request.headers
+            return httpx.Response(200, json={"data": []}) if ok else httpx.Response(403, json={"error": "invalid key"})
         if request.method == "POST" and str(request.url) == "https://openrouter.ai/api/v1/auth/keys":
             body = json.loads(request.content)
             digest = hashlib.sha256(body["code_verifier"].encode()).digest()
@@ -72,7 +75,7 @@ def test_providers_lists_auth_kinds_and_openrouter_alone_offers_oauth(tmp_path: 
     with make_client(settings(tmp_path), fake) as client:
         body = client.get("/providers").json()
     kinds = {p["id"]: p["authKinds"] for p in body["providers"]}
-    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"], "gemini": ["api_key"]}
+    assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"], "gemini": ["api_key"], "sarvam": ["api_key"]}
     assert all(p["connected"] is False for p in body["providers"])
     assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected"}
 
@@ -102,6 +105,23 @@ def test_valid_key_connects_unlocks_models_and_delete_disconnects(tmp_path: Path
         with client.websocket_connect("/ws") as ws:
             event = json.loads(ws.receive_text())
             assert all(m["locked"] is True for m in event["models"])
+
+
+def test_sarvam_key_goes_in_its_subscription_header_and_unlocks_its_transcription_models(tmp_path: Path, fake: FakeProviders) -> None:
+    with make_client(settings(tmp_path), fake) as client:
+        models = client.get("/voice-models").json()["models"]
+        sarvam = [m for m in models if m["provider"] == "sarvam"]
+        assert [m["id"] for m in sarvam] == ["saaras:v3-realtime", "saaras:v4"]
+        assert all(m["capabilities"]["speaks"] is False and m["voices"] == [] and m["locked"] for m in sarvam)
+        assert client.post("/providers/sarvam/key", json={"key": BAD_KEY}).status_code == 400
+        assert client.post("/providers/sarvam/key", json={"key": GOOD_KEY}).status_code == 204
+        assert connected(client.get("/providers"))["sarvam"] is True
+        assert unlocked(client.get("/voice-models").json()["models"]) == {"sarvam"}
+        with client.websocket_connect("/ws") as ws:
+            event = json.loads(ws.receive_text())
+            # A transcription-only model never becomes the selection, even when it is the only one unlocked.
+            assert event["type"] == "models" and event["selection"]["model"] != "saaras:v4"
+    assert [str(r.url) for r in fake.requests] == ["https://api.sarvam.ai/v2/models"] * 2
 
 
 def unlocked(models: list[dict[str, Any]]) -> set[str]:

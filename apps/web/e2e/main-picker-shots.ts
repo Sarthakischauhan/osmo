@@ -107,7 +107,7 @@ async function main() {
     await page.mouse.move(c.x, c.y, { steps: 4 });
     await hoverOption(page, "Providers", "xAI");
     await page.locator('[role=listbox][aria-label="Models"] [role=option][aria-label="grok-voice-3.0"]').click();
-    await page.waitForFunction(() => document.querySelector(".rp-summary")?.textContent?.includes("grok-voice-3.0"));
+    await page.waitForFunction(() => localStorage.getItem("osmo.voice-pick.v2")?.includes("grok-voice-3.0"));
     await pause(600);
     await hoverOption(page, "Models", "grok-voice-3.0");
     await page.locator('[role=listbox][aria-label="Voices"] [role=option][aria-label^="Sal"]').click();
@@ -117,8 +117,7 @@ async function main() {
     await page.mouse.move(10, 10);
     await pause(500);
     await shot(page, "main-6-session-still-connected", true);
-    const summary = (await page.locator(".rp-summary").textContent()) ?? "";
-    check(`summary follows the switch (${summary})`, summary.includes("grok-voice-3.0") && summary.includes("Sal") && summary.includes("none"));
+    check("No separate model summary pill", (await page.locator(".rp-summary").count()) === 0);
     check("End button still shown (session connected)", (await page.locator("button.end").count()) === 1);
     check(`localStorage holds the confirmed pick (${await stored()})`, (await stored()) === JSON.stringify({ model: "grok-voice-3.0", voice: "sal", effort: "none" }));
     check(`browser WebSocket opened exactly once (${sockets.length})`, sockets.length === 1);

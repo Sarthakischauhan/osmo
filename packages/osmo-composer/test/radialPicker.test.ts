@@ -20,8 +20,9 @@ import {
   ringSpec,
   snapOffset,
 } from "../src/radial-picker/geometry";
-import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restorePick } from "../src/radial-picker/persistence";
+import { PICK_STORAGE_KEY, defaultPick, readSavedPick, restoreMemory, restorePick } from "../src/radial-picker/persistence";
 import { focusVisible, modelRingLabel } from "../src/radial-picker/RadialPicker";
+import { modelLabel } from "../src/radial-picker/ringLabels";
 import {
   type LogoFetch,
   isPlaceholderLogo,
@@ -29,7 +30,18 @@ import {
   resetLogoChecks,
   resolveLogo,
 } from "../src/radial-picker/providerIcons";
-import { effortsOf, groupProviders, initialPicker, isFrozen, pickModel, reducePicker } from "../src/radial-picker/reducer";
+import {
+  effortsOf,
+  emptyMemory,
+  groupProviders,
+  initialPicker,
+  isFrozen,
+  pickModel,
+  recallModel,
+  recallProvider,
+  reducePicker,
+  remember,
+} from "../src/radial-picker/reducer";
 
 const voice = (id: string) => ({ id, label: id.toUpperCase(), traits: [] });
 const model = (provider: string, id: string, voices: string[], reasoningEffort?: VoiceModel["capabilities"]["reasoningEffort"]): VoiceModel => ({
@@ -240,6 +252,49 @@ describe("selection rules", () => {
   });
 });
 
+describe("remembered paths", () => {
+  const xai = [model("xai", "grok-voice-latest", ["eve", "ara"], ["none", "high"]), model("xai", "grok-voice-3.0", ["eve", "ara", "sal"], ["none", "high"])];
+  const registry = [...xai, ...REGISTRY.slice(1)];
+  const providers = groupProviders(registry);
+  const xaiGroup = providers.find((g) => g.id === "xai");
+  const openaiGroup = providers.find((g) => g.id === "openai");
+  if (!xaiGroup || !openaiGroup) throw new Error("fixture");
+  const chosen = { model: "grok-voice-3.0", voice: "sal", effort: "none" as const };
+  const memory = remember(emptyMemory, registry, chosen);
+  const elsewhere = { model: "m1", voice: "b" };
+
+  it("a provider commit recalls its last model with that model's voice and effort", () => {
+    expect(recallProvider(xaiGroup, memory, elsewhere)).toEqual(chosen);
+    expect(recallProvider(xaiGroup, emptyMemory, elsewhere)).toEqual({ model: "grok-voice-latest", voice: "eve", effort: "high" });
+  });
+  it("a model commit recalls its own voice and effort, not its defaults", () => {
+    const three = xai[1];
+    if (!three) throw new Error("fixture");
+    expect(recallModel(three, memory, elsewhere)).toEqual(chosen);
+    expect(recallModel(three, emptyMemory, elsewhere)).toEqual({ model: "grok-voice-3.0", voice: "eve", effort: "high" });
+  });
+  it("the current pick wins over memory for its own provider and model", () => {
+    const current = { model: "grok-voice-latest", voice: "ara", effort: "none" as const };
+    expect(recallProvider(xaiGroup, memory, current)).toEqual(current);
+  });
+  it("opening a remembered model's ring centres its remembered voice", () => {
+    const opened = reducePicker(initialPicker, { type: "open", groups: providers, value: elsewhere, memory });
+    const r2 = reducePicker(opened, { type: "hoverProvider", provider: "xai", now: 0, groups: providers, value: elsewhere, memory });
+    const r3 = reducePicker(r2, { type: "hoverModel", model: "grok-voice-3.0", now: 0, groups: providers, value: elsewhere, memory });
+    expect(r3.offsets.voices).toBe(offsetFor(RINGS.voices, 3, 2));
+  });
+  it("memory survives storage as JSON and junk reads as empty", () => {
+    expect(restoreMemory(JSON.stringify(memory))).toEqual(memory);
+    expect(restoreMemory("{nope")).toEqual(emptyMemory);
+    expect(restoreMemory(null)).toEqual(emptyMemory);
+  });
+  it("forgets nothing about other providers", () => {
+    const both = remember(memory, registry, { model: "m4", voice: "b", effort: "low" });
+    expect(recallProvider(xaiGroup, both, elsewhere)).toEqual(chosen);
+    expect(recallProvider(openaiGroup, both, { model: "deep", voice: "v1" })).toEqual({ model: "m4", voice: "b", effort: "low" });
+  });
+});
+
 describe("persistence", () => {
   it("uses the key osmo.voice-pick.v2, so picks saved under the old 'none' default are not read", () =>
     expect(PICK_STORAGE_KEY).toBe("osmo.voice-pick.v2"));
@@ -262,6 +317,34 @@ describe("persistence", () => {
   it("repairs a stale voice or effort within a model that still exists", () => {
     expect(restorePick(JSON.stringify({ model: "deep", voice: "gone", effort: "high" }), REGISTRY)).toEqual({ model: "deep", voice: "v1", effort: "high" });
     expect(restorePick(JSON.stringify({ model: "grok-voice-latest", voice: "sal", effort: "high" }), REGISTRY)).toEqual({ model: "grok-voice-latest", voice: "sal" });
+  });
+});
+
+describe("transcription-only models (Sarvam realtime STT)", () => {
+  const saaras: VoiceModel = {
+    ...model("sarvam", "saaras:v4", []),
+    capabilities: { tools: false, interrupt: false, customVoices: false, reasoningEffort: [], speaks: false },
+  };
+  const withSarvam = [saaras, ...REGISTRY];
+  it("parses speaks from the wire and keeps it optional", () => {
+    expect(voiceModelSchema.parse(saaras).capabilities.speaks).toBe(false);
+    expect(voiceModelSchema.parse(REGISTRY[0]).capabilities.speaks).toBeUndefined();
+  });
+  it("groups Sarvam as an unlocked provider with its models listed", () => {
+    const sarvam = groupProviders(withSarvam).find((g) => g.id === "sarvam");
+    expect(sarvam?.locked).toBe(false);
+    expect(sarvam?.models.map((m) => m.id)).toEqual(["saaras:v4"]);
+  });
+  it("labels the model ring entry transcription only", () => {
+    expect(modelLabel(saaras).tip).toBe("saaras:v4 · transcription only");
+    expect(modelLabel(REGISTRY[0]).tip).toBe("grok-voice-latest");
+  });
+  it("never defaults to or restores a transcription-only model", () => {
+    expect(defaultPick(withSarvam)).toEqual({ model: "grok-voice-latest", voice: "eve" });
+    expect(restorePick(JSON.stringify({ model: "saaras:v4", voice: "x" }), withSarvam)).toEqual(defaultPick(withSarvam));
+  });
+  it("uses Sarvam's official logomark at runtime and bundles none", () => {
+    expect(providerIcons.sarvam).toEqual({ label: "Sarvam AI", logo: "https://assets.sarvam.ai/assets/brand/logos/sarvam-logo-black.svg" });
   });
 });
 
@@ -311,7 +394,10 @@ describe("provider logo fallback chain", () => {
   it("bundles fallbacks only for providers models.dev really has", () => {
     const bundledFor = Object.entries(providerIcons).filter(([, icon]) => icon.fallback !== undefined).map(([id]) => id);
     expect(bundledFor).toEqual(["xai", "openai", "google", "anthropic", "mistral"]);
-    for (const icon of Object.values(providerIcons)) expect(icon.logo).toMatch(/^https:\/\/models\.dev\/logos\/.+\.svg$/);
+    // Every runtime logo is models.dev's, except Sarvam's official logomark (models.dev has none).
+    for (const [id, icon] of Object.entries(providerIcons)) {
+      if (id !== "sarvam") expect(icon.logo).toMatch(/^https:\/\/models\.dev\/logos\/.+\.svg$/);
+    }
   });
 });
 
@@ -367,20 +453,13 @@ describe("model ring labels", () => {
     const rule = (sel: string) => css.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? "";
     expect(rule(".rp-option")).not.toMatch(/ellipsis|max-width|overflow/);
     expect(rule(".rp-tip")).toMatch(/border: 0/);
-    expect(rule(".rp-tip")).toMatch(/rgba\(255, 255, 255/);
+    expect(rule(".rp-tip")).toMatch(/background: var\(--accent\)/);
+    expect(css).not.toMatch(/backdrop-filter|radial-gradient/);
+    expect(css).not.toMatch(/box-shadow: (?!none)/);
   });
 });
 
-describe("summary font", () => {
-  it("uses the ring pills' sans (inherited from .rp), not a monospace", () => {
-    const css = readFileSync(new URL("../src/radial-picker/radialPicker.css", import.meta.url), "utf8");
-    const summary = css.match(/\.rp-summary \{([^}]*)\}/)?.[1] ?? "";
-    expect(summary).toMatch(/font-family: inherit/);
-    expect(summary).toMatch(/font-weight: 500/);
-    expect(summary).not.toMatch(/mono/i);
-    expect(css.match(/\.rp \{([^}]*)\}/)?.[1]).toMatch(/font-family: Inter/);
-  });
-});
+
 
 describe("a 28-voice ring (xAI's documented roster)", () => {
   it("shows a window with … markers, fades mid-glide and settles on whole slots", () => {

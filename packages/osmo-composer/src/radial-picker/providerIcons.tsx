@@ -40,6 +40,9 @@ export const providerIcons: Record<string, ProviderIcon> = {
   cartesia: { label: "Cartesia", logo: `${MODELS_DEV}/cartesia.svg` },
   openrouter: { label: "OpenRouter", logo: `${MODELS_DEV}/openrouter.svg` },
   // models.dev serves a real mark at the `vercel` slug, so no bundled fallback is needed.
+  // Sarvam's official logomark from its brand guidelines (https://www.sarvam.ai/brand-guidelines);
+  // models.dev has none. Loaded at runtime, not bundled: the guidelines forbid modifying the file.
+  sarvam: { label: "Sarvam AI", logo: "https://assets.sarvam.ai/assets/brand/logos/sarvam-logo-black.svg" },
   vercel: { label: "Vercel AI Gateway", logo: `${MODELS_DEV}/vercel.svg` },
 };
 

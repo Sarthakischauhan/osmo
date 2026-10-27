@@ -30,6 +30,8 @@ export const voiceModelSchema = z.object({
     interrupt: z.boolean(),
     customVoices: z.boolean(),
     reasoningEffort: z.array(effortSchema).nullish(),
+    /** False for a transcription-only model (Sarvam's realtime STT): listed, never selectable. */
+    speaks: z.boolean().optional(),
   }),
   voices: z.array(z.object({ id: z.string(), label: z.string(), traits: z.array(z.string()) })),
   defaultVoice: z.string(),
@@ -46,12 +48,27 @@ export const voiceSelectionSchema = z.object({
 });
 export type VoiceSelection = z.infer<typeof voiceSelectionSchema>;
 
+/** A stored conversation (mirrors symphony_server/storage.py ThreadRecord). */
+export const threadSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  forkedFrom: z.string().nullish(),
+});
+export type Thread = z.infer<typeof threadSchema>;
+
+export const agentRunStatusSchema = z.enum(["running", "waiting_approval", "completed", "failed", "cancelled"]);
+export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
+
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
     voice: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     effort: effortSchema.optional(),
+    /** Continue this stored thread (the server replays it); a new thread when unset. */
+    threadId: z.string().min(1).optional(),
   }),
   z.object({ type: z.literal("session.configure") }).merge(voiceSelectionSchema),
   z.object({
@@ -60,6 +77,8 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     model: z.string().min(1),
     voice: z.string().min(1),
   }),
+  z.object({ type: z.literal("desktop.configure"), enabled: z.boolean() }),
+  z.object({ type: z.literal("desktop.result"), requestId: z.string(), result: z.record(z.unknown()).optional(), error: z.string().max(2000).optional() }),
   z.object({ type: z.literal("session.end") }),
   z.object({ type: z.literal("interrupt") }),
   z.object({
@@ -72,12 +91,15 @@ export const clientEventSchema = z.discriminatedUnion("type", [
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
 export const serverEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
   z.object({
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),
     text: z.string(),
+    // User utterances: an empty delta opens the turn when speech stops; `final` carries the whole transcript.
     itemId: z.string().optional(),
+    final: z.boolean().optional(),
   }),
   // The spec's payload is (id, type, props); it is nested under `widget`
   // because `type` is already the event discriminator.
@@ -98,6 +120,27 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     source: z.enum(["client", "tool"]),
     error: z.string().optional(),
   }),
+  // The stored thread this session reads and writes (on start and when its title changes).
+  z.object({ type: z.literal("thread"), thread: threadSchema }),
+  // A background agent run (`run_agent`) changed status or phase.
+  z.object({
+    type: z.literal("agent.update"),
+    runId: z.string(),
+    task: z.string(),
+    status: agentRunStatusSchema,
+    phase: z.string().nullish(),
+    result: z.string().nullish(),
+  }),
+  // An agent run waits for the user: answer with `POST /api/approvals/{approvalId}`.
+  z.object({
+    type: z.literal("approval.request"),
+    approvalId: z.string(),
+    runId: z.string(),
+    tool: z.string(),
+    summary: z.string(),
+    arguments: z.string(),
+  }),
+  z.object({ type: z.literal("approval.resolved"), approvalId: z.string(), runId: z.string(), approved: z.boolean() }),
   // Answer to a `voice.preview` request: base64 PCM16 (24 kHz mono, ~2 s) or an error.
   z.object({
     type: z.literal("voice.preview"),

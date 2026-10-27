@@ -1,8 +1,8 @@
 import type { OsmoState } from "./protocol";
 
 /**
- * Canvas orb: a fluid, layered blob whose wobble, size and glow follow the assistant's output level.
- * The idea (state presets plus a live 0..1 volume that adds speed, distortion and glow) follows
+ * Canvas orb: a solid blob whose wobble and size follow the assistant's output level.
+ * The idea (state presets plus a live 0..1 volume that adds speed and distortion) follows
  * assistant-ui's VoiceOrb (https://www.assistant-ui.com/elements/orb, MIT); this 2D-canvas version
  * is Osmo's own code, with no dependency and no copied source.
  */
@@ -19,28 +19,21 @@ export function orbMode(connection: "disconnected" | "connecting" | "connected",
 type Rgb = readonly [number, number, number];
 
 interface Preset {
-  /** Light, mid and deep colour of the body. */
   colors: readonly [Rgb, Rgb, Rgb];
-  /** Base wobble (0..1), animation speed, and breathing amount. */
   wobble: number;
   speed: number;
   breathe: number;
   glow: number;
 }
 
+/** Brand colors shift with the session state; speech adds the strongest glow. */
 export const PRESETS: Record<OrbMode, Preset> = {
-  // Calm brand indigo, nearly still.
   idle: { colors: [[226, 230, 255], [140, 150, 240], [62, 58, 170]], wobble: 0.12, speed: 0.35, breathe: 0.01, glow: 0.25 },
-  // Same brand family, a little more alive while the mic is open.
   listening: { colors: [[230, 236, 255], [129, 146, 248], [67, 56, 202]], wobble: 0.28, speed: 0.6, breathe: 0.03, glow: 0.4 },
-  // Muted slate with a quick breath, so it never reads as ready.
   connecting: { colors: [[214, 218, 228], [140, 148, 168], [70, 76, 96]], wobble: 0.1, speed: 1.6, breathe: 0.05, glow: 0.2 },
-  // Amber only while a widget waits on the user's choice.
   awaiting: { colors: [[255, 236, 190], [251, 191, 36], [180, 83, 9]], wobble: 0.22, speed: 0.5, breathe: 0.05, glow: 0.55 },
-  // Lighter, icy lavender that swirls rather than wobbles.
   thinking: { colors: [[255, 255, 255], [221, 214, 254], [167, 139, 250]], wobble: 0.18, speed: 1.8, breathe: 0.02, glow: 0.5 },
-  // Deep violet with a cyan edge; the live level drives most of the motion.
-  speaking: { colors: [[224, 231, 255], [129, 140, 248], [76, 29, 149]], wobble: 0.45, speed: 1.1, breathe: 0.0, glow: 0.6 },
+  speaking: { colors: [[224, 231, 255], [129, 140, 248], [76, 29, 149]], wobble: 0.45, speed: 1.1, breathe: 0, glow: 0.6 },
 };
 
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -104,26 +97,19 @@ export function drawOrb(ctx: CanvasRenderingContext2D, size: number, frame: OrbF
   const { preset, level, time: t } = frame;
   const [light, mid, deep] = preset.colors;
   const c = size / 2;
-  const base = size * 0.24;
-  const radius = base * (1 + Math.sin(t * 2) * preset.breathe + level * 0.16);
+  const radius = size * 0.24 * (1 + Math.sin(t * 2) * preset.breathe + level * 0.16);
   const amount = (preset.wobble + level * 0.9) * 0.09;
   ctx.clearRect(0, 0, size, size);
-
-  // Soft outer glow, brighter with the voice.
   const glow = ctx.createRadialGradient(c, c, radius * 0.6, c, c, Math.min(c * 0.98, radius * (1.9 + level * 0.6)));
   glow.addColorStop(0, css(mid, preset.glow * (0.55 + level * 0.45)));
   glow.addColorStop(1, css(mid, 0));
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, size, size);
-
-  // Two translucent trailing layers make the body read as fluid.
   for (const [seed, scale, alpha] of [[4.2, 1.08, 0.35], [8.9, 1.03, 0.5]] as const) {
     blob(ctx, c, c, radius * scale, t * 0.8, amount * 1.4, seed);
     ctx.fillStyle = css(deep, alpha);
     ctx.fill();
   }
-
-  // Main body with a lit, off-centre highlight.
   blob(ctx, c, c, radius, t, amount, 0);
   const swirl = mode === "thinking" ? t * 1.4 : t * 0.25;
   const hx = c + Math.cos(swirl - 2.3) * radius * 0.32;

@@ -23,7 +23,7 @@ export interface OrbComposerProps {
    * Wrap the orb in the radial voice picker: hovering or focusing the orb opens the
    * dial, a tap still starts or interrupts the conversation.
    */
-  picker?: Omit<RadialPickerProps, "orb" | "orbSize" | "onOrbActivate" | "orbLabel" | "loadError">;
+  picker?: Omit<RadialPickerProps, "orb" | "orbSize" | "onOrbActivate" | "orbLabel">;
   /** Why the picker's models could not be loaded (shown while the app retries). */
   pickerError?: string;
 }
@@ -39,7 +39,7 @@ export function OrbComposer({ session, awaitingChoice = false, className, style,
   const caption =
     connection === "connecting"
       ? "Connecting…"
-      : (error ?? (picker ? undefined : pickerError) ?? detail ?? (mode === "awaiting" ? "Waiting for your choice" : CAPTIONS[shown]));
+      : (error ?? pickerError ?? detail ?? (mode === "awaiting" ? "Waiting for your choice" : CAPTIONS[shown]));
 
   const onTap = () => {
     if (connection === "disconnected") void session.start();
@@ -51,7 +51,7 @@ export function OrbComposer({ session, awaitingChoice = false, className, style,
   return (
     <div className={`orb-composer ${className ?? ""}`} style={style} data-state={shown} data-mode={mode} data-connection={connection}>
       {picker ? (
-        <RadialPicker {...picker} loadError={pickerError} orb={orb} orbSize={64} onOrbActivate={onTap} orbLabel={label} />
+        <RadialPicker {...picker} orb={orb} orbSize={64} onOrbActivate={onTap} orbLabel={label} />
       ) : (
         <button type="button" className="orb" data-state={shown} data-mode={mode} data-connection={connection} aria-label={label} onClick={onTap}>
           {orb}

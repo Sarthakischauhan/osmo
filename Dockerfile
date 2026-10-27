@@ -4,6 +4,7 @@ WORKDIR /repo
 COPY package.json bun.lock tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/web ./apps/web
+COPY apps/desktop/package.json ./apps/desktop/package.json
 RUN bun install --frozen-lockfile && bun run --filter @osmo/web build
 
 FROM python:3.12-slim

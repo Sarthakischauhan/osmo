@@ -1,7 +1,35 @@
+import { BARGE_IN } from "@osmo/osmo-composer";
 import { describe, expect, it } from "vitest";
-import { emptyFeed, pendingChoice, reduceFeed } from "../src/feed";
+import { emptyFeed, pendingChoice, reduceFeed, feedFromMessages } from "../src/feed";
 
 describe("reduceFeed", () => {
+  it("ignores the barge-in audio flush signal, even while working", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Plan Lisbon" });
+    feed = reduceFeed(feed, { type: "state", state: "working", detail: "Planning" });
+    const before = feed;
+    feed = reduceFeed(feed, { type: "state", state: "working", detail: BARGE_IN });
+    expect(feed).toBe(before);
+  });
+
+  it("keeps an utterance above its answer when the transcript lands mid-answer", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "", itemId: "u1" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "I just want to know, " });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "What do you mean?", itemId: "u1", final: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "or just a chat." });
+    expect(feed.turns.map((turn) => (turn.role === "approval" ? "" : `${turn.role}:${turn.text}`))).toEqual([
+      "user:What do you mean?",
+      "assistant:I just want to know, or just a chat.",
+    ]);
+    expect(feed.turns[0]).toMatchObject({ pending: false });
+  });
+
+  it("drops an utterance whose transcript comes back empty", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "", itemId: "u1" });
+    expect(feed.turns[0]).toMatchObject({ role: "user", pending: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "", itemId: "u1", final: true });
+    expect(feed.turns).toEqual([]);
+  });
+
   it("groups assistant text, activity and widgets into one turn after the user turn", () => {
     let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Weather in Palo Alto?" });
     feed = reduceFeed(feed, { type: "state", state: "working", detail: "Checking weather · Palo Alto" });
@@ -93,5 +121,30 @@ describe("pendingChoice", () => {
       widget: { id: "c2", type: "card", props: { title: "t", body: "b", actions: [{ id: "ok", label: "OK" }] } },
     });
     expect(pendingChoice(feed, new Set())).toBe("c2");
+  });
+});
+
+describe("approval turns", () => {
+  it("adds an approval to the feed and collapses it once answered", () => {
+    const asked = reduceFeed(emptyFeed, {
+      type: "approval.request",
+      approvalId: "p1",
+      runId: "r1",
+      tool: "create_image",
+      summary: "Drawing a picture",
+      arguments: '{"prompt":"a cat"}',
+    });
+    expect(asked.turns).toMatchObject([{ role: "approval", approvalId: "p1", tool: "create_image" }]);
+    const answered = reduceFeed(asked, { type: "approval.resolved", approvalId: "p1", runId: "r1", approved: true }, 42);
+    expect(answered.turns[0]).toMatchObject({ resolved: { approved: true, at: 42 } });
+  });
+
+  it("rebuilds a stored thread's user and assistant turns", () => {
+    const feed = feedFromMessages([
+      { role: "user", text: "hi" },
+      { role: "agent", text: "[agent r1] done" },
+      { role: "assistant", text: "hello" },
+    ]);
+    expect(feed.turns.map((t) => t.role)).toEqual(["user", "assistant"]);
   });
 });

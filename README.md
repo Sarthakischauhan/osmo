@@ -105,6 +105,13 @@ auth kind (`api_key` or `oauth`); for example `/osmo/default/openrouter/KEY`. Th
 `default` today; it is a parameter of the store so per-user keys can come later. The folders are
 created on first use, and disconnecting a provider deletes its folder.
 
+## Desktop voice assistant and computer support
+
+Osmo also runs in Electron with the same voice UI and opt-in primary-screen inspection, mouse,
+keyboard and scroll tools. Run `make install`, `make build`, then `bun run desktop`. Computer support
+requires PyAutoGUI and a connected vision model. See [desktop setup and packaging](apps/desktop/README.md)
+for the complete setup, OS permissions, shortcuts and current distribution limits.
+
 ## Contributing
 
 ## Development
@@ -115,4 +122,12 @@ Install Bun and [uv](https://docs.astral.sh/uv/), then from the repository root:
 make install
 ```
 
-For live voice sessions, add an xAI key in the app's Providers panel (it is validated, then kept in the server's secret store; the `XAI_API_KEY` environment variable is not read). Optional server settings: `OSMO_TOOLS` (comma-separated tool categories: `search`, `image`, `osmo`; all by default), `EXA_API_KEY` (lifts Exa's shared rate limit for web search), `OSMO_IMAGE_MODEL` (core_ai image model, default `grok:grok-imagine-image-2.0`), `XAI_BASE_URL`. Run the web client and Python server in separate terminals with `make dev-web` and `make dev-server`. Use `make typecheck`, `make test`, and `make build` for frontend checks and production build; `make server-check` and `make server-test` run Python checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+For live voice sessions, add an xAI key in the app's Providers panel (it is validated, then kept in the server's secret store; the `XAI_API_KEY` environment variable is not read). Optional server settings: `OSMO_TOOLS` (comma-separated tool categories: `search`, `image`, `osmo`; all by default), `EXA_API_KEY` (lifts Exa's shared rate limit for web search), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (optional; trace each spoken turn to Langfuse, with `LANGFUSE_BASE_URL` for a non-EU host), `OSMO_IMAGE_MODEL` (core_ai image model, default `grok:grok-imagine-image-2.0`), `XAI_BASE_URL`.
+
+Voice and agent: the voice model keeps widgets, voice changes and computer support, and hands web search to a background agent with `run_agent` (it returns a run id at once; `agent_status` and `cancel_agent` follow it). The agent only has `web_search`. The agent's progress comes back into the voice session as notices, and talking over Osmo stops its speech, never the run. Agent steps named in `OSMO_APPROVAL_TOOLS` (comma-separated tool names, unset by default) wait for Approve / Deny in the app (`POST /api/approvals/{id}`). `OSMO_AGENT_MODEL` picks the agent's core_ai model (default `grok:grok-4.7`).
+
+Persistence: threads, messages, agent runs and provider connections are kept in SQLite at `OSMO_DATABASE_FILE` (in memory when unset). The REST API is `GET/POST /api/threads`, `GET/PATCH/DELETE /api/threads/{id}`, and `POST /api/threads/{id}/fork`.
+
+Provider sign-in: OpenRouter uses its documented PKCE key exchange. Vercel uses Sign in with Vercel (OAuth authorization code + PKCE) once an app is registered: set `OSMO_VERCEL_OAUTH_CLIENT_ID` and `OSMO_VERCEL_OAUTH_CLIENT_SECRET`, with callback `{origin}/providers/vercel/oauth/callback` and scopes `openid offline_access`. Without them Vercel, and xAI, OpenAI and Gemini, take an API key (none of them documents a third-party OAuth flow that gives Realtime or inference access Osmo can use).
+
+Run the web client and Python server in separate terminals with `make dev-web` and `make dev-server`. Use `make typecheck`, `make test`, and `make build` for frontend checks and production build; `make server-check` and `make server-test` run Python checks. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.

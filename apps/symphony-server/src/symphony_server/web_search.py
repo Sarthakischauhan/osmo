@@ -97,7 +97,7 @@ class WebSearchTool(Tool):
                 "arguments": {"query": parsed.query, "objective": parsed.query, "numResults": parsed.max_results},
             },
         }
-        headers = {"accept": "application/json, text/event-stream"}
+        headers = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
         if self.api_key:
             headers["x-api-key"] = self.api_key
         try:

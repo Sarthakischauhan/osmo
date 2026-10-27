@@ -52,6 +52,46 @@ export function pickModel(model: VoiceModel, current: VoiceSelection): VoiceSele
   return effort === undefined ? { model: model.id, voice: model.defaultVoice } : { model: model.id, voice: model.defaultVoice, effort };
 }
 
+/** The last pick made under each provider and on each model, so committing either one recalls
+ *  the rest of its path (xAI → Grok Voice 3.0 → Eve) instead of falling back to defaults. */
+export interface PickMemory {
+  /** Provider id → the model last picked from it. */
+  providers: Record<string, string>;
+  /** Model id → the voice and effort last picked on it. */
+  models: Record<string, { voice: string; effort?: Effort }>;
+}
+
+export const emptyMemory: PickMemory = { providers: {}, models: {} };
+
+export function remember(memory: PickMemory, registry: readonly VoiceModel[], pick: VoiceSelection): PickMemory {
+  const model = registry.find((m) => m.id === pick.model);
+  if (!model) return memory;
+  const last = pick.effort === undefined ? { voice: pick.voice } : { voice: pick.voice, effort: pick.effort };
+  return { providers: { ...memory.providers, [model.provider]: model.id }, models: { ...memory.models, [model.id]: last } };
+}
+
+/** `model` with `wanted`'s voice and effort where it offers them, else its defaults. */
+export function onModel(model: VoiceModel, wanted: { voice?: string; effort?: Effort }): VoiceSelection {
+  const current = wanted.effort === undefined ? { model: model.id, voice: model.defaultVoice } : { model: model.id, voice: model.defaultVoice, effort: wanted.effort };
+  const voice = wanted.voice !== undefined && model.voices.some((v) => v.id === wanted.voice) ? wanted.voice : model.defaultVoice;
+  return { ...pickModel(model, current), voice };
+}
+
+/** The full pick for `model`: the current one if it is that model, else the voice and effort last
+ *  picked on it, else its default voice and the current effort if it offers it. */
+export function recallModel(model: VoiceModel, memory: PickMemory, current: VoiceSelection): VoiceSelection {
+  if (model.id === current.model) return onModel(model, current);
+  return onModel(model, memory.models[model.id] ?? { effort: current.effort });
+}
+
+/** The full pick for a provider: its current or last-picked model (else its first usable one), recalled. */
+export function recallProvider(group: ProviderGroup, memory: PickMemory, current: VoiceSelection): VoiceSelection | undefined {
+  const usable = group.models.filter((model) => model.locked !== true);
+  const model =
+    usable.find((m) => m.id === current.model) ?? usable.find((m) => m.id === memory.providers[group.id]) ?? usable[0];
+  return model && recallModel(model, memory, current);
+}
+
 export type Depth = 0 | 1 | 2 | 3;
 
 export interface PickerState {
@@ -86,6 +126,7 @@ export function isFrozen(state: PickerState, ring: RingKey, now: number): boolea
 export interface Context {
   groups: ProviderGroup[];
   value: VoiceSelection;
+  memory?: PickMemory;
 }
 
 export type PickerAction =
@@ -103,10 +144,11 @@ function selectedProvider({ groups, value }: Context): number {
   return groups.findIndex((group) => group.models.some((model) => model.id === value.model));
 }
 
-function openThird(state: PickerState, model: VoiceModel, value: VoiceSelection): PickerState {
-  const voice = model.id === value.model ? model.voices.findIndex((v) => v.id === value.voice) : model.voices.findIndex((v) => v.id === model.defaultVoice);
+function openThird(state: PickerState, model: VoiceModel, ctx: Context): PickerState {
+  const recalled = recallModel(model, ctx.memory ?? emptyMemory, ctx.value);
+  const voice = model.voices.findIndex((v) => v.id === recalled.voice);
   const efforts = effortsOf(model);
-  const effort = model.id === value.model && value.effort !== undefined ? efforts.indexOf(value.effort) : -1;
+  const effort = recalled.effort === undefined ? -1 : efforts.indexOf(recalled.effort);
   return {
     ...state,
     depth: 3,
@@ -122,8 +164,8 @@ function openThird(state: PickerState, model: VoiceModel, value: VoiceSelection)
 function openModels(state: PickerState, group: ProviderGroup, ctx: Context): PickerState {
   const providerIndex = ctx.groups.findIndex((g) => g.id === group.id);
   const providerAngle = slotAngle(ringSpec("providers", ctx.groups.length), providerIndex - state.offsets.providers);
-  const selected = group.models.findIndex((model) => model.id === ctx.value.model);
-  const anchor = Math.max(0, selected);
+  const recalled = recallProvider(group, ctx.memory ?? emptyMemory, ctx.value);
+  const anchor = Math.max(0, group.models.findIndex((model) => model.id === recalled?.model));
   const models = offsetFor(RINGS.models, group.models.length, anchor, nearestSlot(RINGS.models, providerAngle));
   return { ...state, depth: 2, provider: group.id, model: undefined, offsets: { ...state.offsets, models } };
 }
@@ -147,7 +189,7 @@ export function reducePicker(state: PickerState, action: PickerAction): PickerSt
     case "hoverModel": {
       if (state.depth < 2 || state.model === action.model || isFrozen(state, "models", action.now)) return state;
       const model = action.groups.find((g) => g.id === state.provider)?.models.find((m) => m.id === action.model);
-      return model ? openThird(state, model, action.value) : state;
+      return model ? openThird(state, model, action) : state;
     }
     case "scroll": {
       const ring = ringSpec(action.ring, action.count);

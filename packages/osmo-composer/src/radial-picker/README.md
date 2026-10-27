@@ -9,12 +9,13 @@ import { RadialPicker, usePersistedPick, useOsmoSession } from "@osmo/osmo-compo
 import "@osmo/osmo-composer/radial-picker.css";
 
 const session = useOsmoSession({ url, voice: pick?.voice, model: pick?.model, effort: pick?.effort });
-// `choose` shows a pick; `save` also writes localStorage "osmo.voice-pick" — call it on `voice.configured`.
-const [pick, save, choose] = usePersistedPick(session.voiceModels);
+// `save` applies and persists a pick plus the per-provider/per-model memory; also call it on `voice.configured`.
+const [pick, save, memory] = usePersistedPick(session.voiceModels);
 <RadialPicker
   registry={session.voiceModels}            // from Symphony's `models` event
   value={pick}
-  onChange={(next) => { choose(next); session.configure(next); }}
+  memory={memory}
+  onChange={(next) => { save(next); session.configure(next); }}
   onPreview={session.previewVoice}
   onPreviewStop={session.stopPreview}
   previewing={session.previewing}
@@ -28,7 +29,8 @@ const [pick, save, choose] = usePersistedPick(session.voiceModels);
 | --- | --- | --- | --- |
 | `registry` | `VoiceModel[]` | — | Grouped into providers by `provider`, in first-seen order. |
 | `value` | `{ model, voice, effort? }` | — | Selected path; stays highlighted when the dial reopens. |
-| `onChange` | `(next) => void` | — | Exactly once per commit (click / Enter / Space). Picking a model picks its `defaultVoice` and keeps the effort if the model still offers it. |
+| `onChange` | `(next) => void` | — | Exactly once per commit (click / Enter / Space), always a full `{ model, voice, effort? }`. A provider commit recalls the model last picked from it; a model commit recalls the voice and effort last picked on it (else its `defaultVoice`, keeping the effort if offered). |
+| `memory` | `PickMemory` | empty | Last pick per provider and per model, from `usePersistedPick` (localStorage `osmo.voice-memory.v1`). |
 | `orbSize` | `number` | `96` | Orb diameter in px. |
 | `providerIcons` | `Record<string, ProviderIcon>` | built-in map | See below. |
 | `orb` | `ReactNode` | neutral glass sphere | Orb face inside the button. |
@@ -66,7 +68,7 @@ const icons = { ...providerIcons, acme: { label: "Acme", logo: "https://cdn.exam
 
 - Rings (angles CCW from +x): R1 providers r=84, 30–150°, 4 slots × 40° (fewer providers than slots are spread evenly around 90°); R2 models r=160, 20–160°, 5 × 35°;
   R3 voices r=235, 130–170°, 3 × 20° (left); R3 effort r=235, 14–46°, 3 × 16° (right, only levels in `reasoningEffort`, hidden if none).
-- Hover orb → R1, provider → R2, model → R3. Leaving the dial closes it after 250 ms; Escape closes and refocuses the orb.
+- Hover orb → R1, provider → R2, model → R3. Once the next ring is open, a different provider or model takes over only after the pointer rests on it 160 ms (`HOVER_INTENT_MS`), so moving outward across neighbours keeps the path; clicks and keys switch at once. Leaving the dial closes it after 250 ms; Escape closes and refocuses the orb.
 - Hit-testing is by radius from the orb centre (R1 56–122, R2 122–198, R3 198–274; R3 side by angle; ring radii 84/160/236 = 84 + n × `--rp-ring-spacing`).
 - Scroll with wheel/trackpad (`deltaY + deltaX`), touch angular drag, or ←/→ in a focused ring. Offsets are fractional,
   snap 120 ms after input stops with a 180 ms ease-out, clamp at both ends, and never wrap. Edge items fade/scale over the last

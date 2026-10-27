@@ -39,6 +39,8 @@ def action_text(action: WidgetAction, widget: Widget) -> str:
 
 
 def activity_label(name: str, args: Mapping[str, Any]) -> str:
+    if name == "computer":
+        return {"observe": "Looking at your screen", "click": "Clicking on your screen", "type": "Typing", "key": "Pressing keys", "scroll": "Scrolling"}.get(str(args.get("action")), "Using computer support")
     if name == "get_weather":
         return f"Checking weather · {args.get('location', '')}"
     if name == "get_stock_history":

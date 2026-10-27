@@ -58,6 +58,9 @@ class Capabilities(_Wire):
     interrupt: bool
     customVoices: bool
     reasoningEffort: list[Effort] | None = None
+    # False for a transcription-only model (Sarvam's realtime STT): it cannot answer, so the
+    # picker shows it but it cannot be selected.
+    speaks: bool = True
 
 
 class Voice(_Wire):
@@ -92,16 +95,28 @@ class SetVoiceArgs(_Wire):
 
 
 # The core_ai voice provider (also its ModelRegistry namespace) serving each Osmo provider id, and back.
-CORE_NAMESPACES: dict[str, str] = {"xai": "grok", "openai": "openai", "vercel": "vercel", "gemini": "gemini"}
+CORE_NAMESPACES: dict[str, str] = {
+    "xai": "grok",
+    "openai": "openai",
+    "vercel": "vercel",
+    "gemini": "gemini",
+    "sarvam": "sarvam",
+}
 OSMO_PROVIDERS: dict[str, str] = {namespace: provider for provider, namespace in CORE_NAMESPACES.items()}
 LATEST = "latest"
 
 
+def provider_of(model_id: str) -> str | None:
+    """The Osmo provider serving a core_ai model id (`namespace:model`), if it is one of ours."""
+    return OSMO_PROVIDERS.get(model_id.split(":", 1)[0])
+
+
 def voice_models() -> tuple[VoiceModel, ...]:
     """The picker's models: every realtime model in the core_ai voice catalog that has voices to
-    pick from (a selection always names one), latest first, then in catalog order. Voices and
-    reasoning efforts come from each model's VoiceModelSpec."""
-    specs = [m for m in VOICE_MODELS if m.provider in OSMO_PROVIDERS and m.voices]
+    pick from (a selection always names one), plus transcription-only models (no audio output,
+    shown with `speaks: false`), latest first, then in catalog order. Voices and reasoning
+    efforts come from each model's VoiceModelSpec."""
+    specs = [m for m in VOICE_MODELS if m.provider in OSMO_PROVIDERS and (m.voices or not m.audio_output)]
     return tuple(voice_model(m) for m in sorted(specs, key=lambda m: not m.id.endswith(LATEST)))
 
 
@@ -123,17 +138,25 @@ def model_labels(model_id: str) -> tuple[str, str | None]:
 
 def voice_model(info: VoiceModelSpec) -> VoiceModel:
     label, short_label = model_labels(info.id)
+    speaks = bool(info.audio_output)
     return VoiceModel(
         id=info.id,
         provider=OSMO_PROVIDERS[info.provider],
         label=label,
         shortLabel=short_label,
         capabilities=Capabilities.model_validate(
-            {"tools": True, "interrupt": True, "customVoices": False, "reasoningEffort": list(info.reasoning_efforts)}
+            {
+                "tools": speaks,
+                "interrupt": speaks,
+                "customVoices": False,
+                "reasoningEffort": list(info.reasoning_efforts),
+                "speaks": speaks,
+            }
         ),
         voices=[Voice(id=v.id, label=v.label, traits=list(v.traits)) for v in info.voices],
-        # Google publishes no default voice; its catalog entries leave it empty.
-        defaultVoice=info.default_voice or info.voices[0].id,
+        # Google publishes no default voice; its catalog entries leave it empty. A transcription-only
+        # model has no voice at all.
+        defaultVoice=info.default_voice or (info.voices[0].id if info.voices else ""),
     )
 
 
@@ -183,7 +206,7 @@ def voice_entry(voice: Voice) -> str:
 def set_voice_description(models: tuple[VoiceModel, ...]) -> str:
     """Tool description carrying the catalog (voice ids and labels, plus traits where published)."""
     lines = []
-    for model in models:
+    for model in (m for m in models if m.capabilities.speaks):
         voices = "; ".join(voice_entry(v) for v in model.voices)
         efforts = ", ".join(model.capabilities.reasoningEffort or []) or "none"
         lines.append(f"- {model.id}: voices {voices}; reasoning effort {efforts}")
@@ -264,6 +287,8 @@ def resolve_selection(models: tuple[VoiceModel, ...], change: SetVoiceArgs, curr
         return f"unknown model {model_id!r}; choose one of {', '.join(m.id for m in models)}"
     if model.locked:
         return f"{model.id} is locked: connect {model.provider} first"
+    if not model.capabilities.speaks:
+        return f"{model.id} only transcribes speech: it cannot answer in a voice"
     model_changed = model.id != current.model
     voice_id = change.voice or (model.defaultVoice if model_changed else current.voice)
     voice = find_voice(model, voice_id)
@@ -282,7 +307,9 @@ def voice_change_error(models: tuple[VoiceModel, ...], change: SetVoiceArgs) -> 
     """Why a `set_voice` change could not apply on any model's defaults, or None. The tool has no
     session in hand, so it checks here and the bridge resolves the change against its selection."""
     outcomes = [
-        resolve_selection(models, change, Selection(model=m.id, voice=m.defaultVoice, effort=None)) for m in models
+        resolve_selection(models, change, Selection(model=m.id, voice=m.defaultVoice, effort=None))
+        for m in models
+        if m.capabilities.speaks
     ]
     if any(isinstance(outcome, Selection) for outcome in outcomes):
         return None

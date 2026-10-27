@@ -27,7 +27,7 @@ export const OPTION_TOKENS = {
   height: 36,
   /** Horizontal padding inside every option. */
   paddingX: 12,
-  /** Corner radius (full pill). */
+  /** Corner radius (full pill): options stay round; the 3px rule is for everything else. */
   radius: 999,
   /** Gap between an option's label and its glyph (logo, meter, playing bars). */
   gap: 6,
@@ -78,6 +78,8 @@ export const SNAP_MS = 180;
 export const FREEZE_AFTER_SNAP_MS = 150;
 export const CLOSE_GRACE_MS = 250;
 export const PREVIEW_HOVER_MS = 400;
+/** A pointer rests this long on a provider or model before it replaces the open path. */
+export const HOVER_INTENT_MS = 160;
 /** Wheel/trackpad pixels per slot. */
 export const PX_PER_SLOT = 60;
 
