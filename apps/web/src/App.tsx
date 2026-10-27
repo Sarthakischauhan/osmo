@@ -414,8 +414,16 @@ function FeedTurn({ turn, step, onDecide }: { turn: Turn; step: number | undefin
     case "user":
       return (
         <div className="turn user">
-          <div className="bubble">
-            <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
+          <div className="bubble" data-pending={turn.pending || undefined}>
+            {turn.text ? (
+              <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
+            ) : (
+              <span className="heard-dots" aria-label="Transcribing">
+                <i />
+                <i />
+                <i />
+              </span>
+            )}
           </div>
         </div>
       );

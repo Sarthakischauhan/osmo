@@ -94,7 +94,10 @@ class TranscriptDelta(_Event):
     type: Literal["transcript.delta"] = "transcript.delta"
     role: Literal["user", "assistant"]
     text: str
+    # User utterances carry an id: an empty delta opens the utterance's turn when speech stops,
+    # and the `final` one carries its whole transcript (empty when nothing was said).
     itemId: str | None = None
+    final: bool | None = None
 
 
 class RenderedWidget(_Event):

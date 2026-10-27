@@ -11,6 +11,25 @@ describe("reduceFeed", () => {
     expect(feed).toBe(before);
   });
 
+  it("keeps an utterance above its answer when the transcript lands mid-answer", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "", itemId: "u1" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "I just want to know, " });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "What do you mean?", itemId: "u1", final: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "or just a chat." });
+    expect(feed.turns.map((turn) => (turn.role === "approval" ? "" : `${turn.role}:${turn.text}`))).toEqual([
+      "user:What do you mean?",
+      "assistant:I just want to know, or just a chat.",
+    ]);
+    expect(feed.turns[0]).toMatchObject({ pending: false });
+  });
+
+  it("drops an utterance whose transcript comes back empty", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "", itemId: "u1" });
+    expect(feed.turns[0]).toMatchObject({ role: "user", pending: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "", itemId: "u1", final: true });
+    expect(feed.turns).toEqual([]);
+  });
+
   it("groups assistant text, activity and widgets into one turn after the user turn", () => {
     let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Weather in Palo Alto?" });
     feed = reduceFeed(feed, { type: "state", state: "working", detail: "Checking weather · Palo Alto" });

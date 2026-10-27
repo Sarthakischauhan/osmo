@@ -37,6 +37,14 @@ def next_event(ws: WebSocketTestSession, event_type: str) -> dict[str, Any]:
             return event
 
 
+def heard(ws: WebSocketTestSession) -> dict[str, Any]:
+    """The user's final transcript, past the empty bubble opened when their speech stopped."""
+    while True:
+        event = next_event(ws, "transcript.delta")
+        if event["role"] == "user" and event.get("final"):
+            return event
+
+
 def start(ws: WebSocketTestSession, grok: FakeGrok) -> dict[str, Any]:
     ws.send_text(json.dumps({"type": "session.start", "voice": "eve"}))
     assert next_event(ws, "state")["state"] == "listening"
@@ -129,7 +137,8 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
         say(grok, "Weather this weekend?")
-        assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "user", "text": "Weather this weekend?"}
+        assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "user", "text": "", "itemId": "u1"}
+        assert heard(ws) == {"type": "transcript.delta", "role": "user", "text": "Weather this weekend?", "itemId": "u1", "final": True}
 
         call(grok, "render_widget", WEATHER_CARD, "c1")
         assert next_event(ws, "state") == {"type": "state", "state": "working", "detail": "Running render_widget"}
@@ -279,11 +288,32 @@ def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGro
         say(grok, "go on")
         grok.send({"type": "response.created", "response": {"id": "r1"}})
         grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "So"})
-        assert next_event(ws, "transcript.delta")["role"] == "user"
+        assert heard(ws)["text"] == "go on"
         assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "assistant", "text": "So"}
         ws.send_text(json.dumps({"type": "interrupt"}))
         assert grok.next_of("response.cancel")["type"] == "response.cancel"
         assert next_event(ws, "state") == {"type": "state", "state": "listening", "detail": "barge-in"}
+
+
+def test_a_transcript_landing_mid_answer_stays_above_it(client: TestClient, grok: FakeGrok) -> None:
+    """Transcription finishes after the answer has started: the utterance's bubble opened when
+    speech stopped holds its place, and the thread stores the utterance before the answer."""
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        grok.send({"type": "input_audio_buffer.speech_stopped"})
+        assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "user", "text": "", "itemId": "u1"}
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "Just a chat."})
+        assert next_event(ws, "transcript.delta")["role"] == "assistant"
+        grok.send({"type": "response.done", "response": {"id": "r1"}})
+        assert next_event(ws, "state")["state"] == "listening"
+        grok.send({"type": "conversation.item.input_audio_transcription.completed", "item_id": "u", "transcript": "What do you mean?"})
+        assert heard(ws) == {"type": "transcript.delta", "role": "user", "text": "What do you mean?", "itemId": "u1", "final": True}
+
+        ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "eve"}))
+        assert next_event(ws, "voice.configured")["selection"]["model"] == "grok-voice-3.0"
+        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(2)]
+        assert [replayed_entry(item) for item in replayed] == [("user", "What do you mean?"), ("assistant", "Just a chat.")]
 
 
 def test_empty_transcript_cancels_instead_of_running_a_turn(client: TestClient, grok: FakeGrok) -> None:

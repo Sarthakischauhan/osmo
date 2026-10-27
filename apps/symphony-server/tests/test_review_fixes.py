@@ -27,7 +27,7 @@ from symphony_server.voices import (
     PreviewCache,
     RateLimiter,
 )
-from test_session import next_event, say, start
+from test_session import heard, next_event, say, start
 
 FAKE_AUDIO = b"\x05\x00" * (PREVIEW_BYTES // 2)
 
@@ -163,7 +163,7 @@ def test_picker_model_switch_waits_for_the_in_flight_response_then_listens(clien
         assert grok.paths.get(timeout=5).endswith("model=grok-voice-latest")
         say(grok, "Tell me a joke.")
         grok.send({"type": "response.created", "response": {"id": "r1"}})
-        assert next_event(ws, "transcript.delta")["role"] == "user"
+        assert heard(ws)["text"] == "Tell me a joke."
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "ara"}))
         with pytest.raises(queue.Empty):
             grok.paths.get(timeout=0.4)  # no swap while the turn is running

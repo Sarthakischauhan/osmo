@@ -26,9 +26,18 @@ export interface ApprovalTurn {
 }
 
 export type Turn =
-  | { role: "user"; key: string; text: string }
+  | UserTurn
   | { role: "assistant"; key: string; text: string; activities: Activity[]; widgets: CanvasWidget[] }
   | ApprovalTurn;
+
+/** `pending` while the utterance's transcript is still on its way. */
+export interface UserTurn {
+  role: "user";
+  key: string;
+  text: string;
+  itemId?: string;
+  pending?: boolean;
+}
 
 type AssistantTurn = Extract<Turn, { role: "assistant" }>;
 
@@ -97,6 +106,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
       return feed;
     case "transcript.delta":
       if (event.role === "user") {
+        if (event.itemId !== undefined) return heard(feed, event.itemId, event.text, event.final === true);
         return { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: event.text }] };
       }
       return withAssistant(feed, (turn) => ({ ...turn, text: turn.text + event.text }));
@@ -127,6 +137,24 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
       // Voice picker events; the feed has nothing to show for them.
       return feed;
   }
+}
+
+/**
+ * An utterance's turn opens (empty, pending) as soon as speech stops, so it sits above the answer
+ * even though its transcript usually lands after that answer has started. Deltas append; the
+ * final one replaces with the whole transcript, and drops the turn if nothing was said.
+ */
+function heard(feed: Feed, itemId: string, text: string, final: boolean): Feed {
+  const at = feed.turns.findIndex((turn) => turn.role === "user" && turn.itemId === itemId);
+  const turn = feed.turns[at];
+  if (turn?.role !== "user") {
+    if (final && !text) return feed;
+    const fresh: UserTurn = { role: "user", key: `u${feed.seq}`, text, itemId, pending: !final };
+    return { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+  }
+  const full = final ? text : turn.text + text;
+  if (final && !full) return { ...feed, turns: feed.turns.filter((_, i) => i !== at) };
+  return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, text: full, pending: !final } : existing)) };
 }
 
 /**

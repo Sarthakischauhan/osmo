@@ -84,6 +84,9 @@ BARGE_IN = "barge-in"
 SWAP_WAIT_S = 15.0
 # A thread is titled from its first utterance, cut to this length.
 TITLE_FROM_SPEECH_MAX = 60
+# An utterance's bubble waits this long for its transcript (some never come: noise, a failed
+# transcription, a closed voice session) before it is dropped.
+UNHEARD_WAIT_S = 10.0
 
 
 class VoiceToolSink(EventSink):
@@ -107,6 +110,8 @@ class Response:
     text: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     done: ResponseDone | None = None
+    # Utterances still awaiting their transcript when the response began; stored after them.
+    after: frozenset[str] | None = None
 
 
 def tool_output(result: Any) -> str:
@@ -148,6 +153,13 @@ class VoiceBridge:
         self.idle_notices: dict[str, Notice] = {}
         # A model switch asked for by set_voice mid-answer; applied once the answer ends.
         self.swap_after_turn = False
+        # Ended utterances whose transcript has not arrived, oldest first. Transcription finishes
+        # after the answer has often started, so each utterance's bubble is opened when speech
+        # stops and filled in later, keeping it above that answer.
+        self.utterances = 0
+        self.unheard: list[str] = []
+        # Answers held back from storage until the utterances they reply to are stored.
+        self.held: list[tuple[frozenset[str], str]] = []
         self.configure_lock = asyncio.Lock()
         self.tasks: set[asyncio.Task[None]] = set()
 
@@ -244,6 +256,22 @@ class VoiceBridge:
         if self.thread is not None:
             self.storage.add_message(self.thread.id, role, text)
 
+    def next_utterance(self) -> str:
+        self.utterances += 1
+        return f"u{self.utterances}"
+
+    async def expire(self, utterance: str) -> None:
+        await asyncio.sleep(UNHEARD_WAIT_S)
+        if utterance in self.unheard:
+            self.unheard.remove(utterance)
+            await self.emit(TranscriptDelta(role="user", text="", itemId=utterance, final=True))
+            self.store_held()
+
+    def store_held(self) -> None:
+        """Store held answers, in order, once nothing they reply to is still unheard."""
+        while self.held and not self.held[0][0].intersection(self.unheard):
+            self.record("assistant", self.held.pop(0)[1])
+
     async def title_from(self, text: str) -> None:
         """Name an untitled thread after its first utterance."""
         if self.thread is None or self.thread.title != DEFAULT_THREAD_TITLE:
@@ -322,6 +350,10 @@ class VoiceBridge:
         self.desktop.configure(False)
         voice, self.voice = self.voice, None
         self.idle.set()
+        # Transcripts still owed will not come now; keep the answers anyway.
+        for _, text in self.held:
+            self.record("assistant", text)
+        self.held.clear()
         if voice is not None:
             await voice.aclose()
 
@@ -344,13 +376,19 @@ class VoiceBridge:
             await self.set_state("listening", BARGE_IN)
         elif isinstance(event, SpeechStopped):
             self.idle.clear()
+            utterance = self.next_utterance()
+            self.unheard.append(utterance)
+            await self.emit(TranscriptDelta(role="user", text="", itemId=utterance))
+            self.spawn(self.expire(utterance))
             await self.set_state("thinking")
         elif isinstance(event, UserTranscript):
+            utterance = self.unheard.pop(0) if self.unheard else self.next_utterance()
+            await self.emit(TranscriptDelta(role="user", text=event.text, itemId=utterance, final=True))
             if event.text:
                 self.record("user", event.text)
-                await self.emit(TranscriptDelta(role="user", text=event.text))
                 await self.title_from(event.text)
-            else:
+            self.store_held()
+            if not event.text:
                 # Noise, not words: drop whatever the model started saying about it.
                 await voice.cancel()
                 await self.turn_over()
@@ -373,7 +411,8 @@ class VoiceBridge:
             if response.done is None or self.voice is not voice:
                 return
             if response.text:
-                self.record("assistant", "".join(response.text))
+                self.held.append((response.after or frozenset(), "".join(response.text)))
+                self.store_held()
             if response.calls and response.done.error is None:
                 await self.run_tools(voice, response.calls)
             else:
@@ -382,6 +421,8 @@ class VoiceBridge:
     async def read_response(self, voice: VoiceSession) -> Response:
         response = Response()
         async for event in voice.response():
+            if response.after is None:
+                response.after = frozenset(self.unheard)
             if isinstance(event, TextDelta):
                 response.text.append(event.text)
                 await self.emit(TranscriptDelta(role="assistant", text=event.text))

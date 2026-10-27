@@ -95,7 +95,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),
     text: z.string(),
+    // User utterances: an empty delta opens the turn when speech stops; `final` carries the whole transcript.
     itemId: z.string().optional(),
+    final: z.boolean().optional(),
   }),
   // The spec's payload is (id, type, props); it is nested under `widget`
   // because `type` is already the event discriminator.
