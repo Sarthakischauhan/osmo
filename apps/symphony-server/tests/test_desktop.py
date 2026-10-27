@@ -102,26 +102,27 @@ def test_harness_computer_rpc_roundtrip_and_revocation(grok: FakeGrok) -> None:
             answer(grok, 'Computer support stopped.', 'r4')
             wait_listening(ws)
 
-def test_delegated_agent_reaches_only_its_originating_desktop(grok: FakeGrok) -> None:
+def test_delegated_agent_does_not_use_the_desktop(grok: FakeGrok) -> None:
+    """Computer support stays on the voice model. A background run cannot click through it."""
     from core_ai import ModelRegistry
+    from symphony_server.app import AGENT_TOOLS
     from test_agents import ScriptedAgent, Step
     registry = ModelRegistry()
-    agent = ScriptedAgent([Step(tool='computer', arguments=json.dumps({'action': 'click', 'x': 0.4, 'y': 0.6})), Step(text='Clicked the control.')])
-    settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop',))
+    agent = ScriptedAgent([Step(text='Searched the web.')])
+    settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop', 'search'))
     client = make_client(settings, secret_store=xai_key_store(), registry=registry)
     registry.register('grok', agent)
+    assert AGENT_TOOLS == frozenset({'web_search'})
     with client, client.websocket_connect('/ws') as ws:
-        start(ws, grok)
+        update = start(ws, grok)
+        assert 'computer' in {tool['name'] for tool in update['session']['tools']}
         ws.send_json({'type': 'desktop.configure', 'enabled': True})
-        say(grok, 'Handle the computer task in the background')
-        call(grok, 'run_agent', {'task': 'Click the control'}, 'delegate')
+        say(grok, 'Look this up in the background')
+        call(grok, 'run_agent', {'task': 'Search for the control'}, 'delegate')
         started = tool_output(grok)
         assert started['status'] == 'running'
-        request = next_event(ws, 'desktop.request')
-        assert request['action']['x'] == 0.4
-        ws.send_json({'type': 'desktop.result', 'requestId': request['requestId'], 'result': {'ok': True}})
         done = next_event(ws, 'agent.update')
         while done['status'] != 'completed':
             done = next_event(ws, 'agent.update')
         assert done['runId'] == started['run_id']
-        assert done['result'] == 'Clicked the control.'
+        assert done['result'] == 'Searched the web.'

@@ -70,6 +70,7 @@ def test_create_image_draws_with_the_configured_model_and_shows_a_card() -> None
 def test_web_search_calls_exa_and_returns_its_text() -> None:
     def exa(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == EXA_MCP_URL and request.headers["x-api-key"] == "exa-key"
+        assert request.headers["content-type"] == "application/json"
         call = json.loads(request.content)
         assert call["params"]["arguments"]["query"] == "osmo"
         reply = {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "Title: Osmo\nURL: https://x"}]}}
