@@ -4,8 +4,8 @@
 answers at once with its run id. `AgentRuns` follows each run's events, keeps the run's row in
 storage, and tells the thread's observer (the open voice bridge, if any) what happened:
 wire events for the browser, and `Notice`s for the voice model, each tagged with when it
-should be spoken: `interrupt` (failed, needs approval, done), `when_idle` (a new phase) or
-`silent` (added to the conversation without a response).
+should be spoken: `interrupt` (failed, needs approval, done) or `silent` (added to the conversation
+without a response). A run's phase is never spoken: it goes to the widget and to `agent_status`.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from symphony_server.voices import provider_of
 
 log = logging.getLogger("symphony.agents")
 
-NoticeTag = Literal["interrupt", "when_idle", "silent"]
+NoticeTag = Literal["interrupt", "silent"]
 # A finished run's answer, as told to the voice model (it summarizes it out loud).
 RESULT_TOLD_MAX = 4000
 TASK_MAX = 4000
@@ -103,6 +103,8 @@ class AgentRuns:
         self.tasks: set[asyncio.Task[None]] = set()
         # The approval each waiting run asks for, by run id.
         self.asking: dict[str, ApprovalRequest] = {}
+        # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
+        self.phases: dict[str, str] = {}
 
     def observe(self, thread_id: str, observer: AgentObserver) -> None:
         self.observers[thread_id] = observer
@@ -180,7 +182,6 @@ class AgentRuns:
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
-            await self.notify(record, Notice(run_id, "when_idle", f"[agent {run_id}] now: {phase}"))
         elif kind == OSMO_WIDGET:
             await self.show(record, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
@@ -212,6 +213,10 @@ class AgentRuns:
     async def update(self, record: AgentRunRecord, status: AgentRunStatus, *, phase: str | None = None, result: str | None = None) -> None:
         changed = record.model_copy(update={"status": status, "result": result or record.result, "updatedAt": time.time()})
         self.runs[record.runId] = changed
+        if phase is None or status not in ("running", "waiting_approval"):
+            self.phases.pop(record.runId, None)
+        else:
+            self.phases[record.runId] = phase
         if status != "waiting_approval":
             self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
@@ -264,8 +269,8 @@ class AgentDesk:
         return record if record is not None and record.threadId == self.thread_id else None
 
 
-def run_status(record: AgentRunRecord) -> str:
-    return json.dumps({"run_id": record.runId, "status": record.status, "task": record.task, "result": record.result})
+def run_status(record: AgentRunRecord, phase: str | None = None) -> str:
+    return json.dumps({"run_id": record.runId, "status": record.status, "phase": phase, "task": record.task, "result": record.result})
 
 
 class RunAgentTool(Tool):
@@ -299,7 +304,7 @@ class AgentStatusTool(Tool):
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
         del sink
         record = self.desk.mine(str(args.get("run_id", "")))
-        return run_status(record) if record is not None else json.dumps({"error": "no such run in this conversation"})
+        return run_status(record, self.desk.runs.phases.get(record.runId)) if record is not None else json.dumps({"error": "no such run in this conversation"})
 
 
 class CancelAgentTool(Tool):
