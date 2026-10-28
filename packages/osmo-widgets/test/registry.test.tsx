@@ -49,12 +49,12 @@ describe("osmo widget registry on chat-sdk", () => {
   it("renders the agent browser: live with its latest frame, then ended on the last one", () => {
     const frame = "data:image/jpeg;base64,/9j/4AAQ";
     const live = render("w7", "browser", { status: "live", url: "https://example.com/", frame });
-    expect(live).toContain('data-status="live"');
+    expect(live).toContain("osmo-frame-bar");
     expect(live).toContain(`src="${frame}"`);
     expect(live).toContain("https://example.com/");
     expect(live).toContain("Live");
     const ended = render("w7", "browser", { status: "ended", url: "https://example.com/", frame });
-    expect(ended).toContain('data-status="ended"');
+    expect(ended).toContain("osmo-frame-bar");
     expect(ended).toContain(`src="${frame}"`);
     expect(ended).toContain("Ended");
   });
