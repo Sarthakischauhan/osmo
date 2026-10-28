@@ -16,8 +16,9 @@ DEFAULT_DATABASE_FILE = "~/.config/osmo/osmo.db"
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
 DEFAULT_AGENT_MODEL = "grok:grok-4.7"
 # Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
-# The agent only searches, and search does not wait unless this is set.
-DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ()
+# Clicking and typing in the agent browser can submit, buy or send, so they wait; opening, reading and
+# scrolling pages do not. Search does not wait unless it is added here.
+DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type")
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -33,7 +34,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - To change a widget already on screen, call update_widget with its id.
 
 # Background agent
-- For anything that needs the web (facts, news, weather, prices, research), call run_agent with a full, self-contained task and say one line that you started. Keep talking with the user meanwhile. The agent can only search; it cannot draw, show widgets, or use the computer.
+- For anything that needs the web (facts, news, weather, prices, research), call run_agent with a full, self-contained task and say one line that you started. Keep talking with the user meanwhile. The agent can search the web and, when its browser is enabled, browse pages (the browser appears live on screen); it cannot draw, show widgets, or use the computer.
 - Messages starting with [agent <run id>] report on a run: when it is done, summarize the result in one or two sentences; when it needs approval, ask the user to tap Approve or Deny on screen; never approve for them.
 - agent_status tells you where a run is; cancel_agent stops one the user no longer wants.
 
@@ -49,7 +50,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 
 # Tool groups the server can enable (OSMO_TOOLS); see app.osmo_tools.
-ToolCategory = Literal["search", "image", "osmo", "desktop"]
+ToolCategory = Literal["search", "image", "osmo", "desktop", "browser"]
 DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo")
 # The OSMO_TOOLS category of each of Osmo's tools, by tool name.
 TOOL_CATEGORIES: dict[str, ToolCategory] = {
@@ -61,6 +62,11 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "set_voice": "osmo",
     "get_weather": "osmo",
     "get_stock_history": "osmo",
+    "browser_open": "browser",
+    "browser_read": "browser",
+    "browser_click": "browser",
+    "browser_type": "browser",
+    "browser_scroll": "browser",
 }
 
 
@@ -111,6 +117,8 @@ class Settings:
     tool_categories: tuple[ToolCategory, ...] = DEFAULT_TOOL_CATEGORIES
     # core_ai model id that create_image draws with.
     desktop_vision_model: str | None = None
+    # A Chrome or Chromium executable the agent browser launches (OSMO_BROWSER_PATH); the browser tools fail without it.
+    browser_path: str | None = None
     image_model: str = DEFAULT_IMAGE_MODEL
     # Optional Exa key for web_search; without one Exa answers at a low shared rate limit.
     exa_api_key: str | None = None
@@ -135,6 +143,7 @@ class Settings:
             infisical=infisical_from_env() if infisical_selected() else None,
             tool_categories=tool_categories(os.getenv("OSMO_TOOLS")),
             desktop_vision_model=os.getenv("OSMO_DESKTOP_VISION_MODEL") or None,
+            browser_path=os.getenv("OSMO_BROWSER_PATH") or None,
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
             database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
@@ -158,8 +167,6 @@ def tool_categories(value: str | None) -> tuple[ToolCategory, ...]:
     known: tuple[ToolCategory, ...] = get_args(ToolCategory)
     picked: list[ToolCategory] = []
     for name in (part.strip() for part in value.split(",") if part.strip()):
-        if name == "browser":
-            raise ValueError("OSMO_TOOLS: the browser category has no tools yet (there is no connect_browser)")
         category = next((c for c in known if c == name), None)
         if category is None:
             raise ValueError(f"OSMO_TOOLS: unknown category {name!r}; choose from {', '.join(known)}")

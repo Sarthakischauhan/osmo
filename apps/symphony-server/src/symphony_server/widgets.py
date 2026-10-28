@@ -71,6 +71,14 @@ class HtmlProps(_Strict):
     title: str | None = Field(default=None, min_length=1, max_length=80)
 
 
+class BrowserProps(_Strict):
+    """The agent browser: `frame` is the latest screencast frame, `url` the page it shows."""
+
+    status: Literal["live", "ended"]
+    url: str | None = None
+    frame: DataImageUrl | None = None
+
+
 class CardWidget(_Strict):
     type: Literal["card"]
     props: CardProps
@@ -91,8 +99,13 @@ class HtmlWidget(_Strict):
     props: HtmlProps
 
 
+class BrowserWidget(_Strict):
+    type: Literal["browser"]
+    props: BrowserProps
+
+
 Widget = Annotated[
-    Union[CardWidget, OptionsWidget, ChartWidget, HtmlWidget],
+    Union[CardWidget, OptionsWidget, ChartWidget, HtmlWidget, BrowserWidget],
     Field(discriminator="type"),
 ]
 widget_adapter: TypeAdapter[Widget] = TypeAdapter(Widget)
@@ -113,6 +126,8 @@ def describe_widget(widget: Widget) -> str:
     if isinstance(widget, ChartWidget):
         names = ", ".join(s.name for s in widget.props.series)
         return f"{widget.props.kind} chart, {names}, {len(widget.props.series[0].points)} points"
+    if isinstance(widget, BrowserWidget):
+        return "agent browser"
     if widget.props.title:
         return f'interactive html widget "{widget.props.title}"'
     return "interactive html widget"

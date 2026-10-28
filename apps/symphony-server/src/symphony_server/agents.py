@@ -24,6 +24,7 @@ from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRe
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from symphony_server.browser import BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
@@ -89,9 +90,13 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, *, desktops: dict[str, DesktopSession] | None = None) -> None:
+    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
         self.desktops = desktops if desktops is not None else {}
+        self.browsers = browsers
+        # A browser session's frames are shown on the thread of the run it belongs to.
+        self.browsers.show = self.show_session
+        self.session_threads: dict[str, str] = {}
         self.runs: dict[str, AgentRunRecord] = {}
         self.sessions: dict[str, str] = {}
         self.observers: dict[str, AgentObserver] = {}
@@ -125,6 +130,7 @@ class AgentRuns:
         record = AgentRunRecord(runId=state.run_id, threadId=thread_id, task=task, status="running", createdAt=now, updatedAt=now)
         self.runs[record.runId] = record
         self.sessions[record.runId] = session_id
+        self.session_threads[session_id] = thread_id
         self.storage.save_run(record)
         self.spawn(self.follow(record.runId))
         return record
@@ -155,6 +161,7 @@ class AgentRuns:
     async def shutdown(self) -> None:
         for task in tuple(self.tasks):
             task.cancel()
+        await self.browsers.close_all()
 
     # ------------------------------------------------------------ run events
 
@@ -166,7 +173,9 @@ class AgentRuns:
         record = self.runs[run_id]
         kind = event.event_type
         if kind in ("run_completed", "run_failed", "run_limit_exceeded", "run_cancelled"):
-            self.desktops.pop(self.sessions.get(run_id, ""), None)
+            session_id = self.sessions.get(run_id, "")
+            self.desktops.pop(session_id, None)
+            await self.browsers.close(session_id)
         if kind == "tool_execution_started":
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
@@ -210,6 +219,12 @@ class AgentRuns:
 
     async def show(self, record: AgentRunRecord, event: ServerEvent) -> None:
         observer = self.observers.get(record.threadId)
+        if observer is not None:
+            await observer.show(event)
+
+    async def show_session(self, session_id: str, event: ServerEvent) -> None:
+        """Show `event` on the thread of the run with this session id (what browser frames use)."""
+        observer = self.observers.get(self.session_threads.get(session_id, ""))
         if observer is not None:
             await observer.show(event)
 

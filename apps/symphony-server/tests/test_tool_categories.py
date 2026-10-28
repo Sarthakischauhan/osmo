@@ -12,6 +12,7 @@ from core_ai.types import Message
 from core_harness import EventSink
 
 from symphony_server.app import osmo_tools
+from symphony_server.browser import BrowserSessions
 from symphony_server.canvas import OSMO_WIDGET, CreateImageTool, WidgetBoard
 from symphony_server.file_store import FileSecretStore
 from symphony_server.memory import MemoryPersistence
@@ -38,20 +39,20 @@ class DrawingRegistry(ModelRegistry):
 def tool_names(categories: str | None) -> set[str]:
     access = ModelAccess(ModelRegistry(), CredentialStore(FileSecretStore(None)), "http://unused/v1")
     settings = Settings(tool_categories=tool_categories(categories))
-    return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, WidgetBoard())}
+    board = WidgetBoard()
+    return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, board, BrowserSessions(None, board))}
 
 
 def test_osmo_tools_follows_the_enabled_categories() -> None:
     osmo = {"render_widget", "update_widget", "set_voice", "get_weather", "get_stock_history"}
     assert tool_names(None) == osmo | {"web_search", "create_image"}
     assert tool_names("desktop") == {"computer"}
+    assert tool_names("browser") == {"browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll"}
     assert tool_names("osmo") == osmo
     assert tool_names("search, image") == {"web_search", "create_image"}
 
 
-def test_unknown_or_toolless_categories_are_refused() -> None:
-    with pytest.raises(ValueError, match="no connect_browser"):
-        tool_categories("osmo,browser")
+def test_unknown_categories_are_refused() -> None:
     with pytest.raises(ValueError, match="unknown category 'maps'"):
         tool_categories("maps")
 

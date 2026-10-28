@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Prop schemas for the four widget types. Symphony validates every
+ * Prop schemas for the five widget types. Symphony validates every
  * render_widget call against these before anything reaches the canvas,
  * and the registry re-checks them on the client.
  */
@@ -72,11 +72,21 @@ export const htmlPropsSchema = z
   })
   .strict();
 
+/** The agent browser: the newest screencast frame (a data: URL, as card images) and the page it shows. */
+export const browserPropsSchema = z
+  .object({
+    status: z.enum(["live", "ended"]),
+    url: z.string().optional(),
+    frame: z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).optional(),
+  })
+  .strict();
+
 export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("card"), props: cardPropsSchema }),
   z.object({ type: z.literal("options"), props: optionsPropsSchema }),
   z.object({ type: z.literal("chart"), props: chartPropsSchema }),
   z.object({ type: z.literal("html"), props: htmlPropsSchema }),
+  z.object({ type: z.literal("browser"), props: browserPropsSchema }),
 ]);
 
 export type Widget = z.infer<typeof widgetSchema>;
@@ -85,8 +95,9 @@ export type CardProps = z.infer<typeof cardPropsSchema>;
 export type OptionsProps = z.infer<typeof optionsPropsSchema>;
 export type ChartProps = z.infer<typeof chartPropsSchema>;
 export type HtmlProps = z.infer<typeof htmlPropsSchema>;
+export type BrowserProps = z.infer<typeof browserPropsSchema>;
 
-export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html"];
+export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser"];
 
 /** One-line description of a validated widget, returned to the model as `shown`. */
 export function describeWidget(widget: Widget): string {
@@ -103,6 +114,8 @@ export function describeWidget(widget: Widget): string {
         first ? `, ${first.points.length} points` : ""
       }`;
     }
+    case "browser":
+      return "agent browser";
     case "html":
       return widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
   }

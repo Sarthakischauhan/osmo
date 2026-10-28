@@ -46,6 +46,23 @@ describe("osmo widget registry on chat-sdk", () => {
     );
   });
 
+  it("renders the agent browser: live with its latest frame, then ended on the last one", () => {
+    const frame = "data:image/jpeg;base64,/9j/4AAQ";
+    const live = render("w7", "browser", { status: "live", url: "https://example.com/", frame });
+    expect(live).toContain('data-status="live"');
+    expect(live).toContain(`src="${frame}"`);
+    expect(live).toContain("https://example.com/");
+    expect(live).toContain("Live");
+    const ended = render("w7", "browser", { status: "ended", url: "https://example.com/", frame });
+    expect(ended).toContain('data-status="ended"');
+    expect(ended).toContain(`src="${frame}"`);
+    expect(ended).toContain("Ended");
+  });
+
+  it("shows the agent browser as starting until its first frame", () => {
+    expect(render("w8", "browser", { status: "live" })).toContain("Starting the browser");
+  });
+
   it("drops widgets that fail the schema", () => {
     expect(toWidgetPart("w3", "chart", { kind: "pie" })).toBeNull();
     expect(toWidgetPart("w6", "unknown", {})).toBeNull();

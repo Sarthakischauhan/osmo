@@ -1,9 +1,10 @@
 import { MessageContent, QuestionWidget, defineWidget, type WidgetComponentProps } from "@sarchauhan/chat";
 import type { AgentWidgetPart } from "@sarchauhan/protocol";
 import { AsciiArt } from "./asciiArt";
+import { BrowserWidget } from "./browser";
 import { ChartWidget } from "./chart";
 import { HtmlWidget } from "./html";
-import { cardPropsSchema, chartPropsSchema, htmlPropsSchema, optionsPropsSchema, widgetSchema } from "./schema";
+import { browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, optionsPropsSchema, widgetSchema } from "./schema";
 
 /** Action ids reported back as `widget.action`. */
 export const CARD_PRESS = "press";
@@ -67,6 +68,11 @@ function Html({ widget: _widget, ...raw }: WidgetComponentProps) {
   return parsed.success ? <HtmlWidget {...parsed.data} /> : null;
 }
 
+function Browser({ widget: _widget, ...raw }: WidgetComponentProps) {
+  const parsed = browserPropsSchema.safeParse(raw);
+  return parsed.success ? <BrowserWidget {...parsed.data} /> : null;
+}
+
 /**
  * Osmo's widget registry for chat-sdk's WidgetProvider. card and options are
  * chat-sdk components (BaseWidget, MessageContent, QuestionWidget); chart and
@@ -81,6 +87,7 @@ export const osmoWidgets = [
   defineWidget("options", Options, { shell: false }),
   defineWidget("chart", Chart, { shell: false }),
   defineWidget("html", Html, { shell: false }),
+  defineWidget("browser", Browser, { shell: false }),
 ];
 
 /** Validates a `widget.render` payload and turns it into a chat-sdk widget part; invalid widgets are dropped. */

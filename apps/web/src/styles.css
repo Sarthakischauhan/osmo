@@ -122,6 +122,15 @@ button { font: inherit; color: inherit; }
 .osmo-html-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--surface-1); box-shadow: none; }
 .osmo-html-modal .osmo-html-viewport { flex: 1; }
 
+.osmo-browser { overflow: hidden; border-radius: var(--radius, 3px); background: var(--surface-1); }
+.osmo-browser-url { flex: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--font-mono); color: var(--muted-foreground); }
+.osmo-browser-status { display: inline-flex; align-items: center; gap: 6px; padding-right: 8px; font-size: 11px; color: var(--muted-foreground); }
+.osmo-browser-dot { width: 6px; height: 6px; border-radius: var(--radius, 3px); background: var(--muted-foreground); }
+.osmo-browser[data-status="live"] .osmo-browser-dot { background: var(--foreground); }
+.osmo-browser-viewport { background: #111; line-height: 0; }
+.osmo-browser-viewport img { display: block; width: 100%; height: auto; }
+.osmo-browser-wait { margin: 0; padding: 48px 16px; text-align: center; font-size: 12px; line-height: 1.4; color: var(--muted-foreground); }
+
 .dock { padding: 18px 0 22px; background: var(--background); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .orb { position: relative; width: 64px; height: 64px; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }

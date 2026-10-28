@@ -62,12 +62,17 @@ class WidgetBoard:
             self.widgets.popitem(last=False)
 
 
+def render_event(board: WidgetBoard, widget: Widget) -> WidgetRender:
+    """Put `widget` on the board; the event that shows it on the canvas."""
+    widget_id = board.add(widget)
+    return WidgetRender(widget=RenderedWidget(id=widget_id, type=widget.type, props=widget_props(widget)))
+
+
 async def show(board: WidgetBoard, sink: EventSink, widget: Widget) -> str:
     """Put `widget` on the board and the canvas; returns the tool result for the model."""
-    widget_id = board.add(widget)
-    event = WidgetRender(widget=RenderedWidget(id=widget_id, type=widget.type, props=widget_props(widget)))
+    event = render_event(board, widget)
     await sink.emit(OSMO_WIDGET, event.model_dump(mode="json"))
-    return json.dumps({"shown": describe_widget(widget), "id": widget_id})
+    return json.dumps({"shown": describe_widget(widget), "id": event.widget.id})
 
 
 def compact_errors(exc: ValidationError) -> str:

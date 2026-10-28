@@ -112,7 +112,7 @@ def test_delegated_agent_does_not_use_the_desktop(grok: FakeGrok) -> None:
     settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop', 'search'))
     client = make_client(settings, secret_store=xai_key_store(), registry=registry)
     registry.register('grok', agent)
-    assert AGENT_TOOLS == frozenset({'web_search'})
+    assert 'computer' not in AGENT_TOOLS
     with client, client.websocket_connect('/ws') as ws:
         update = start(ws, grok)
         assert 'computer' in {tool['name'] for tool in update['session']['tools']}
