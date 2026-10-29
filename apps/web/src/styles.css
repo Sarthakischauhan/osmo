@@ -302,8 +302,14 @@ button.osmo-list-row { cursor: pointer; }
 
 /* ---- Floating orb and agent log (#18) ---- */
 /* The floating window is the orb alone; while the pointer rests on it, the agent log opens below it. */
-.osmo-floating { display: flex; flex-direction: column; align-items: center; width: 100%; color: var(--foreground); }
-.osmo-floating-orb { flex: none; position: relative; display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+.osmo-floating { display: flex; flex-direction: column; align-items: flex-start; width: 100%; color: var(--foreground); }
+.osmo-floating[data-side="above"] { flex-direction: column-reverse; height: 100%; }
+/* The Electron orb window is transparent: only the orb and the box are drawn. */
+html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overflow: hidden; }
+/* Holds the box's width at the window's open width (BOX_WIDTH in apps/desktop/src/window-state.js), so its height measures the same before the window has grown. */
+.osmo-floating-box { width: 360px; visibility: hidden; }
+.osmo-floating-box[data-placed] { visibility: visible; }
+.osmo-floating-orb { flex: none; position: relative; margin-left: var(--orb-left, 0px); display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
 .osmo-floating-orb .orb-canvas { transform: translate(-50%, -50%) scale(1.2); }
 .osmo-compact-agents { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 288px; overflow-y: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--background); }
 .osmo-compact-agent { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 3px; background: var(--surface-1); }

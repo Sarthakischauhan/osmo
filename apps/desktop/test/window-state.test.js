@@ -1,34 +1,51 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ORB_SIZE, clampInto, defaultOrbBounds, parseSavedPosition, restoreOrbBounds, serializePosition, workAreaOf } from '../src/window-state.js';
+import { BOX_MAX_HEIGHT, BOX_WIDTH, ORB_MARGIN, ORB_SIZE, boxLayout, defaultOrbBounds } from '../src/window-state.js';
 
-const left = { x: 0, y: 0, width: 1920, height: 1080 };
-const right = { x: 1920, y: 0, width: 1440, height: 900 };
-const margin = 20;
+const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+const orb = defaultOrbBounds(workArea);
 
-test('the default orb sits in the lower right of the primary work area', () => {
-  assert.deepEqual(defaultOrbBounds(left, margin), { width: 112, height: 112, x: 1920 - 112 - margin, y: 1080 - 112 - margin });
+test('the orb starts 24 px in from the lower right of the work area', () => {
+  assert.equal(ORB_MARGIN, 24);
+  assert.deepEqual(orb, { ...ORB_SIZE, x: 1920 - 112 - 24, y: 1080 - 112 - 24 });
+  const offset = { x: 1920, y: 40, width: 1440, height: 860 };
+  assert.deepEqual(defaultOrbBounds(offset), { ...ORB_SIZE, x: 1920 + 1440 - 112 - 24, y: 40 + 860 - 112 - 24 });
 });
 
-test('a saved position is kept on its screen, and clamped when that screen got smaller', () => {
-  assert.deepEqual(restoreOrbBounds({ x: 2100, y: 300 }, [left, right], left, margin), { ...ORB_SIZE, x: 2100, y: 300 });
-  const shrunk = { x: 1920, y: 0, width: 1280, height: 720 };
-  assert.deepEqual(restoreOrbBounds({ x: 3100, y: 700 }, [left, shrunk], left, margin), { ...ORB_SIZE, x: 1920 + 1280 - 112, y: 720 - 112 });
+test('with the box closed the window is the orb alone', () => {
+  assert.deepEqual(boxLayout(orb, workArea, 0), { side: 'below', orbLeft: 0, bounds: orb });
 });
 
-test('a position on a screen that is gone, or no saved position, falls back to the primary default', () => {
-  const fallback = defaultOrbBounds(left, margin);
-  assert.deepEqual(restoreOrbBounds({ x: 2100, y: 300 }, [left], left, margin), fallback);
-  assert.deepEqual(restoreOrbBounds(undefined, [left, right], left, margin), fallback);
+test('the box opens below the orb when it fits', () => {
+  const high = { ...ORB_SIZE, x: 800, y: 100 };
+  const layout = boxLayout(high, workArea, 200);
+  assert.equal(layout.side, 'below');
+  assert.deepEqual(layout.bounds, { x: 800 + 56 - BOX_WIDTH / 2, y: 100, width: BOX_WIDTH, height: 112 + 200 });
+  assert.equal(layout.orbLeft, BOX_WIDTH / 2 - 56);
 });
 
-test('the work area of a rectangle is the one holding most of it', () => {
-  assert.equal(workAreaOf({ x: 1900, y: 0, width: 112, height: 112 }, [left, right]), right);
-  assert.equal(workAreaOf({ x: 5000, y: 0, width: 112, height: 112 }, [left, right]), undefined);
-  assert.deepEqual(clampInto({ x: -50, y: 2000, width: 112, height: 112 }, left), { x: 0, y: 1080 - 112, width: 112, height: 112 });
+test('the box flips above the orb when it would go off the bottom, and the orb stays put on screen', () => {
+  const layout = boxLayout(orb, workArea, BOX_MAX_HEIGHT);
+  assert.equal(layout.side, 'above');
+  assert.equal(layout.bounds.y, orb.y - BOX_MAX_HEIGHT);
+  assert.equal(layout.bounds.y + layout.bounds.height, orb.y + orb.height);
+  assert.equal(layout.bounds.x + layout.orbLeft, orb.x);
 });
 
-test('only a position is stored, and damaged files read as none', () => {
-  assert.deepEqual(parseSavedPosition(serializePosition({ x: 10.4, y: 20.6, width: 112, height: 112 })), { x: 10, y: 21 });
-  for (const text of ['', 'not json', '{}', '{"x":"1","y":2}', 'null', '{"x":1,"y":null}']) assert.equal(parseSavedPosition(text), undefined);
+test('the box stays below exactly while it ends inside the work area', () => {
+  const edge = { ...ORB_SIZE, x: 800, y: 1080 - 112 - 100 };
+  assert.equal(boxLayout(edge, workArea, 100).side, 'below');
+  assert.equal(boxLayout(edge, workArea, 101).side, 'above');
+});
+
+test('the window is kept inside the work area sideways, and the orb is placed inside it', () => {
+  const right = boxLayout(orb, workArea, 100);
+  assert.equal(right.bounds.x + right.bounds.width, workArea.x + workArea.width);
+  assert.equal(right.bounds.x + right.orbLeft, orb.x);
+  const left = boxLayout({ ...ORB_SIZE, x: 10, y: 100 }, workArea, 100);
+  assert.equal(left.bounds.x, 0);
+  assert.equal(left.orbLeft, 10);
+  const second = { x: 1920, y: 0, width: 1440, height: 900 };
+  const onSecond = boxLayout({ ...ORB_SIZE, x: 1930, y: 100 }, second, 100);
+  assert.equal(onSecond.bounds.x, 1920);
 });

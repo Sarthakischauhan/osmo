@@ -14,7 +14,6 @@ export interface OsmoSessionOptions {
   /** The stored thread to continue when the session starts; a new one when unset. */
   threadId?: string;
   onEvent?: (event: ServerEvent) => void;
-  desktop?: { enabled: boolean; execute: (action: Record<string, unknown>) => Promise<Record<string, unknown>> };
 }
 
 export interface OsmoSession {
@@ -55,7 +54,7 @@ interface Runtime {
   preview: PcmPlayer;
 }
 
-export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, desktop }: OsmoSessionOptions): OsmoSession {
+export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }: OsmoSessionOptions): OsmoSession {
   const [voiceModels, setVoiceModels] = useState<VoiceModel[]>([]);
   const [selection, setSelection] = useState<VoiceSelection | undefined>();
   const [previewing, setPreviewing] = useState<{ model: string; voice: string } | undefined>();
@@ -72,8 +71,6 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
   const [error, setError] = useState<string | undefined>();
   const [startedAt, setStartedAt] = useState<number | undefined>();
   const runtime = useRef<Runtime | null>(null);
-  const desktopRef = useRef(desktop);
-  desktopRef.current = desktop;
   const eventSink = useRef(onEvent);
   eventSink.current = onEvent;
 
@@ -101,21 +98,6 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
         setPlaying(true);
       },
       onEvent: (event) => {
-        if (event.type === "desktop.request") {
-          if (runtime.current?.client !== client) return;
-          const native = desktopRef.current;
-          void (async () => {
-            try {
-              if (!native?.enabled) throw new Error("Computer support is disabled");
-              const result = await native.execute(event.action);
-              if (runtime.current?.client === client) client.send({ type: "desktop.result", requestId: event.requestId, result });
-            } catch (error) {
-              if (runtime.current?.client === client) client.send({ type: "desktop.result", requestId: event.requestId,
-                error: (error instanceof Error ? error.message : String(error)).slice(0, 2000) });
-            }
-          })();
-          return;
-        }
         if (event.type === "models") {
           setVoiceModels(event.models);
           setSelection(event.selection);
@@ -149,7 +131,6 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
       client.send({ type: "session.start", voice, model, effort, threadId });
-      if (desktopRef.current?.enabled) client.send({ type: "desktop.configure", enabled: true });
       // A preview plays on the speakers: keep it out of the mic so it is not heard as the user.
       await mic.start((frame) => {
         if (!previewingRef.current) client.sendAudio(frame);
@@ -213,7 +194,6 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
   const outputLevel = useCallback(() => runtime.current?.player.level() ?? 0, []);
 
   useEffect(() => teardown, [teardown]);
-  useEffect(() => { runtime.current?.client.send({ type: "desktop.configure", enabled: desktop?.enabled ?? false }); }, [desktop?.enabled, connection]);
 
   const shownState: OsmoState = playing ? "speaking" : serverState;
   speakingRef.current = shownState === "speaking";

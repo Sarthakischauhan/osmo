@@ -12,7 +12,6 @@ import {
   type VoiceSelection,
   orbMode,
   sameOriginSocketUrl,
-  useOsmoSession,
   usePersistedPick,
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
@@ -30,6 +29,7 @@ import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useSession } from "./session";
 import { type Feed, type RunCard, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
@@ -89,14 +89,13 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [registry, setRegistry] = useState<VoiceModel[]>([]);
   const [pick, save, pickMemory] = usePersistedPick(registry);
   savePick.current = save;
-  const session = useOsmoSession({
+  const session = useSession({
     url: sameOriginSocketUrl(window.location),
     model: pick?.model,
     voice: pick?.voice,
     effort: pick?.effort,
     threadId,
     onEvent,
-    desktop: desktop.adapter,
   });
   const { end } = session;
   useEffect(() => {

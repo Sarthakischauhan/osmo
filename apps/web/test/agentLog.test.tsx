@@ -1,6 +1,7 @@
 import type { AgentRunStatus, ServerEvent } from "@osmo/osmo-composer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { ApprovalPrompt } from "../src/components/ApprovalPrompt";
 import { CompactAgentActivity } from "../src/CompactAgentActivity";
 import { FloatingOrb } from "../src/FloatingOrb";
 import { agentActivity } from "../src/compact";
@@ -46,10 +47,42 @@ describe("the agent log", () => {
   });
 });
 
+describe("the approval prompt's title", () => {
+  const turn = turns.find((item) => item.role === "approval");
+  const title = (step: number | undefined) => (turn?.role === "approval" ? renderToStaticMarkup(<ApprovalPrompt turn={turn} step={step} onDecide={() => undefined} />) : "");
+
+  it("names the step when the run's steps are known", () => {
+    expect(title(2)).toContain("Approve step 2?");
+  });
+
+  it("names the action when the steps are not known, instead of a step 0", () => {
+    for (const step of [undefined, 0]) {
+      expect(title(step)).toContain("Approve clicking buy?");
+      expect(title(step)).not.toContain("step 0");
+    }
+  });
+});
+
 describe("the floating orb at rest", () => {
   it("is the orb alone: no header, Expand, End or log", () => {
-    const html = renderToStaticMarkup(<FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} />);
+    const html = renderToStaticMarkup(
+      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={{ side: "below", orbLeft: 0, placed: 0 }} onBoxHeight={() => undefined} />,
+    );
     expect(html).toContain("osmo-floating-orb");
     for (const text of ["Expand", "End", "<header", "osmo-compact-agents"]) expect(html).not.toContain(text);
+  });
+});
+
+describe("where the floating orb puts its box", () => {
+  const render = (placement: { side: "below" | "above"; orbLeft: number; placed: number }) =>
+    renderToStaticMarkup(
+      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={placement} onBoxHeight={() => undefined} />,
+    );
+
+  it("tells the layout which side the box is on and where the orb sits in the window", () => {
+    const above = render({ side: "above", orbLeft: 124, placed: 200 });
+    expect(above).toContain('data-side="above"');
+    expect(above).toContain("--orb-left:124px");
+    expect(render({ side: "below", orbLeft: 0, placed: 0 })).toContain('data-side="below"');
   });
 });

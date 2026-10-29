@@ -46,6 +46,25 @@ dusk, evening and night, with shared monospace artwork and reduced-motion suppor
 Changing threads ends the active voice session and revokes native control. Stored threads and
 background runs keep PR #14's persistence and approval behavior.
 
+## Two windows, one session
+
+The app has the full window and a small always-on-top **orb** window (`/#orb` of the same page). Only
+one shows at a time, and the orb is what the app opens to. Main owns the voice session (the one
+Symphony WebSocket, and its audio); both windows only ask for it and listen, over one typed IPC
+contract (`src/session-contract.js`, mirrored in `src/preload.cjs`). Switching windows, or reloading
+one, never ends or duplicates the session.
+
+- Minimizing or closing the full window, or **Cmd/Ctrl+Shift+O**, hides it and shows the orb.
+  Closing also revokes computer support; **Quit** in the Osmo menu quits.
+- Double-clicking the orb, or the same shortcut, shows the full window and hides the orb.
+- The orb starts 24 px in from the lower right of the work area. Hovering it opens the agent log
+  below it, or above it when there is no room below.
+
+**Audio is not wired up.** Electron's main process has no way to capture a microphone or play sound
+(no `getUserMedia`, no Web Audio, no Node audio API), so `runApp({ audio })` takes the audio mechanism
+as a port (`AudioPort` in `src/session-controller.js`). Until one is chosen the app passes none, and
+starting a session reports that instead of connecting.
+
 ## Use
 
 1. Start a voice session with the orb.
@@ -68,7 +87,7 @@ PyAutoGUI's failsafe. These mechanisms do not roll back input already sent.
 
 ## OS setup and limits
 
-- **macOS:** grant Microphone, Screen Recording and Accessibility to Osmo (or the development
+- **macOS:** grant Screen Recording and Accessibility to Osmo (or the development
   Electron/Python processes if prompted); restart after granting Screen Recording.
 - **Windows:** use a Python interpreter with PyAutoGUI installed.
 - **Linux:** X11 is required for input. Wayland input is not supported in this first version.

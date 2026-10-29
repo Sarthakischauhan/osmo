@@ -39,14 +39,15 @@ function detail(run: RunView): string | undefined {
 }
 
 /**
- * Agent runs as compact cards: this thread's first (a run whose thread is not known yet is this thread's, as in the feed),
- * a run waiting for approval before one that is working, and a count for the other threads' runs.
+ * Agent runs as compact cards: this thread's (a run whose thread is not known yet is this thread's, as in the feed; with
+ * no thread open, which is the orb's case while no session is up, every run is), a run waiting for approval before one
+ * that is working, and a count for the other threads' runs.
  */
 export function agentActivity(runs: Runs, turns: readonly Turn[], threadId: string | undefined, now: number): AgentActivity {
   const asking = new Map<string, ApprovalTurn>();
   for (const turn of turns) if (turn.role === "approval" && turn.resolved === undefined) asking.set(turn.runId, turn);
   const all = Object.values(runs);
-  const own = all.filter((run) => run.threadId === undefined || run.threadId === threadId);
+  const own = threadId === undefined ? all : all.filter((run) => run.threadId === undefined || run.threadId === threadId);
   const cards = own
     .filter((run) => shown(run, now))
     .sort((a, b) => PRIORITY[a.status] - PRIORITY[b.status] || a.startedAt - b.startedAt)

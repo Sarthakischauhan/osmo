@@ -1,14 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-
-interface DesktopStatus { enabled: boolean; platform: string; stopShortcut: string }
-interface DesktopBridge {
-  status(): Promise<DesktopStatus>;
-  setEnabled(enabled: boolean): Promise<DesktopStatus>;
-  execute(action: Record<string, unknown>): Promise<Record<string, unknown>>;
-  onStatus(callback: (status: DesktopStatus) => void): () => void;
-}
-declare global { interface Window { osmoDesktop?: DesktopBridge } }
+import type { DesktopStatus } from './desktopBridge';
 
 export function useDesktopSupport() {
   const bridge = window.osmoDesktop;
@@ -33,7 +25,6 @@ export function useDesktopSupport() {
     status,
     pending,
     toggle,
-    adapter: bridge ? { enabled: status?.enabled ?? false, execute: bridge.execute } : undefined,
   };
 }
 

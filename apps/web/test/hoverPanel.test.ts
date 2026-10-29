@@ -110,4 +110,23 @@ describe("the hover panel's timing", () => {
     clock.advance(1000);
     expect(changes).toEqual([]);
   });
+
+  it("forgets the pointer and the pin when the orb goes out of sight, and closes", () => {
+    const { clock, hover, changes } = panel();
+    hover.enter("orb");
+    clock.advance(OPEN_DELAY_MS);
+    hover.pin();
+    hover.reset();
+    clock.advance(CLOSE_DELAY_MS);
+    expect(hover.open).toBe(false);
+    expect(changes).toEqual([true, false]);
+  });
+
+  it("keeps an approval's box open through a reset", () => {
+    const { clock, hover } = panel();
+    hover.approvalWaiting(true);
+    hover.reset();
+    clock.advance(CLOSE_DELAY_MS * 2);
+    expect(hover.open).toBe(true);
+  });
 });

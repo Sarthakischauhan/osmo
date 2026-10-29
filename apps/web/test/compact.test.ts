@@ -37,6 +37,12 @@ describe("compact agent activity", () => {
     expect(agentActivity(runs, [], "t1", 5000)).toMatchObject({ cards: [{ runId: "r1" }], running: 1, elsewhere: 1 });
   });
 
+  it("with no thread open, shows every thread's runs as cards", () => {
+    const events = [update("r1", "running", "Reading"), update("r2", "waiting_approval", "Clicking")];
+    const runs = runsOf(events, { r1: "t1", r2: "t2" });
+    expect(agentActivity(runs, [], undefined, 5000)).toMatchObject({ cards: [{ runId: "r2" }, { runId: "r1" }], running: 2, needingApproval: 1, elsewhere: 0 });
+  });
+
   it("offers Approve / Deny only for an approval not yet answered", () => {
     const events: ServerEvent[] = [update("r1", "waiting_approval", "Clicking"), approval("r1"), { type: "approval.resolved", approvalId: "p-r1", runId: "r1", approved: true }];
     const activity = agentActivity(runsOf(events), feedOf(events).turns, undefined, 5000);

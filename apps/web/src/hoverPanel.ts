@@ -46,6 +46,13 @@ export class HoverPanel<Handle> {
     this.settle();
   }
 
+  /** The orb is out of sight (its window was hidden): no pointer is on it any more, and nothing stays pinned. */
+  reset(): void {
+    this.inside.clear();
+    this.pinned = false;
+    this.settle();
+  }
+
   /** An approval waits: the panel is visible until it is answered. */
   approvalWaiting(waiting: boolean): void {
     this.approval = waiting;

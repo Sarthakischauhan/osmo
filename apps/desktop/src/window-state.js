@@ -1,67 +1,36 @@
-// Where the floating orb sits. Pure functions over Electron's display rectangles
-// ({ x, y, width, height }), so placement is testable without a screen; the window itself is main's.
+// Where the floating orb sits and where its hover box opens. Pure functions over Electron's display rectangles
+// ({ x, y, width, height }), so placement is testable without a screen; the windows themselves are main's.
 
-/** The floating window around the orb alone (#18). */
+/** The floating window around the orb alone (#18), and how far in from the work area's lower right it starts. */
 export const ORB_SIZE = { width: 112, height: 112 };
+export const ORB_MARGIN = 24;
+/** The hover box: as wide as the window while it is open, and as tall as its agent log, up to this. */
+export const BOX_WIDTH = 360;
+export const BOX_MAX_HEIGHT = 288;
 
-
-function overlap(a, b) {
-  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
-  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
-  return width > 0 && height > 0 ? width * height : 0;
-}
-
-/** `rect` moved, never resized, to lie inside `workArea`. */
-export function clampInto(rect, workArea) {
-  return {
-    ...rect,
-    x: Math.min(Math.max(rect.x, workArea.x), workArea.x + workArea.width - rect.width),
-    y: Math.min(Math.max(rect.y, workArea.y), workArea.y + workArea.height - rect.height),
-  };
-}
-
-/** The work area holding most of `rect`, or undefined when it is on none (its screen was unplugged). */
-export function workAreaOf(rect, workAreas) {
-  let best;
-  let most = 0;
-  for (const candidate of workAreas) {
-    const shared = overlap(rect, candidate);
-    if (shared > most) { best = candidate; most = shared; }
-  }
-  return best;
-}
-
-/** Flush-corner default: the lower right of `workArea`, `margin` px in from both edges. */
-export function defaultOrbBounds(workArea, margin) {
+/** The orb's own 112 px box in the lower right of `workArea`. */
+export function defaultOrbBounds(workArea) {
   return {
     ...ORB_SIZE,
-    x: workArea.x + workArea.width - ORB_SIZE.width - margin,
-    y: workArea.y + workArea.height - ORB_SIZE.height - margin,
+    x: workArea.x + workArea.width - ORB_SIZE.width - ORB_MARGIN,
+    y: workArea.y + workArea.height - ORB_SIZE.height - ORB_MARGIN,
   };
 }
 
 /**
- * The orb's bounds at start: where the user left it if some screen still shows it (kept inside that screen, so a
- * smaller resolution cannot strand it), else the default on the primary display.
+ * The floating window while the hover box is `height` tall (0: closed, the orb's own box). The box opens below the orb
+ * and flips above it when it would not fit in the work area. The orb never moves on screen, so the window grows
+ * around it: `orbLeft` is where the orb sits inside the window (the window is kept inside the work area sideways).
+ * @returns {{ side: 'below' | 'above', orbLeft: number, bounds: { x: number, y: number, width: number, height: number } }}
  */
-export function restoreOrbBounds(saved, workAreas, primary, margin) {
-  if (saved) {
-    const rect = { ...ORB_SIZE, x: saved.x, y: saved.y };
-    const home = workAreaOf(rect, workAreas);
-    if (home) return clampInto(rect, home);
-  }
-  return defaultOrbBounds(primary, margin);
+export function boxLayout(orb, workArea, height) {
+  if (height <= 0) return { side: 'below', orbLeft: 0, bounds: { ...orb } };
+  const side = orb.y + orb.height + height <= workArea.y + workArea.height ? 'below' : 'above';
+  const centered = orb.x + orb.width / 2 - BOX_WIDTH / 2;
+  const x = Math.min(Math.max(centered, workArea.x), workArea.x + workArea.width - BOX_WIDTH);
+  return {
+    side,
+    orbLeft: orb.x - x,
+    bounds: { x, y: side === 'below' ? orb.y : orb.y - height, width: BOX_WIDTH, height: orb.height + height },
+  };
 }
-
-/** What is stored: the orb's position, or undefined for anything else (a missing, old or damaged file). */
-export function parseSavedPosition(text) {
-  try {
-    const value = JSON.parse(text);
-    return Number.isFinite(value?.x) && Number.isFinite(value?.y) ? { x: value.x, y: value.y } : undefined;
-  } catch { return undefined; }
-}
-
-export function serializePosition(orb) {
-  return JSON.stringify({ x: Math.round(orb.x), y: Math.round(orb.y) });
-}
-
