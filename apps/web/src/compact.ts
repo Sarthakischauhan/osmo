@@ -1,28 +1,8 @@
-import type { AgentRunStatus, OrbMode } from "@osmo/osmo-composer";
+import type { AgentRunStatus } from "@osmo/osmo-composer";
 import { type ApprovalTurn, type Turn } from "./feed";
 import { COMPLETED_LINGER_MS, type RunView, type Runs } from "./lib/runs";
 
-/** What the compact panel shows of a conversation: a cropped view of the same feed and runs, never its own state. */
-
-/** The panel shows the latest 2-3 transcript messages (#18); it shows three. */
-export const COMPACT_MESSAGES = 3;
-
-export const ORB_LABELS: Record<OrbMode, string> = {
-  connecting: "Connecting",
-  idle: "Ready",
-  listening: "Listening",
-  awaiting: "Your choice",
-  thinking: "Thinking",
-  speaking: "Speaking",
-};
-
-type SpokenTurn = Extract<Turn, { role: "user" | "assistant" }>;
-
-/** The latest spoken lines, oldest first, while a line is still streaming or its transcript is on its way. Tool activity, widgets and approvals are not messages. */
-export function compactMessages(turns: readonly Turn[], limit: number = COMPACT_MESSAGES): SpokenTurn[] {
-  const spoken = turns.filter((turn): turn is SpokenTurn => (turn.role === "user" && (turn.text !== "" || turn.pending === true)) || (turn.role === "assistant" && turn.text !== ""));
-  return spoken.slice(-limit);
-}
+/** What the floating orb's agent log shows: a cropped view of the same runs and approvals, never its own state. */
 
 export interface AgentSummary {
   runId: string;

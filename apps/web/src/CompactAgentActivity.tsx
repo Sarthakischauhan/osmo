@@ -1,7 +1,8 @@
 import { ApprovalPrompt } from "@/components/ApprovalPrompt";
 import type { Runs } from "@/lib/runs";
-import type { DecideApproval } from "./ConversationFeed";
 import { type AgentActivity, type AgentSummary } from "./compact";
+
+export type DecideApproval = (approvalId: string, runId: string, approved: boolean) => Promise<void>;
 
 const STATUS: Record<AgentSummary["status"], string> = {
   running: "working",
@@ -31,7 +32,7 @@ export function CompactAgentActivity({ activity, runs, onDecide }: { activity: A
   if (activity.cards.length === 0 && activity.elsewhere === 0) return null;
   const summary = counts(activity);
   return (
-    <section className="osmo-compact-agents" aria-label="Agents">
+    <section className="osmo-compact-agents" aria-label="Agent activity">
       {summary !== "" && <p className="osmo-tertiary osmo-compact-counts">{summary}</p>}
       {activity.cards.map((card) => {
         const { approval } = card;

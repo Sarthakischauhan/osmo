@@ -1,8 +1,9 @@
 import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
-import { BrowserControlsContext, osmoWidgets } from "@osmo/osmo-widgets";
-import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
+import { BrowserControlsContext, osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
+import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
+import type { AgentPart, AgentSubagent, AgentSubagentState } from "@sarchauhan/protocol";
 import {
   OrbComposer,
   type ServerEvent,
@@ -18,10 +19,10 @@ import "@osmo/osmo-composer/radial-picker.css";
 import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ApprovalPrompt } from "@/components/ApprovalPrompt";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
 import { RunsList } from "@/components/home/RunsList";
 import { AsciiHome } from "@/components/home/AsciiHome";
-import { ConversationFeed } from "./ConversationFeed";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
@@ -29,7 +30,7 @@ import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { type Feed, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
+import { type Feed, type RunCard, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
 
@@ -355,7 +356,9 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
               ) : (
                 <div className="feed">
                   {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
-                  <ConversationFeed turns={feed.turns} runs={runs} onDecide={decide} />
+                  {feed.turns.map((turn) => (
+                    <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
+                  ))}
                   <div ref={bottom} />
                 </div>
               )}
@@ -403,6 +406,46 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   );
 }
 
+type AssistantTurn = Extract<Turn, { role: "assistant" }>;
+
+function FeedTurn({ turn, step, onDecide }: { turn: Turn; step: number | undefined; onDecide: (approvalId: string, runId: string, approved: boolean) => Promise<void> }) {
+  switch (turn.role) {
+    case "user":
+      return (
+        <div className="turn user">
+          <div className="bubble" data-pending={turn.pending || undefined}>
+            {turn.text ? (
+              <MessageContent parts={[{ type: "text", text: turn.text }]} isUser />
+            ) : (
+              <span className="heard-dots" aria-label="Transcribing">
+                <i />
+                <i />
+                <i />
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    case "approval":
+      return <ApprovalPrompt turn={turn} step={step} onDecide={(approved) => void onDecide(turn.approvalId, turn.runId, approved)} />;
+    case "assistant":
+      return (
+        <div className="turn assistant">
+          <span className="avatar" aria-hidden />
+          <div className="assistant-body">
+            <MessageContent parts={assistantParts(turn)} />
+            {/* One element per widget keyed by its server id, so React state follows the
+                widget itself and never shifts when text or activity rows are added above. */}
+            {turn.widgets.map((widget) => {
+              const part = toWidgetPart(widget.id, widget.type, widget.props);
+              return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
+            })}
+          </div>
+        </div>
+      );
+  }
+}
+
 function Clock({ since }: { since: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -413,4 +456,45 @@ function Clock({ since }: { since: number }) {
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   return <span className="clock">{`${mm}:${ss}`}</span>;
+}
+
+/** One assistant turn's spoken line, tool activity rows and agent runs as chat-sdk parts; widgets render separately, keyed by id. */
+function assistantParts(turn: AssistantTurn): AgentPart[] {
+  const parts: AgentPart[] = [];
+  if (turn.text) parts.push({ type: "text", text: turn.text });
+  turn.activities.forEach((activity, i) =>
+    parts.push({
+      type: "tool",
+      toolName: "activity",
+      toolCallId: `${turn.key}-tool-${i}`,
+      title: activity.label,
+      state: activity.done ? "output-available" : "input-available",
+    }),
+  );
+  for (const run of turn.runs) parts.push({ type: "data", name: "subagent", id: run.runId, data: subagent(run) });
+  return parts;
+}
+
+const SUBAGENT_STATE: Record<RunCard["status"], AgentSubagentState> = {
+  running: "running",
+  waiting_approval: "running",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+};
+
+function subagent(run: RunCard): AgentSubagent {
+  return {
+    id: run.runId,
+    title: "Symphony",
+    task: run.task,
+    state: SUBAGENT_STATE[run.status],
+    error: run.status === "failed" ? run.result : undefined,
+    // The answer is the voice model's to tell; the card keeps it under View activity, after the steps.
+    messages: [...run.phases, ...(run.status === "completed" && run.result ? [run.result] : [])].map((text, i) => ({
+      id: `${run.runId}-${i}`,
+      role: "assistant",
+      parts: [{ type: "text", text }],
+    })),
+  };
 }
