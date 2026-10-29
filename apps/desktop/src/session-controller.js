@@ -3,21 +3,18 @@
 // or reloading a window cannot end the session, and there is never a second connection.
 //
 // Audio is a port, because Electron's main process has no way to capture a microphone or play sound (no
-// getUserMedia, no Web Audio, no Node audio API). Until a mechanism is chosen the app passes no port and `start`
-// reports AUDIO_UNAVAILABLE instead of connecting.
-
-export const AUDIO_UNAVAILABLE = 'Microphone capture is not available in the main process: Electron gives it no audio capture or playback. A capture mechanism has to be chosen first.';
+// getUserMedia, no Web Audio, no Node audio API): audio-port.js is the port, backed by the hidden audio renderer.
 
 /** `state.detail` that means: drop queued assistant audio now (the protocol's BARGE_IN). */
 const BARGE_IN = 'barge-in';
 const OPEN = 1;
 
 /**
- * Microphone in, assistant speech out: whatever main will use for audio.
+ * Microphone in, assistant speech out.
  * @typedef {object} AudioPort
- * @property {(onFrame: (pcm16: ArrayBuffer) => void) => Promise<void>} start begin capturing 24 kHz mono PCM16
+ * @property {(onFrame: (pcm16: ArrayBuffer | Uint8Array) => void) => Promise<void>} start begin capturing 24 kHz mono PCM16, resolving once the microphone is open
  * @property {() => void} stop
- * @property {(pcm16: ArrayBuffer) => void} play
+ * @property {(pcm16: ArrayBuffer | Uint8Array) => void} play
  * @property {() => void} flush drop everything queued for playback
  */
 
@@ -41,7 +38,7 @@ export function reduceSnapshot(snapshot, event) {
  * @param {{
  *   url: string,
  *   createSocket: (url: string) => any,
- *   audio?: AudioPort,
+ *   audio: AudioPort,
  *   desktop: { execute: (action: Record<string, unknown>) => Promise<Record<string, unknown>> },
  *   onEvent: (event: Record<string, any>) => void,
  *   onStatus: (snapshot: import('./session-contract.js').SessionSnapshot) => void,
@@ -52,6 +49,7 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
   let snapshot = emptySnapshot();
   let socket;
   let desktopEnabled = false;
+  let openThread;
 
   const set = next => { snapshot = next; onStatus(snapshot); };
   const sendJson = (target, event) => { if (target.readyState === OPEN) target.send(JSON.stringify(event)); };
@@ -60,8 +58,8 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
   function teardown(target) {
     if (socket !== target) return false;
     socket = undefined;
-    audio?.stop();
-    audio?.flush();
+    audio.stop();
+    audio.flush();
     target.close();
     return true;
   }
@@ -78,12 +76,12 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
 
   function onMessage(target, data) {
     if (socket !== target) return;
-    if (typeof data !== 'string') { audio?.play(data); return; }
+    if (typeof data !== 'string') { audio.play(data); return; }
     let event;
     try { event = JSON.parse(data); } catch { return; }
     if (event === null || typeof event !== 'object' || typeof event.type !== 'string') return;
     if (event.type === 'desktop.request') { void runDesktop(target, event); return; }
-    if (event.type === 'state' && event.detail === BARGE_IN) audio?.flush();
+    if (event.type === 'state' && event.detail === BARGE_IN) audio.flush();
     const next = reduceSnapshot(snapshot, event);
     if (next !== snapshot) set(next);
     onEvent(event);
@@ -107,10 +105,10 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
   return {
     snapshot: () => snapshot,
 
-    /** Starts the one session; while one is starting or live this changes nothing. Failures arrive as `error`. */
+    /** Starts the one session, continuing the workspace's open thread unless `options` names one; while one is starting
+     * or live this changes nothing. Failures arrive as `error`. */
     async start(options) {
       if (socket) return snapshot;
-      if (!audio) { set({ ...snapshot, error: AUDIO_UNAVAILABLE }); return snapshot; }
       const target = createSocket(url);
       socket = target;
       set({ ...snapshot, connection: 'connecting', error: undefined });
@@ -124,7 +122,7 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
         if (socket !== target) return snapshot;
         target.onmessage = message => onMessage(target, message.data);
         target.onclose = () => onClose(target);
-        sendJson(target, { type: 'session.start', ...options });
+        sendJson(target, { type: 'session.start', ...options, threadId: options.threadId ?? openThread });
         if (desktopEnabled) sendJson(target, { type: 'desktop.configure', enabled: true });
         await audio.start(frame => sendFrame(target, frame));
         if (socket !== target) return snapshot;
@@ -147,16 +145,19 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
 
     interrupt() {
       if (!socket) return;
-      audio?.flush();
+      audio.flush();
       sendJson(socket, { type: 'interrupt' });
     },
 
     /** An already validated event from a renderer, passed on to Symphony. */
     send(event) {
       if (!socket) return;
-      if (event.type === 'widget.action') audio?.flush();
+      if (event.type === 'widget.action') audio.flush();
       sendJson(socket, event);
     },
+
+    /** The thread the workspace has open, or undefined for a new chat. */
+    setOpenThread(threadId) { openThread = threadId; },
 
     /** Computer support was granted or revoked in main: Symphony is told, now and on the next session. */
     setDesktopEnabled(enabled) {

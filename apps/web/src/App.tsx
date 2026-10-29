@@ -98,6 +98,10 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     onEvent,
   });
   const { end } = session;
+  // In the Electron app the orb window starts calls too: it continues whichever thread this window has open.
+  useEffect(() => {
+    window.osmoDesktop?.session.openThread(threadId).catch(() => toast.error("Could not share the open thread with the orb"));
+  }, [threadId]);
   useEffect(() => {
     api.list().then(setThreads, () => toast.error("Could not load threads"));
   }, []);

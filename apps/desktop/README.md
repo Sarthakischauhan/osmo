@@ -60,10 +60,22 @@ one, never ends or duplicates the session.
 - The orb starts 24 px in from the lower right of the work area. Hovering it opens the agent log
   below it, or above it when there is no room below.
 
-**Audio is not wired up.** Electron's main process has no way to capture a microphone or play sound
-(no `getUserMedia`, no Web Audio, no Node audio API), so `runApp({ audio })` takes the audio mechanism
-as a port (`AudioPort` in `src/session-controller.js`). Until one is chosen the app passes none, and
-starting a session reports that instead of connecting.
+- A single click on the orb starts the session only after the double-click window has passed, so a
+  double-click only expands. No platform API reports the double-click interval (the DOM has none, and
+  Electron has none), so `apps/web/src/singleClick.ts` uses a fixed 500 ms.
+- The orb adopts the thread the workspace has open (reported over `workspace:thread`); the workspace
+  window is the only sender. With no thread open, the session starts a new one.
+
+**Audio.** Electron's main process has no way to capture a microphone or play sound (no
+`getUserMedia`, no Web Audio, no Node audio API), so main keeps a third, hidden window (`/#audio` of
+the same page, `show: false`) whose only job is audio. It reuses the composer's `MicCapture` and
+`PcmPlayer`, and talks to main over the same typed contract: `audio:start`/`audio:stop` and
+`audio:play`/`audio:flush` come from main, `audio:started` and `audio:frame` (PCM16 mic frames) go
+back. Main implements `AudioPort` (`src/audio-port.js`) over those messages; the socket and session
+stay in main, so the call survives switching windows. Only that window may use the microphone
+(`allowMicrophone` in `src/policy.js`, checked against its web contents). If it crashes, the call
+ends and the page reloads. Output levels and previews do not cross the contract, so the orb's level
+stays flat in Electron.
 
 ## Use
 

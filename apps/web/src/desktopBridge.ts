@@ -26,6 +26,8 @@ export interface SessionBridge {
   end(): Promise<SessionSnapshot>;
   interrupt(): Promise<void>;
   send(event: ClientEvent): Promise<void>;
+  /** The workspace's open thread (undefined: a new chat); a session the orb starts continues it. */
+  openThread(threadId: string | undefined): Promise<void>;
   /** A server event, as main received it; validate before use. */
   onEvent(callback: (event: unknown) => void): () => void;
   onStatus(callback: (snapshot: SessionSnapshot) => void): () => void;

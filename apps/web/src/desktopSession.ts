@@ -77,7 +77,8 @@ export function createDesktopSession(bridge: SessionBridge): (options: OsmoSessi
     const sendBrowserInput = useCallback((id: string, input: Parameters<OsmoSession["sendBrowserInput"]>[1]) => report(bridge.send({ ...input, id })), [report]);
     const closeBrowser = useCallback((id: string) => report(bridge.send({ type: "browser.close", id })), [report]);
     const configure = useCallback((selection: Parameters<OsmoSession["configure"]>[0]) => report(bridge.send({ type: "session.configure", ...selection })), [report]);
-    // Playback and previews need an audio output that main does not have yet.
+    // The call's audio plays in main's audio renderer: voice previews and the output level are read off an in-page
+    // player in the browser and do not cross the contract.
     const silent = useCallback(() => undefined, []);
     const level = useCallback(() => 0, []);
 

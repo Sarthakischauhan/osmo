@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHANNELS, validateBoxHeight, validateClientEvent, validateStart } from '../src/session-contract.js';
+import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateStart } from '../src/session-contract.js';
 import { BOX_MAX_HEIGHT } from '../src/window-state.js';
 
 test('every channel is unique, and renderer channels are separate from the ones main sends on', () => {
   const names = Object.values(CHANNELS);
   assert.equal(new Set(names).size, names.length);
-  assert.deepEqual(Object.keys(CHANNELS).sort(), ['box', 'end', 'event', 'interrupt', 'send', 'showFull', 'snapshot', 'start', 'status']);
+  assert.deepEqual(Object.keys(CHANNELS).sort(), [
+    'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
+    'box', 'end', 'event', 'interrupt', 'openThread', 'send', 'showFull', 'snapshot', 'start', 'status',
+  ]);
 });
 
 test('a session start carries only the pick and the thread', () => {
@@ -45,4 +48,24 @@ test('the hover box asks for at most its maximum height', () => {
   assert.equal(validateBoxHeight(120.2), 121);
   assert.equal(validateBoxHeight(BOX_MAX_HEIGHT), BOX_MAX_HEIGHT);
   for (const value of [-1, BOX_MAX_HEIGHT + 1, NaN, Infinity, '100', null, undefined]) assert.throws(() => validateBoxHeight(value));
+});
+
+test('the open thread is an id, or nothing for a new chat', () => {
+  assert.equal(validateOpenThread('t1'), 't1');
+  assert.equal(validateOpenThread(undefined), undefined);
+  for (const value of ['', null, 3, {}, ['t1']]) assert.throws(() => validateOpenThread(value));
+});
+
+test('a microphone frame is whole 16-bit samples, as a buffer or a view of one', () => {
+  const buffer = new ArrayBuffer(4800);
+  assert.equal(validateAudioFrame(buffer), buffer);
+  const bytes = new Uint8Array(4);
+  assert.equal(validateAudioFrame(bytes), bytes);
+  for (const value of [new ArrayBuffer(0), new ArrayBuffer(3), new Uint8Array(5), 'pcm', null, undefined, [1, 2], { byteLength: 4 }]) assert.throws(() => validateAudioFrame(value));
+});
+
+test('the audio renderer answers a capture request with nothing, or an error', () => {
+  assert.deepEqual(validateCaptureResult({}), {});
+  assert.deepEqual(validateCaptureResult({ error: 'Permission denied' }), { error: 'Permission denied' });
+  for (const value of [undefined, null, 'ok', { error: '' }, { error: 5 }, { ok: true }]) assert.throws(() => validateCaptureResult(value));
 });

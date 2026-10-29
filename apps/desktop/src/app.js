@@ -2,9 +2,10 @@ import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, M
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { localAppUrl, trustedFrame, validateAction } from './policy.js';
+import { createAudioPort } from './audio-port.js';
+import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
 import { pythonExecutable, startServer } from './server.js';
-import { CHANNELS, validateBoxHeight, validateClientEvent, validateStart } from './session-contract.js';
+import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
 import { SWITCH_ACCELERATOR, createWindowSwitch } from './window-mode.js';
 import { boxLayout, defaultOrbBounds } from './window-state.js';
@@ -15,12 +16,13 @@ const STOP_SHORTCUT = 'CommandOrControl+Shift+Escape';
 
 /**
  * Two windows over one session: the workspace (the Osmo UI) and the always-on-top orb. Main owns the session, the
- * computer-support consent and the stop shortcut; the windows only show and ask.
- * @param {{ audio?: import('./session-controller.js').AudioPort }} options the audio mechanism, once one is chosen
+ * computer-support consent and the stop shortcut; the windows only show and ask. A third, hidden window is the
+ * session's microphone and speakers: main has no audio of its own, so that page captures and plays over IPC.
  */
-export function runApp({ audio } = {}) {
+export function runApp() {
   let workspace;
   let floating;
+  let audioWindow;
   let orbBounds;
   let switcher;
   let quitting = false;
@@ -35,10 +37,11 @@ export function runApp({ audio } = {}) {
   const windows = () => [workspace, floating].filter(win => win && live(win.webContents));
   const broadcast = (channel, payload) => { for (const win of windows()) win.webContents.send(channel, payload); };
 
+  const audio = createAudioPort((channel, payload) => { if (audioWindow && live(audioWindow.webContents)) audioWindow.webContents.send(channel, payload); });
   const session = createSessionController({
     url: `${origin.replace(/^http/, 'ws')}/ws`,
     createSocket: url => new WebSocket(url),
-    audio,
+    audio: audio.port,
     desktop: { execute: value => execute(value) },
     onEvent: event => broadcast(CHANNELS.event, event),
     onStatus: snapshot => broadcast(CHANNELS.status, snapshot),
@@ -139,6 +142,12 @@ export function runApp({ audio } = {}) {
   ipcMain.handle(CHANNELS.end, event => { authorize(event, workspace, floating); return session.end(); });
   ipcMain.handle(CHANNELS.interrupt, event => { authorize(event, workspace, floating); session.interrupt(); });
   ipcMain.handle(CHANNELS.send, (event, value) => { authorize(event, workspace, floating); session.send(validateClientEvent(value)); });
+  // The workspace says which thread it has open; a session the orb starts continues it.
+  ipcMain.handle(CHANNELS.openThread, (event, threadId) => { authorize(event, workspace); session.setOpenThread(validateOpenThread(threadId)); });
+  // The audio renderer's own: it is up, the microphone is open (or why not), and a frame of what it hears.
+  ipcMain.handle(CHANNELS.audioReady, event => { authorize(event, audioWindow); audio.ready(); });
+  ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
+  ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
   // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got.
   ipcMain.handle(CHANNELS.showFull, event => { authorize(event, floating); switcher.toFull(); });
   ipcMain.handle(CHANNELS.box, (event, height) => {
@@ -148,11 +157,9 @@ export function runApp({ audio } = {}) {
     return { side: layout.side, orbLeft: layout.orbLeft };
   });
 
-  /** The page's own rules for either window: it may not navigate away, open windows, or ask for any permission. */
+  /** The page's own rules for each window: it may not navigate away or open windows. */
   function secure(win, { revokeOnNavigation }) {
     const contents = win.webContents;
-    contents.session.setPermissionCheckHandler(() => false);
-    contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     contents.setWindowOpenHandler(({ url }) => {
       if (url.startsWith('https://')) void shell.openExternal(url);
       return { action: 'deny' };
@@ -165,6 +172,25 @@ export function runApp({ audio } = {}) {
   }
 
   const webPreferences = { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false };
+
+  /** The hidden window with the microphone and speakers: the only one allowed to capture, and no other page may. */
+  function createAudio() {
+    audioWindow = new BrowserWindow({
+      show: false, width: 200, height: 200, skipTaskbar: true,
+      webPreferences: { ...webPreferences, preload: path.join(here, 'audio-preload.cjs'), autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
+    });
+    const contents = audioWindow.webContents;
+    // Every window shares the default session: its handlers allow the audio renderer's microphone and nothing else.
+    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
+      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin));
+    contents.session.setPermissionRequestHandler((wc, permission, callback, details) =>
+      callback(allowMicrophone(wc, contents, permission, '', details, origin)));
+    secure(audioWindow, { revokeOnNavigation: false });
+    // A crashed audio page ends the call rather than leaving a session that cannot hear or speak.
+    contents.on('render-process-gone', () => { audio.lost(); session.end(); audioWindow.reload(); });
+    audioWindow.on('closed', () => { audioWindow = undefined; });
+    void audioWindow.loadURL(`${origin}/#audio`);
+  }
 
   function createWorkspace() {
     workspace = new BrowserWindow({
@@ -212,6 +238,7 @@ export function runApp({ audio } = {}) {
         { label: 'Osmo', submenu: [{ label: 'Stop computer support', accelerator: STOP_SHORTCUT, click: revoke }, { role: 'quit' }] },
         { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
       ]));
+      createAudio();
       createWorkspace();
       createFloating();
       switcher = createWindowSwitch({ full: workspace, orb: floating });

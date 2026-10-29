@@ -1,7 +1,8 @@
-// The one IPC contract between Electron main (which owns the voice session) and both renderers (the workspace and the
-// orb window). Channel names, and what main accepts from a renderer: nothing else crosses, and main validates every
-// payload, so a renderer can ask for a session but never reach the socket, the mic or the computer-support bridge.
-// preload.cjs is sandboxed and cannot import this file, so it repeats the names; test/preload.test.js keeps them equal.
+// The one IPC contract between Electron main (which owns the voice session) and its renderers: the workspace and the
+// orb window, which ask for the session, and the hidden audio renderer, which is main's microphone and speakers. Channel
+// names, and what main accepts from a renderer: nothing else crosses, and main validates every payload, so a window can
+// ask for a session but never reach the socket, the mic or the computer-support bridge.
+// The preloads are sandboxed and cannot import this file, so they repeat the names; test/preload.test.js keeps them equal.
 
 import { BOX_MAX_HEIGHT } from './window-state.js';
 
@@ -14,9 +15,19 @@ export const CHANNELS = Object.freeze({
   send: 'session:send',
   showFull: 'window:show-full',
   box: 'orb:box',
-  // main -> renderers (send)
+  openThread: 'workspace:thread',
+  // main -> windows (send)
   event: 'session:event',
   status: 'session:status',
+  // audio renderer -> main (send)
+  audioReady: 'audio:ready',
+  audioStarted: 'audio:started',
+  audioFrame: 'audio:frame',
+  // main -> audio renderer (send)
+  audioStart: 'audio:start',
+  audioStop: 'audio:stop',
+  audioPlay: 'audio:play',
+  audioFlush: 'audio:flush',
 });
 
 /**
@@ -101,4 +112,30 @@ export function validateClientEvent(value) {
 export function validateBoxHeight(value) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > BOX_MAX_HEIGHT) throw new Error('Invalid box height');
   return Math.ceil(value);
+}
+
+/** The thread the workspace has open (a session started without one continues it); undefined for a new chat. */
+export function validateOpenThread(value) {
+  if (value !== undefined && !isText(value)) throw new Error('Invalid thread');
+  return value;
+}
+
+/**
+ * One frame of microphone audio from the audio renderer: 24 kHz mono PCM16, so whole 16-bit samples.
+ * @returns {ArrayBuffer | Uint8Array}
+ */
+export function validateAudioFrame(value) {
+  const bytes = value instanceof ArrayBuffer || ArrayBuffer.isView(value) ? value.byteLength : 0;
+  if (bytes === 0 || bytes % 2 !== 0) throw new Error('Invalid audio frame');
+  return value;
+}
+
+/**
+ * The audio renderer's answer to `audioStart`: capture is running, or why it could not start.
+ * @returns {{ error?: string }}
+ */
+export function validateCaptureResult(value) {
+  onlyKeys(value, ['error'], 'capture result');
+  if (value.error !== undefined && !isText(value.error)) throw new Error('Invalid capture result');
+  return value;
 }

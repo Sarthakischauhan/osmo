@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('osmoDesktop', {
     end: () => ipcRenderer.invoke('session:end'),
     interrupt: () => ipcRenderer.invoke('session:interrupt'),
     send: event => ipcRenderer.invoke('session:send', event),
+    openThread: threadId => ipcRenderer.invoke('workspace:thread', threadId),
     onEvent: callback => listen('session:event', callback),
     onStatus: callback => listen('session:status', callback),
   },

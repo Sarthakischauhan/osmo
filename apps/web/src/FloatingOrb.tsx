@@ -4,7 +4,10 @@ import type { BoxPlacement } from "./desktopBridge";
 import type { Runs } from "@/lib/runs";
 import { CompactAgentActivity, type DecideApproval } from "./CompactAgentActivity";
 import type { AgentActivity } from "./compact";
-import { HoverPanel } from "./hoverPanel";
+import { HoverPanel, type Scheduler } from "./hoverPanel";
+import { SingleClick } from "./singleClick";
+
+const windowTimers: Scheduler<number> = { after: (callback, ms) => window.setTimeout(callback, ms), cancel: (handle) => window.clearTimeout(handle) };
 
 export interface FloatingOrbProps {
   mode: OrbMode;
@@ -13,7 +16,7 @@ export interface FloatingOrbProps {
   activity: AgentActivity;
   theme: "light" | "dark";
   onDecide: DecideApproval;
-  /** Tap on the orb: start talking, or interrupt while Osmo speaks. */
+  /** Tap on the orb, once it is clear it was not the first half of a double-click: start talking, or interrupt while Osmo speaks. */
   onTalk: () => void;
   /** Double-click on the orb: back to the full window. */
   onExpand: () => void;
@@ -32,10 +35,15 @@ export function FloatingOrb({ mode, outputLevel, runs, activity, theme, onDecide
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const hover = useRef<HoverPanel<number>>();
-  hover.current ??= new HoverPanel<number>({ after: (callback, ms) => window.setTimeout(callback, ms), cancel: (handle) => window.clearTimeout(handle) }, setOpen);
+  hover.current ??= new HoverPanel<number>(windowTimers, setOpen);
+  const talk = useRef(onTalk);
+  talk.current = onTalk;
+  const tap = useRef<SingleClick<number>>();
+  tap.current ??= new SingleClick<number>(windowTimers, () => talk.current());
   const waiting = activity.needingApproval > 0;
   useEffect(() => hover.current?.approvalWaiting(waiting), [waiting]);
   useEffect(() => () => hover.current?.dispose(), []);
+  useEffect(() => () => tap.current?.cancel(), []);
   // The window is hidden while the full window shows: forget the pointer, so the box starts closed when it comes back.
   useEffect(() => {
     const onVisibility = () => {
@@ -69,8 +77,11 @@ export function FloatingOrb({ mode, outputLevel, runs, activity, theme, onDecide
         className="osmo-floating-orb"
         data-mode={mode}
         aria-label={mode === "speaking" ? "Interrupt" : "Talk to Osmo"}
-        onClick={onTalk}
-        onDoubleClick={onExpand}
+        onClick={() => tap.current?.click()}
+        onDoubleClick={() => {
+          tap.current?.cancel();
+          onExpand();
+        }}
         {...track("orb")}
       >
         <GlassOrb mode={mode} outputLevel={outputLevel} />

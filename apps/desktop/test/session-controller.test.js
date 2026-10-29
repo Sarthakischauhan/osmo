@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AUDIO_UNAVAILABLE, createSessionController, emptySnapshot, reduceSnapshot } from '../src/session-controller.js';
+import { createSessionController, emptySnapshot, reduceSnapshot } from '../src/session-controller.js';
 
 class FakeSocket {
   constructor(url) { this.url = url; this.readyState = 0; this.sent = []; this.closed = false; }
@@ -12,16 +12,16 @@ class FakeSocket {
   sentJson() { return this.sent.filter(item => typeof item === 'string').map(item => JSON.parse(item)); }
 }
 
-function fixture({ withAudio = true, execute = async () => ({ ok: true }) } = {}) {
+function fixture({ execute = async () => ({ ok: true }) } = {}) {
   const sockets = [];
   const log = { events: [], statuses: [], audio: [], disconnected: 0 };
   let onFrame;
-  const audio = withAudio ? {
+  const audio = {
     start: async callback => { onFrame = callback; log.audio.push('start'); },
     stop: () => log.audio.push('stop'),
     play: pcm => log.audio.push(['play', pcm]),
     flush: () => log.audio.push('flush'),
-  } : undefined;
+  };
   const controller = createSessionController({
     url: 'ws://127.0.0.1:8080/ws',
     createSocket: url => { const socket = new FakeSocket(url); sockets.push(socket); return socket; },
@@ -60,12 +60,44 @@ test('microphone frames go to the socket as binary', async () => {
   assert.equal(sockets[0].sent.at(-1), pcm);
 });
 
-test('without an audio mechanism start reports why and opens nothing', async () => {
-  const { controller, sockets } = fixture({ withAudio: false });
-  const snapshot = await controller.start({});
-  assert.equal(sockets.length, 0);
+test('a session continues the thread the workspace has open, unless the caller names one', async () => {
+  const adopted = fixture();
+  adopted.controller.setOpenThread('open-1');
+  const first = adopted.controller.start({ voice: 'eve' });
+  adopted.sockets[0].open();
+  await first;
+  assert.deepEqual(adopted.sockets[0].sentJson(), [{ type: 'session.start', voice: 'eve', threadId: 'open-1' }]);
+
+  const named = fixture();
+  named.controller.setOpenThread('open-1');
+  const second = named.controller.start({ threadId: 'asked' });
+  named.sockets[0].open();
+  await second;
+  assert.equal(named.sockets[0].sentJson()[0].threadId, 'asked');
+
+  const fresh = fixture();
+  fresh.controller.setOpenThread('open-1');
+  fresh.controller.setOpenThread(undefined);
+  const third = fresh.controller.start({});
+  fresh.sockets[0].open();
+  await third;
+  assert.deepEqual(fresh.sockets[0].sentJson(), [{ type: 'session.start' }]);
+});
+
+test('when the microphone cannot open the session fails with why, and the socket is closed', async () => {
+  const fx = fixture();
+  const audio = { start: async () => { throw new Error('Permission denied'); }, stop: () => fx.log.audio.push('stop'), play: () => {}, flush: () => {} };
+  const controller = createSessionController({
+    url: 'ws://x/ws', createSocket: () => { const socket = new FakeSocket(); fx.sockets.push(socket); return socket; }, audio,
+    desktop: { execute: async () => ({}) }, onEvent: () => {}, onStatus: () => {},
+  });
+  const started = controller.start({});
+  fx.sockets[0].open();
+  const snapshot = await started;
   assert.equal(snapshot.connection, 'disconnected');
-  assert.equal(snapshot.error, AUDIO_UNAVAILABLE);
+  assert.equal(snapshot.error, 'Permission denied');
+  assert.equal(fx.sockets[0].closed, true);
+  assert.deepEqual(fx.log.audio, ['stop']);
 });
 
 test('there is one session: starting again, from either window, opens no second socket', async () => {
