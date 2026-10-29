@@ -24,6 +24,12 @@ export const CloseIcon = () => (
   </Icon>
 );
 
+export const PowerIcon = () => (
+  <Icon>
+    <path d="M12 3v8M6.3 7a8 8 0 1 0 11.4 0" />
+  </Icon>
+);
+
 /** The viewport height of a framed widget in the feed; fullscreen fills the modal instead. */
 export const INLINE_HEIGHT = 320;
 

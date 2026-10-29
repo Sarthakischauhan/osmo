@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
-import { AUDIO_SAMPLE_RATE, BARGE_IN, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
+import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
 
@@ -28,6 +28,10 @@ export interface OsmoSession {
   end: () => void;
   interrupt: () => void;
   sendWidgetAction: (id: string, action: string, value?: string) => void;
+  /** The user's click, scroll or key on the agent browser widget `id` (the server plays it into the page). */
+  sendBrowserInput: (id: string, input: BrowserInput) => void;
+  /** Close the agent browser widget `id`'s browser. */
+  closeBrowser: (id: string) => void;
   /** Symphony's voice model registry (`models` event); empty until connected. */
   voiceModels: VoiceModel[];
   /** The session's model/voice/effort as Symphony last confirmed it (picker commit or `set_voice`). */
@@ -179,6 +183,14 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
     runtime.current?.client.send({ type: "widget.action", id, action, value });
   }, []);
 
+  const sendBrowserInput = useCallback((id: string, input: BrowserInput) => {
+    runtime.current?.client.send({ ...input, id });
+  }, []);
+
+  const closeBrowser = useCallback((id: string) => {
+    runtime.current?.client.send({ type: "browser.close", id });
+  }, []);
+
   const configure = useCallback((next: VoiceSelection) => {
     runtime.current?.client.send({ type: "session.configure", ...next });
   }, []);
@@ -222,6 +234,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent, d
     end,
     interrupt,
     sendWidgetAction,
+    sendBrowserInput,
+    closeBrowser,
     voiceModels,
     selection,
     configure,

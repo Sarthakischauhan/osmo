@@ -42,10 +42,16 @@ from websockets.exceptions import WebSocketException
 from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
+from symphony_server.browser import BrowserSession
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
+from symphony_server.cdp import BrowserError
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
+    BrowserClick,
+    BrowserClose,
+    BrowserKey,
+    BrowserScroll,
     DesktopConfigure,
     DesktopResult,
     Interrupt,
@@ -224,6 +230,13 @@ class VoiceBridge:
         elif isinstance(event, SessionEnd):
             await self.close_voice()
             await self.set_state("idle")
+            # The thread's browser lives between runs and reconnects, and ends with the session.
+            if self.thread is not None:
+                await self.agents.browsers.close(self.thread.id)
+        elif isinstance(event, (BrowserClick, BrowserScroll, BrowserKey)):
+            self.spawn(self.drive_browser(event))
+        elif isinstance(event, BrowserClose):
+            await self.close_browser(event)
         elif isinstance(event, Interrupt):
             await self.interrupt()
         elif isinstance(event, WidgetAction):
@@ -259,6 +272,29 @@ class VoiceBridge:
         self.desk.thread_id = thread.id
         self.agents.observe(thread.id, self)
         await self.emit(ThreadEvent(thread=thread))
+        # A browser the thread already has (a reconnect, a reload) is shown again, with the page it is on.
+        session = self.agents.browsers.sessions.get(thread.id)
+        if session is not None:
+            await self.emit(session.render())
+
+    def browser_widget(self, widget_id: str) -> BrowserSession | None:
+        """The browser session of this thread, when `widget_id` is its widget (a client can only drive its own thread's)."""
+        session = self.agents.browsers.sessions.get(self.thread.id) if self.thread is not None else None
+        return session if session is not None and session.widget_id == widget_id else None
+
+    async def drive_browser(self, event: BrowserClick | BrowserScroll | BrowserKey) -> None:
+        """Pass the user's click, scroll or key on the thread's browser widget to the page (no approval: it is the user's own)."""
+        session = self.browser_widget(event.id)
+        if session is None:
+            return
+        try:
+            await session.drive(event)
+        except BrowserError as exc:
+            log.warning("browser input failed: %s", exc)
+
+    async def close_browser(self, event: BrowserClose) -> None:
+        if self.thread is not None and self.browser_widget(event.id) is not None:
+            await self.agents.browsers.close(self.thread.id)
 
     def record(self, role: MessageRole, text: str) -> None:
         if self.thread is not None:

@@ -24,7 +24,7 @@ from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRe
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from symphony_server.browser import BrowserSessions
+from symphony_server.browser import THREAD_ID, BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
@@ -94,9 +94,8 @@ class AgentRuns:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
         self.desktops = desktops if desktops is not None else {}
         self.browsers = browsers
-        # A browser session's frames are shown on the thread of the run it belongs to.
-        self.browsers.show = self.show_session
-        self.session_threads: dict[str, str] = {}
+        # A thread's browser session shows its widget on the thread (whoever observes it).
+        self.browsers.show = self.show
         self.runs: dict[str, AgentRunRecord] = {}
         self.sessions: dict[str, str] = {}
         self.observers: dict[str, AgentObserver] = {}
@@ -124,7 +123,7 @@ class AgentRuns:
             self.desktops[session_id] = desktop
         request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=self.model_id)
         try:
-            state = await self.backend.submit(RunSubmission(RunContext(session_id=session_id), request))
+            state = await self.backend.submit(RunSubmission(RunContext(session_id=session_id, metadata={THREAD_ID: thread_id}), request))
         except RunCapacityError as exc:
             self.desktops.pop(session_id, None)
             return f"the server is busy: {exc}"
@@ -132,10 +131,9 @@ class AgentRuns:
         record = AgentRunRecord(runId=state.run_id, threadId=thread_id, task=task, status="running", createdAt=now, updatedAt=now)
         self.runs[record.runId] = record
         self.sessions[record.runId] = session_id
-        self.session_threads[session_id] = thread_id
         self.storage.save_run(record)
         # Now, while the answer that called run_agent is the latest: the browser puts the run's card under it.
-        await self.show(record, AgentUpdate(runId=record.runId, task=task, status="running"))
+        await self.show(record.threadId, AgentUpdate(runId=record.runId, task=task, status="running"))
         self.spawn(self.follow(record.runId))
         return record
 
@@ -179,25 +177,24 @@ class AgentRuns:
         if kind in ("run_completed", "run_failed", "run_limit_exceeded", "run_cancelled"):
             session_id = self.sessions.get(run_id, "")
             self.desktops.pop(session_id, None)
-            await self.browsers.close(session_id)
         if kind == "tool_execution_started":
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
         elif kind == OSMO_WIDGET:
-            await self.show(record, widget_event_adapter.validate_python(event.payload))
+            await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
             asked = ApprovalPayload.model_validate(event.payload)
             await self.update(record, "waiting_approval", phase=asked.summary)
             request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments)
             self.asking[run_id] = request
-            await self.show(record, request)
+            await self.show(record.threadId, request)
             text = f"[agent {run_id}] needs approval to: {asked.summary}. Ask the user to tap Approve or Deny on screen."
             await self.notify(record, Notice(run_id, "interrupt", text))
         elif kind == APPROVAL_RESOLVED:
             resolved = ApprovalResolvedPayload.model_validate(event.payload)
             await self.update(record, "running")
-            await self.show(record, ApprovalResolved(approvalId=resolved.approval_id, runId=run_id, approved=resolved.approved))
+            await self.show(record.threadId, ApprovalResolved(approvalId=resolved.approval_id, runId=run_id, approved=resolved.approved))
             verdict = "approved" if resolved.approved else "denied"
             await self.notify(record, Notice(run_id, "silent", f"[agent {run_id}] the user {verdict} the step"))
         elif kind == "run_completed":
@@ -222,16 +219,11 @@ class AgentRuns:
         if status != "waiting_approval":
             self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
-        await self.show(changed, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
+        await self.show(changed.threadId, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
 
-    async def show(self, record: AgentRunRecord, event: ServerEvent) -> None:
-        observer = self.observers.get(record.threadId)
-        if observer is not None:
-            await observer.show(event)
-
-    async def show_session(self, session_id: str, event: ServerEvent) -> None:
-        """Show `event` on the thread of the run with this session id (what browser frames use)."""
-        observer = self.observers.get(self.session_threads.get(session_id, ""))
+    async def show(self, thread_id: str, event: ServerEvent) -> None:
+        """Show `event` to whoever observes the thread."""
+        observer = self.observers.get(thread_id)
         if observer is not None:
             await observer.show(event)
 

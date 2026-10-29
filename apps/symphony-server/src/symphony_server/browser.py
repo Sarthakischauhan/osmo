@@ -1,10 +1,16 @@
-"""The agent browser: a CDP browser session per agent run, driven by Osmo's browser tools.
+"""The agent browser: one CDP browser session per Osmo thread, driven by Osmo's browser tools and by the user.
 
-A run's first browser tool call launches a headless Chrome on a throwaway profile (`BrowserSessions.open`),
-shows an `agent browser` widget on the thread's canvas and starts a CDP screencast: every frame
-Chrome sends becomes a `widget.update` for that widget. The session lives as long as the run:
-`AgentRuns` closes it when the run completes, fails or is cancelled (`BrowserSessions.close`),
-which kills Chrome, removes the profile and leaves the widget frozen on its last frame.
+`BrowserSessions` owns the sessions, keyed by thread id (the agent runs of a thread pass it to the tools through
+`BrowserRunLink`). A thread's first browser tool call launches a headless Chrome on a throwaway profile, shows an
+`agent browser` widget on the thread's canvas and starts a CDP screencast: every frame Chrome sends becomes a
+`widget.update` for that widget. The session outlives the run that opened it: later runs of the thread reuse
+it and the widget keeps streaming between runs. It closes only on an explicit close (`BrowserSessions.close`, from
+the widget's close button), when the thread's voice session ends, or when the server shuts down; closing kills
+Chrome, removes the profile and leaves the widget frozen on its last frame. A client that connects to the thread
+again gets the widget back (`BrowserSession.render`).
+
+The user can click, scroll and type into the page from the widget's fullscreen view (`BrowserSession.drive`); that
+is the user's own input and needs no approval, unlike the agent's `browser_click` and `browser_type`.
 
 Frames and the widget's render reach the browser straight through `show` (the thread's observer),
 not as run events: core_server keeps every run event in memory for replay.
@@ -13,12 +19,9 @@ not as run events: core_server keeps every run event in memory for replay.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
-import re
 import shutil
-import tempfile
 from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import ContextVar
 from pathlib import Path
@@ -30,22 +33,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from symphony_server.canvas import WidgetBoard, render_event
 from symphony_server.cdp import BrowserError, CdpConnection
-from symphony_server.protocol import ServerEvent, WidgetUpdate
+from symphony_server.chrome import BrowserUnavailable, drain, kill_group, listening_url, start_chrome
+from symphony_server.protocol import BrowserClick, BrowserKey, BrowserScroll, RenderedWidget, ServerEvent, WidgetRender, WidgetUpdate
 from symphony_server.widgets import BrowserProps, BrowserWidget
 
 log = logging.getLogger("symphony.browser")
 
-# What chrome prints on stderr once its DevTools server is up (with --remote-debugging-port=0 it picks the port).
-DEVTOOLS_LISTENING = re.compile(r"DevTools listening on (ws://\S+)")
 # The media type of a frame, from the start of its base64 data (Chrome's default is JPEG).
 FRAME_MEDIA_TYPES = (("/9j/", "image/jpeg"), ("iVBORw0KGgo", "image/png"), ("UklGR", "image/webp"))
+# The key of RunContext.metadata that carries the thread an agent run belongs to (the key of its browser).
+THREAD_ID = "thread_id"
+# The keyCode of Enter (what a DOM KeyboardEvent calls it, and CDP's windowsVirtualKeyCode).
+ENTER_KEY_CODE = 13
 READ_EXPRESSION = "({url: location.href, title: document.title, text: document.body ? document.body.innerText : ''})"
 
 Show = Callable[[str, ServerEvent], Awaitable[None]]
-
-
-class BrowserUnavailable(BrowserError):
-    pass
 
 
 class _Cdp(BaseModel):
@@ -66,9 +68,17 @@ class NavigateResult(_Cdp):
     loaderId: str | None = None
 
 
+class FrameMetadata(_Cdp):
+    """What Chrome says about the page a frame shows; the size is the viewport in CSS pixels, the unit of input events."""
+
+    deviceWidth: float | None = None
+    deviceHeight: float | None = None
+
+
 class ScreencastFrame(_Cdp):
     data: str
     sessionId: int
+    metadata: FrameMetadata = FrameMetadata()
 
 
 class NavigatedFrame(_Cdp):
@@ -156,23 +166,17 @@ class BrowserSession:
         self.drain: asyncio.Task[None] | None = None
         self.relays: set[asyncio.Task[None]] = set()
         self.closed = False
+        # What the widget shows now (kept to put it back for a client that connects later), and the size
+        # of the viewport in CSS pixels as of the last frame (to place the user's pointer on the page).
+        self.props = BrowserProps(status="live")
+        self.viewport: FrameMetadata | None = None
+        # The user's clicks, scrolls and keys run one at a time, in the order they came.
+        self.input_lock = asyncio.Lock()
 
     @classmethod
     async def launch(cls, executable: str, widget_id: str, show: Callable[[ServerEvent], Awaitable[None]]) -> BrowserSession:
         """Start Chrome and open a blank page on it; kills it again if anything fails or is cancelled."""
-        profile = Path(tempfile.mkdtemp(prefix="osmo-browser-"))
-        try:
-            process = await asyncio.create_subprocess_exec(
-                executable,
-                "--headless=new",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={profile}",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as exc:
-            shutil.rmtree(profile, ignore_errors=True)
-            raise BrowserUnavailable(f"could not start the browser {executable!r}: {exc}") from exc
+        process, profile = await start_chrome(executable)
         session: BrowserSession | None = None
         try:
             url = await listening_url(process)
@@ -190,10 +194,19 @@ class BrowserSession:
             if session is not None:
                 await session.close()
             else:
-                kill(process)
+                kill_group(process)
                 await process.wait()
                 shutil.rmtree(profile, ignore_errors=True)
             raise
+
+    @property
+    def usable(self) -> bool:
+        """Chrome still runs and its DevTools connection is up."""
+        return not self.closed and self.process.returncode is None and not self.cdp.reader.done()
+
+    def render(self) -> WidgetRender:
+        """The widget as it is now: what a client that connects to the thread again is shown."""
+        return WidgetRender(widget=RenderedWidget(id=self.widget_id, type="browser", props=self.props.model_dump(mode="json", exclude_none=True)))
 
     async def start_screencast(self) -> None:
         self.cdp.on("Page.screencastFrame", self.on_frame)
@@ -209,7 +222,10 @@ class BrowserSession:
     def on_frame(self, params: dict[str, Any], session_id: str | None) -> None:
         if session_id != self.target:
             return
-        self.spawn(self.relay(ScreencastFrame.model_validate(params)))
+        frame = ScreencastFrame.model_validate(params)
+        if frame.metadata.deviceWidth is not None and frame.metadata.deviceHeight is not None:
+            self.viewport = frame.metadata
+        self.spawn(self.relay(frame))
 
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
         relay = asyncio.create_task(work)
@@ -222,6 +238,7 @@ class BrowserSession:
             log.warning("browser frame relay failed: %s", relay.exception())
 
     async def patch(self, props: dict[str, Any]) -> None:
+        self.props = self.props.model_copy(update=props)
         await self.show(WidgetUpdate(id=self.widget_id, patch=props))
 
     async def relay(self, frame: ScreencastFrame) -> None:
@@ -274,6 +291,9 @@ class BrowserSession:
 
     async def click(self, ref: int) -> None:
         x, y = await self.center_of(ref)
+        await self.tap(x, y)
+
+    async def tap(self, x: float, y: float) -> None:
         for kind in ("mousePressed", "mouseReleased"):
             await self.page("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1})
 
@@ -281,13 +301,39 @@ class BrowserSession:
         await self.page("DOM.focus", {"backendNodeId": ref})
         await self.page("Input.insertText", {"text": text})
         if submit:
-            enter = {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}
-            await self.page("Input.dispatchKeyEvent", {"type": "keyDown", "text": "\r", **enter})
-            await self.page("Input.dispatchKeyEvent", {"type": "keyUp", **enter})
+            await self.press("Enter", "Enter", ENTER_KEY_CODE)
+
+    async def press(self, key: str, code: str, key_code: int) -> None:
+        """Press and release a key (`key` and `code` as a DOM KeyboardEvent has them, `key_code` its keyCode)."""
+        text = "\r" if key == "Enter" else key if len(key) == 1 else None
+        keys = {"key": key, "code": code, "windowsVirtualKeyCode": key_code}
+        # A key that types something is a keyDown with its text; one that does not (Backspace, arrows) is a rawKeyDown.
+        await self.page("Input.dispatchKeyEvent", {"type": "rawKeyDown" if text is None else "keyDown", **keys, **({} if text is None else {"text": text})})
+        await self.page("Input.dispatchKeyEvent", {"type": "keyUp", **keys})
 
     async def scroll(self, direction: Literal["down", "up"]) -> None:
         sign = "" if direction == "down" else "-"
         await self.page("Runtime.evaluate", {"expression": f"window.scrollBy(0, {sign}window.innerHeight)"})
+
+    # ------------------------------------------------------------ what the user does in the widget
+
+    def viewport_point(self, x: float, y: float) -> tuple[float, float]:
+        """A point of the displayed frame (0 to 1 across and down, as the widget measured it) in viewport CSS pixels."""
+        if self.viewport is None or self.viewport.deviceWidth is None or self.viewport.deviceHeight is None:
+            raise BrowserError("the browser has shown no frame yet, so a point on it is not known")
+        return x * self.viewport.deviceWidth, y * self.viewport.deviceHeight
+
+    async def drive(self, event: BrowserClick | BrowserScroll | BrowserKey) -> None:
+        """Do what the user did in the widget, straight through CDP: the user's own input needs no approval."""
+        async with self.input_lock:
+            if isinstance(event, BrowserKey):
+                await self.press(event.key, event.code, event.keyCode)
+                return
+            x, y = self.viewport_point(event.x, event.y)
+            if isinstance(event, BrowserClick):
+                await self.tap(x, y)
+            else:
+                await self.page("Input.dispatchMouseEvent", {"type": "mouseWheel", "x": x, "y": y, "deltaX": event.deltaX, "deltaY": event.deltaY})
 
     # ------------------------------------------------------------ lifetime
 
@@ -303,40 +349,17 @@ class BrowserSession:
         if self.drain is not None:
             self.drain.cancel()
         await self.cdp.close()
-        kill(self.process)
+        kill_group(self.process)
         await self.process.wait()
         shutil.rmtree(self.profile, ignore_errors=True)
 
 
-def kill(process: asyncio.subprocess.Process) -> None:
-    """Kill chrome; it may already have exited (a crash on startup) without asyncio having noticed yet."""
-    with contextlib.suppress(ProcessLookupError):
-        process.kill()
-
-
-async def listening_url(process: asyncio.subprocess.Process) -> str:
-    """The DevTools WebSocket url chrome prints on stderr once it is up."""
-    assert process.stderr is not None
-    seen: list[str] = []
-    while line := (await process.stderr.readline()).decode(errors="replace"):
-        listening = DEVTOOLS_LISTENING.search(line)
-        if listening:
-            return listening.group(1)
-        seen.append(line.strip())
-    raise BrowserUnavailable(f"the browser exited before it was ready: {' | '.join(seen[-5:])}")
-
-
-async def drain(process: asyncio.subprocess.Process) -> None:
-    """Keep reading chrome's stderr so it never blocks on a full pipe."""
-    assert process.stderr is not None
-    while await process.stderr.readline():
-        pass
-
-
 class BrowserSessions:
-    """The browser session of each agent run, by run session id, and what to do with it.
+    """The browser session of each thread, by thread id, and what to do with it.
 
-    `show` is wired by `AgentRuns` to the observer of the thread the run belongs to.
+    `show` is wired by `AgentRuns` to the observer of the thread (a client watching it).
+    A session lives until `close` (the widget's close button, the end of the thread's voice session)
+    or `close_all` (server shutdown); the end of an agent run does not close it.
     """
 
     def __init__(self, executable: str | None, board: WidgetBoard) -> None:
@@ -345,22 +368,25 @@ class BrowserSessions:
         self.locks: dict[str, asyncio.Lock] = {}
         self.show: Show = discard
 
-    async def open(self, session_id: str) -> BrowserSession:
-        """The run's browser, launched (and its widget shown) on first use."""
+    async def open(self, thread_id: str) -> BrowserSession:
+        """The thread's browser: the one that is running, or a new one (its widget shown) on first use or after Chrome died."""
         if self.executable is None:
             raise BrowserUnavailable("the browser is not configured: set OSMO_BROWSER_PATH to a Chrome or Chromium executable")
-        async with self.locks.setdefault(session_id, asyncio.Lock()):
-            session = self.sessions.get(session_id)
+        async with self.locks.setdefault(thread_id, asyncio.Lock()):
+            session = self.sessions.get(thread_id)
+            if session is not None and not session.usable:
+                await self.close(thread_id)
+                session = None
             if session is None:
-                session = await self.start(session_id, self.executable)
-                self.sessions[session_id] = session
+                session = await self.start(thread_id, self.executable)
+                self.sessions[thread_id] = session
             return session
 
-    async def start(self, session_id: str, executable: str) -> BrowserSession:
+    async def start(self, thread_id: str, executable: str) -> BrowserSession:
         render = render_event(self.board, BrowserWidget(type="browser", props=BrowserProps(status="live")))
 
         async def show(event: ServerEvent) -> None:
-            await self.show(session_id, event)
+            await self.show(thread_id, event)
 
         session = await BrowserSession.launch(executable, render.widget.id, show)
         try:
@@ -373,36 +399,35 @@ class BrowserSessions:
             raise
         return session
 
-    async def close(self, session_id: str) -> None:
-        """End a run's browser: kill it and freeze its widget on the last frame."""
-        self.locks.pop(session_id, None)
-        session = self.sessions.pop(session_id, None)
+    async def close(self, thread_id: str) -> None:
+        """End a thread's browser: kill it and freeze its widget on the last frame."""
+        session = self.sessions.pop(thread_id, None)
         if session is not None:
             await session.close()
-            await self.show(session_id, WidgetUpdate(id=session.widget_id, patch={"status": "ended"}))
+            await self.show(thread_id, WidgetUpdate(id=session.widget_id, patch={"status": "ended"}))
 
     async def close_all(self) -> None:
-        for session_id in tuple(self.sessions):
-            await self.close(session_id)
+        for thread_id in tuple(self.sessions):
+            await self.close(thread_id)
 
 
-async def discard(session_id: str, event: ServerEvent) -> None:
+async def discard(thread_id: str, event: ServerEvent) -> None:
     """The default `show`: nobody is watching."""
-    del session_id, event
+    del thread_id, event
 
 
-# The agent run (by session id) whose tools are running; set per run by BrowserRunLink, as DesktopRunLink does for the desktop.
+# The thread whose agent run's tools are running; set per run by BrowserRunLink, as DesktopRunLink does for the desktop.
 RUN_BROWSER: ContextVar[str | None] = ContextVar("osmo_browser", default=None)
 
 
 class BrowserRunLink(Addon):
     name = "osmo_browser_link"
 
-    def __init__(self, session_id: str) -> None:
-        self.session_id = session_id
+    def __init__(self, thread_id: str | None) -> None:
+        self.thread_id = thread_id
 
     async def before_run(self, **payload: Any) -> None:
-        RUN_BROWSER.set(self.session_id)
+        RUN_BROWSER.set(self.thread_id)
 
 
 class OpenArgs(BaseModel):
@@ -439,7 +464,7 @@ A = TypeVar("A", bound=BaseModel)
 
 
 class BrowserTool(Tool, Generic[A]):
-    """A tool that acts on the running agent run's browser (launched on first use)."""
+    """A tool that acts on the thread's browser (launched on first use, kept between runs)."""
 
     def __init__(self, sessions: BrowserSessions, name: str, description: str, args_model: type[A]) -> None:
         super().__init__(name=name, description=description, parameters=args_model.model_json_schema())
@@ -447,12 +472,12 @@ class BrowserTool(Tool, Generic[A]):
 
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
         del sink
-        session_id = RUN_BROWSER.get()
-        if session_id is None:
-            return json.dumps({"error": "browser tools run inside an agent run"})
+        thread_id = RUN_BROWSER.get()
+        if thread_id is None:
+            return json.dumps({"error": "browser tools run inside an agent run of a thread"})
         try:
             command = self.args_model.model_validate(args)
-            session = await self.sessions.open(session_id)
+            session = await self.sessions.open(thread_id)
             return json.dumps(await self.act(session, command))
         except (ValidationError, BrowserError) as exc:
             return json.dumps({"error": str(exc)})

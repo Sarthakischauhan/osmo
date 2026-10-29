@@ -1,7 +1,9 @@
 import { MessageContent, QuestionWidget, defineWidget, type WidgetComponentProps } from "@sarchauhan/chat";
 import type { AgentWidgetPart } from "@sarchauhan/protocol";
+import { useContext } from "react";
 import { AsciiArt } from "./asciiArt";
 import { BrowserWidget } from "./browser";
+import { BrowserControlsContext } from "./controls";
 import { ChartWidget } from "./chart";
 import { HtmlWidget } from "./html";
 import { browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, optionsPropsSchema, widgetSchema } from "./schema";
@@ -68,9 +70,13 @@ function Html({ widget: _widget, ...raw }: WidgetComponentProps) {
   return parsed.success ? <HtmlWidget {...parsed.data} /> : null;
 }
 
-function Browser({ widget: _widget, ...raw }: WidgetComponentProps) {
+function Browser({ widget, ...raw }: WidgetComponentProps) {
   const parsed = browserPropsSchema.safeParse(raw);
-  return parsed.success ? <BrowserWidget {...parsed.data} /> : null;
+  const controls = useContext(BrowserControlsContext);
+  if (!parsed.success) return null;
+  const id = widget.widgetId;
+  if (controls === undefined || id === undefined || widget.disabled) return <BrowserWidget {...parsed.data} />;
+  return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} />;
 }
 
 /**

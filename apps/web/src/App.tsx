@@ -1,6 +1,6 @@
 import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
-import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
+import { BrowserControlsContext, osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
 import type { AgentPart, AgentSubagent, AgentSubagentState } from "@sarchauhan/protocol";
@@ -29,7 +29,7 @@ import { toast } from "sonner";
 import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
-import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type Feed, type RunCard, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
@@ -255,7 +255,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     if (previousConnection.current !== "disconnected" && session.connection === "disconnected") void window.osmoDesktop?.setEnabled(false);
     previousConnection.current = session.connection;
   }, [session.connection]);
-  const { sendWidgetAction } = session;
+  const { sendWidgetAction, sendBrowserInput, closeBrowser } = session;
+  const browserControls = useMemo(() => ({ input: sendBrowserInput, close: closeBrowser }), [sendBrowserInput, closeBrowser]);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
     async (response: WidgetResponse) => {
@@ -348,19 +349,21 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         </header>
 
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-          <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
-            {feed.turns.length === 0 ? (
-              <AsciiHome />
-            ) : (
-              <div className="feed">
-                {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
-                {feed.turns.map((turn) => (
-                  <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
-                ))}
-                <div ref={bottom} />
-              </div>
-            )}
-          </main>
+          <BrowserControlsContext.Provider value={browserControls}>
+            <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
+              {feed.turns.length === 0 ? (
+                <AsciiHome />
+              ) : (
+                <div className="feed">
+                  {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
+                  {feed.turns.map((turn) => (
+                    <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
+                  ))}
+                  <div ref={bottom} />
+                </div>
+              )}
+            </main>
+          </BrowserControlsContext.Provider>
         </WidgetProvider>
 
         <footer className="dock">

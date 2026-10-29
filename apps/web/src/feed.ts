@@ -184,6 +184,9 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
       if (event.itemId !== undefined) return answered(feed, event.itemId, event.text, event.final === true);
       return withAssistant(feed, (turn) => ({ ...turn, text: turn.text + event.text }));
     case "widget.render":
+      // A thread has one browser: a render of a browser the feed already shows is the server putting it back
+      // (this client connected again), so it updates that widget where it is instead of adding another.
+      if (event.widget.type === "browser" && hasWidget(feed, event.widget.id)) return updateWidget(feed, event.widget.id, asRecord(event.widget.props));
       return withAssistant(feed, (turn) => ({
         ...finishActivities(turn),
         widgets: [...turn.widgets, { id: event.widget.id, type: event.widget.type, props: asRecord(event.widget.props) }],
@@ -247,6 +250,10 @@ function answered(feed: Feed, itemId: string, text: string, final: boolean): Fee
   }
   const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text, itemId, activities: [], widgets: [], runs: [] };
   return { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+}
+
+function hasWidget(feed: Feed, id: string): boolean {
+  return feed.turns.some((turn) => turn.role === "assistant" && turn.widgets.some((widget) => widget.id === id));
 }
 
 /**
