@@ -97,7 +97,8 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),
     text: z.string(),
-    // User utterances: an empty delta opens the turn when speech stops; `final` carries the whole transcript.
+    // One bubble per itemId, utterance or answer (a chat SDK text part): deltas append, `final` carries
+    // the whole text. An utterance's empty delta opens its bubble when speech stops.
     itemId: z.string().optional(),
     final: z.boolean().optional(),
   }),

@@ -148,7 +148,7 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
         assert tool_output(grok) == {"shown": 'card "Palo Alto weekend"', "id": rendered["id"]}
 
         answer(grok, "Sunny, 72.", "r2")
-        assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "assistant", "text": "Sunny, 72."}
+        assert next_event(ws, "transcript.delta").items() >= {"role": "assistant", "text": "Sunny, 72."}.items()
         wait_listening(ws)
 
 
@@ -289,7 +289,7 @@ def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGro
         grok.send({"type": "response.created", "response": {"id": "r1"}})
         grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "So"})
         assert heard(ws)["text"] == "go on"
-        assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "assistant", "text": "So"}
+        assert next_event(ws, "transcript.delta").items() >= {"role": "assistant", "text": "So"}.items()
         ws.send_text(json.dumps({"type": "interrupt"}))
         assert grok.next_of("response.cancel")["type"] == "response.cancel"
         assert next_event(ws, "state") == {"type": "state", "state": "listening", "detail": "barge-in"}

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -88,6 +89,9 @@ TITLE_FROM_SPEECH_MAX = 60
 # An utterance's bubble waits this long for its transcript (some never come: noise, a failed
 # transcription, a closed voice session) before it is dropped.
 UNHEARD_WAIT_S = 10.0
+# Tools whose result needs no answer when the answer that called them already said something:
+# "I'll look into it" is enough, and a second line after run_agent returns only repeats it.
+ANNOUNCED_TOOLS = frozenset({"run_agent"})
 
 
 class VoiceToolSink(EventSink):
@@ -108,6 +112,8 @@ class VoiceToolSink(EventSink):
 class Response:
     """One voice model response as read off the session."""
 
+    # The answer's bubble in the browser: its deltas carry this id, and a `final` one ends it.
+    item_id: str = field(default_factory=lambda: f"a-{secrets.token_hex(6)}")
     text: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     done: ResponseDone | None = None
@@ -466,7 +472,7 @@ class VoiceBridge:
                 self.held.append((response.after or frozenset(), text))
                 self.store_held()
             if response.calls and response.done.error is None:
-                await self.run_tools(voice, response.calls)
+                await self.run_tools(voice, response.calls, spoke=bool(response.text))
             else:
                 await self.turn_over()
 
@@ -477,21 +483,26 @@ class VoiceBridge:
                 response.after = frozenset(self.unheard)
             if isinstance(event, TextDelta):
                 response.text.append(event.text)
-                await self.emit(TranscriptDelta(role="assistant", text=event.text))
+                await self.emit(TranscriptDelta(role="assistant", text=event.text, itemId=response.item_id))
             elif isinstance(event, ToolCall):
                 response.calls.append(event)
             else:
                 response.done = event
+        if response.text:
+            await self.emit(TranscriptDelta(role="assistant", text="".join(response.text), itemId=response.item_id, final=True))
         return response
 
-    async def run_tools(self, voice: VoiceSession, calls: list[ToolCall]) -> None:
+    async def run_tools(self, voice: VoiceSession, calls: list[ToolCall], *, spoke: bool) -> None:
         self.idle.clear()
         barge_ins = self.barge_ins
         for call in calls:
             await voice.add_tool_result(call.call_id, await self.run_tool(call))
-        if self.barge_ins == barge_ins:
+        if self.barge_ins != barge_ins:
+            return  # the user spoke meanwhile: the answer server VAD starts for that sees the results
+        if spoke and all(call.name in ANNOUNCED_TOOLS for call in calls):
+            await self.turn_over()
+        else:
             await voice.respond()
-        # Otherwise the user spoke meanwhile: the answer server VAD starts for that sees the results.
 
     async def run_tool(self, call: ToolCall) -> str:
         tool = self.tools.get(call.name)

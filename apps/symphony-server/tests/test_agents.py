@@ -90,6 +90,7 @@ def start_agent(ws: WebSocketTestSession, grok: FakeGrok, task: str) -> str:
     started = tool_output(grok)
     assert started["status"] == "running"
     run_id: str = started["run_id"]
+    assert next_event(ws, "agent.update") == {"type": "agent.update", "runId": run_id, "task": task, "status": "running"}
     return run_id
 
 

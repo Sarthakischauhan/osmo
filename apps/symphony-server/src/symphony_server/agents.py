@@ -134,6 +134,8 @@ class AgentRuns:
         self.sessions[record.runId] = session_id
         self.session_threads[session_id] = thread_id
         self.storage.save_run(record)
+        # Now, while the answer that called run_agent is the latest: the browser puts the run's card under it.
+        await self.show(record, AgentUpdate(runId=record.runId, task=task, status="running"))
         self.spawn(self.follow(record.runId))
         return record
 
@@ -293,7 +295,7 @@ class RunAgentTool(Tool):
         started = await self.desk.runs.start(self.desk.thread_id, task, desktop=self.desk.desktop)
         if isinstance(started, str):
             return json.dumps({"error": started})
-        return json.dumps({"run_id": started.runId, "status": started.status, "say": "Say in one line that you started on it."})
+        return json.dumps({"run_id": started.runId, "status": started.status, "say": "If you have not said so yet, say in one line that you started on it."})
 
 
 class AgentStatusTool(Tool):

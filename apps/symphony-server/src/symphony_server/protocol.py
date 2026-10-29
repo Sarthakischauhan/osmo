@@ -94,8 +94,9 @@ class TranscriptDelta(_Event):
     type: Literal["transcript.delta"] = "transcript.delta"
     role: Literal["user", "assistant"]
     text: str
-    # User utterances carry an id: an empty delta opens the utterance's turn when speech stops,
-    # and the `final` one carries its whole transcript (empty when nothing was said).
+    # Each utterance and each answer carries an id, one bubble per id (like a chat SDK's text part):
+    # deltas append, and the `final` one carries the whole text (empty when nothing was said). An
+    # utterance's empty delta opens its bubble when speech stops.
     itemId: str | None = None
     final: bool | None = None
 
