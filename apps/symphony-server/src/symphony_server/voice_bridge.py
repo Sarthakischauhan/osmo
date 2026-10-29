@@ -230,9 +230,10 @@ class VoiceBridge:
         elif isinstance(event, SessionEnd):
             await self.close_voice()
             await self.set_state("idle")
-            # The thread's browser lives between runs and reconnects, and ends with the session.
+            # The thread's browser lives between runs and reconnects, and ends with the session, once the runs
+            # still going on the thread have finished (they finish on their own and their results are stored).
             if self.thread is not None:
-                await self.agents.browsers.close(self.thread.id)
+                await self.agents.browsers.end(self.thread.id)
         elif isinstance(event, (BrowserClick, BrowserScroll, BrowserKey)):
             self.spawn(self.drive_browser(event))
         elif isinstance(event, BrowserClose):
@@ -274,6 +275,7 @@ class VoiceBridge:
         await self.emit(ThreadEvent(thread=thread))
         # A browser the thread already has (a reconnect, a reload) is shown again, with the page it is on.
         session = self.agents.browsers.sessions.get(thread.id)
+        self.agents.browsers.resume(thread.id)
         if session is not None:
             await self.emit(session.render())
 
@@ -285,8 +287,9 @@ class VoiceBridge:
     async def drive_browser(self, event: BrowserClick | BrowserScroll | BrowserKey) -> None:
         """Pass the user's click, scroll or key on the thread's browser widget to the page (no approval: it is the user's own)."""
         session = self.browser_widget(event.id)
-        if session is None:
+        if session is None or self.thread is None:
             return
+        self.agents.browsers.touch(self.thread.id)
         try:
             await session.drive(event)
         except BrowserError as exc:

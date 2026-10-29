@@ -134,6 +134,8 @@ class AgentRuns:
         self.storage.save_run(record)
         # Now, while the answer that called run_agent is the latest: the browser puts the run's card under it.
         await self.show(record.threadId, AgentUpdate(runId=record.runId, task=task, status="running"))
+        # The thread's browser stays open until this run is over (`follow` lets go of it).
+        self.browsers.hold(thread_id)
         self.spawn(self.follow(record.runId))
         return record
 
@@ -168,8 +170,11 @@ class AgentRuns:
     # ------------------------------------------------------------ run events
 
     async def follow(self, run_id: str) -> None:
-        async for _, event in self.backend.events(run_id):
-            await self.on_event(run_id, event)
+        try:
+            async for _, event in self.backend.events(run_id):
+                await self.on_event(run_id, event)
+        finally:
+            await self.browsers.release(self.runs[run_id].threadId)
 
     async def on_event(self, run_id: str, event: ControlPlaneEvent) -> None:
         record = self.runs[run_id]

@@ -5,8 +5,10 @@
 `agent browser` widget on the thread's canvas and starts a CDP screencast: every frame Chrome sends becomes a
 `widget.update` for that widget. The session outlives the run that opened it: later runs of the thread reuse
 it and the widget keeps streaming between runs. It closes only on an explicit close (`BrowserSessions.close`, from
-the widget's close button), when the thread's voice session ends, or when the server shuts down; closing kills
-Chrome, removes the profile and leaves the widget frozen on its last frame. A client that connects to the thread
+the widget's close button), when the thread's voice session ends, when it has sat idle for `IDLE_CLOSE_SECONDS`,
+or when the server shuts down; closing kills Chrome, removes the profile and leaves the widget frozen on its last
+frame. A thread's live agent runs hold its browser: the end of the voice session waits for them to finish, and
+an idle browser is not closed while one runs. A client that connects to the thread
 again gets the widget back (`BrowserSession.render`).
 
 The user can click, scroll and type into the page from the widget's fullscreen view (`BrowserSession.drive`); that
@@ -22,6 +24,7 @@ import asyncio
 import json
 import logging
 import shutil
+import time
 from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import ContextVar
 from pathlib import Path
@@ -43,6 +46,10 @@ log = logging.getLogger("symphony.browser")
 FRAME_MEDIA_TYPES = (("/9j/", "image/jpeg"), ("iVBORw0KGgo", "image/png"), ("UklGR", "image/webp"))
 # The key of RunContext.metadata that carries the thread an agent run belongs to (the key of its browser).
 THREAD_ID = "thread_id"
+# A browser nobody has used (no tool call, no user input, no thread opened) for this long is closed.
+IDLE_CLOSE_SECONDS = 30 * 60
+# How often `watch_idle` looks for idle browsers.
+IDLE_CHECK_SECONDS = 60
 # The keyCode of Enter (what a DOM KeyboardEvent calls it, and CDP's windowsVirtualKeyCode).
 ENTER_KEY_CODE = 13
 READ_EXPRESSION = "({url: location.href, title: document.title, text: document.body ? document.body.innerText : ''})"
@@ -172,6 +179,8 @@ class BrowserSession:
         self.viewport: FrameMetadata | None = None
         # The user's clicks, scrolls and keys run one at a time, in the order they came.
         self.input_lock = asyncio.Lock()
+        # When the browser was last used, on the clock of its `BrowserSessions` (set there).
+        self.last_used = 0.0
 
     @classmethod
     async def launch(cls, executable: str, widget_id: str, show: Callable[[ServerEvent], Awaitable[None]]) -> BrowserSession:
@@ -358,14 +367,19 @@ class BrowserSessions:
     """The browser session of each thread, by thread id, and what to do with it.
 
     `show` is wired by `AgentRuns` to the observer of the thread (a client watching it).
-    A session lives until `close` (the widget's close button, the end of the thread's voice session)
-    or `close_all` (server shutdown); the end of an agent run does not close it.
+    A session lives until `close` (the widget's close button), `end` (the end of the thread's voice session, once
+    its runs are done), `reap_idle` or `close_all` (server shutdown); the end of an agent run does not close it.
+    `clock` tells the time for the idle check (seconds, monotonic).
     """
 
-    def __init__(self, executable: str | None, board: WidgetBoard) -> None:
-        self.executable, self.board = executable, board
+    def __init__(self, executable: str | None, board: WidgetBoard, clock: Callable[[], float] = time.monotonic) -> None:
+        self.executable, self.board, self.clock = executable, board, clock
         self.sessions: dict[str, BrowserSession] = {}
         self.locks: dict[str, asyncio.Lock] = {}
+        # The agent runs of each thread that are not over, which keep its browser open.
+        self.holds: dict[str, int] = {}
+        # Threads whose voice session ended while a run held the browser: it closes with the last run.
+        self.ending: set[str] = set()
         self.show: Show = discard
 
     async def open(self, thread_id: str) -> BrowserSession:
@@ -380,6 +394,7 @@ class BrowserSessions:
             if session is None:
                 session = await self.start(thread_id, self.executable)
                 self.sessions[thread_id] = session
+            session.last_used = self.clock()
             return session
 
     async def start(self, thread_id: str, executable: str) -> BrowserSession:
@@ -399,12 +414,61 @@ class BrowserSessions:
             raise
         return session
 
+    def touch(self, thread_id: str) -> None:
+        """Note that someone used the thread's browser (if it has one) just now."""
+        session = self.sessions.get(thread_id)
+        if session is not None:
+            session.last_used = self.clock()
+
+    def hold(self, thread_id: str) -> None:
+        """An agent run of the thread started: its browser stays open until the run is over."""
+        self.holds[thread_id] = self.holds.get(thread_id, 0) + 1
+
+    async def release(self, thread_id: str) -> None:
+        """An agent run of the thread is over. The last one closes a browser whose voice session has ended."""
+        left = self.holds.get(thread_id, 0) - 1
+        if left > 0:
+            self.holds[thread_id] = left
+            return
+        self.holds.pop(thread_id, None)
+        if thread_id in self.ending:
+            self.ending.discard(thread_id)
+            await self.close(thread_id)
+        else:
+            self.touch(thread_id)
+
+    async def end(self, thread_id: str) -> None:
+        """The thread's voice session ended: close its browser, or leave that to the last run that holds it."""
+        if self.holds.get(thread_id, 0) > 0:
+            self.ending.add(thread_id)
+        else:
+            await self.close(thread_id)
+
+    def resume(self, thread_id: str) -> None:
+        """A voice session began on the thread: its browser is not on its way out any more."""
+        self.ending.discard(thread_id)
+        self.touch(thread_id)
+
     async def close(self, thread_id: str) -> None:
         """End a thread's browser: kill it and freeze its widget on the last frame."""
         session = self.sessions.pop(thread_id, None)
         if session is not None:
             await session.close()
             await self.show(thread_id, WidgetUpdate(id=session.widget_id, patch={"status": "ended"}))
+
+    async def reap_idle(self) -> None:
+        """Close the browsers that have been idle for `IDLE_CLOSE_SECONDS` and that no run holds."""
+        for thread_id in tuple(self.sessions):
+            async with self.locks.setdefault(thread_id, asyncio.Lock()):
+                session = self.sessions.get(thread_id)
+                if session is not None and not self.holds.get(thread_id) and self.clock() - session.last_used >= IDLE_CLOSE_SECONDS:
+                    await self.close(thread_id)
+
+    async def watch_idle(self) -> None:
+        """Run `reap_idle` every `IDLE_CHECK_SECONDS` until cancelled."""
+        while True:
+            await asyncio.sleep(IDLE_CHECK_SECONDS)
+            await self.reap_idle()
 
     async def close_all(self) -> None:
         for thread_id in tuple(self.sessions):

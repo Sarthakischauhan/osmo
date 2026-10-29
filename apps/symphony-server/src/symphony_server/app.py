@@ -9,6 +9,7 @@ live in SQLite (storage.py).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -148,7 +149,11 @@ def create_app(
         if settings.browser_path is not None:
             # A server that was killed could not close its browsers: remove what it left behind.
             reap_stale()
+        idle_watch = asyncio.create_task(browsers.watch_idle()) if settings.browser_path is not None else None
         yield
+        if idle_watch is not None:
+            idle_watch.cancel()
+            await asyncio.gather(idle_watch, return_exceptions=True)
         await agents.shutdown()
         await backend.shutdown()
         storage.close()

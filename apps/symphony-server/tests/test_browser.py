@@ -243,8 +243,18 @@ class Shown:
         return [event.patch for _, event in self.events if isinstance(event, WidgetUpdate)]
 
 
-def sessions_for(chrome: FakeChrome | None) -> tuple[BrowserSessions, Shown]:
-    sessions = BrowserSessions(str(chrome.executable) if chrome else None, WidgetBoard())
+class Clock:
+    """The time the idle check sees, moved by the test."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def sessions_for(chrome: FakeChrome | None, clock: Clock | None = None) -> tuple[BrowserSessions, Shown]:
+    sessions = BrowserSessions(str(chrome.executable) if chrome else None, WidgetBoard(), *([clock] if clock else []))
     shown = Shown()
     sessions.show = shown.show
     return sessions, shown
@@ -700,6 +710,55 @@ def test_the_end_of_the_session_closes_the_threads_browser(grok: FakeGrok, chrom
         assert_browser_gone(chrome)
 
 
+def test_ending_the_session_mid_run_lets_the_run_finish_and_closes_the_browser_after_it(grok: FakeGrok, chrome: FakeChrome) -> None:
+    agent = HoldingAgent([open_step(), Step(text="The boots cost $80.")])
+    with browser_client(grok, agent, chrome) as client, client.websocket_connect("/ws") as ws:
+        run_id = start_agent(ws, grok, "find boots")
+        widget = next_event(ws, "widget.render")["widget"]
+        thread_id = thread_of(client)
+
+        user_sends(ws, type="session.end")
+        until(lambda: next_event(ws, "state")["state"] == "idle")
+        # The run is not stopped and its browser stays up while it works.
+        time.sleep(0.2)
+        assert browser_up(chrome)
+        assert [run["status"] for run in client.get("/api/runs").json()["runs"]] == ["running"]
+
+        agent.release.set()
+        events = until_ended(ws, widget["id"])
+        # The run finished first, and then the browser closed.
+        assert [e["status"] for e in events if e["type"] == "agent.update"][-1] == "completed"
+        assert_browser_gone(chrome)
+
+        # The result was stored with the thread, as every run's is, and is there for a client that connects again.
+        for _ in range(2):
+            detail = client.get(f"/api/threads/{thread_id}").json()
+            assert [(run["runId"], run["status"], run["result"]) for run in detail["runs"]] == [(run_id, "completed", "The boots cost $80.")]
+            assert f"[agent {run_id}] done: The boots cost $80." in [m["text"] for m in detail["messages"]]
+            with client.websocket_connect("/ws") as again:
+                user_sends(again, type="session.start", voice="eve", threadId=thread_id)
+                assert next_event(again, "thread")["thread"]["id"] == thread_id
+
+
+def test_a_new_session_on_the_thread_before_the_run_is_over_keeps_its_browser(grok: FakeGrok, chrome: FakeChrome) -> None:
+    agent = HoldingAgent([open_step(), Step(text="The boots cost $80.")])
+    with browser_client(grok, agent, chrome) as client, client.websocket_connect("/ws") as ws:
+        start_agent(ws, grok, "find boots")
+        next_event(ws, "widget.render")
+        thread_id = thread_of(client)
+        user_sends(ws, type="session.end")
+        until(lambda: next_event(ws, "state")["state"] == "idle")
+        user_sends(ws, type="session.start", voice="eve", threadId=thread_id)
+        restored = next_event(ws, "widget.render")
+        assert restored["widget"]["type"] == "browser"
+
+        agent.release.set()
+        until_run(ws, "completed")
+        time.sleep(0.3)
+        assert browser_up(chrome)
+    assert_browser_gone(chrome)
+
+
 def test_the_user_can_close_the_browser_from_the_widget(grok: FakeGrok, chrome: FakeChrome) -> None:
     agent = ScriptedAgent([open_step(), Step(text="done")])
     with browser_client(grok, agent, chrome) as client, client.websocket_connect("/ws") as ws:
@@ -840,3 +899,128 @@ def test_without_a_browser_path_the_tools_say_so(grok: FakeGrok, chrome: FakeChr
             while update["status"] != "completed":
                 update = next_event(ws, "agent.update")
             assert chrome.methods() == []
+
+
+# ------------------------------------------------------------ idle browsers
+
+MINUTE = 60.0
+THIRTY_MINUTES = 30 * MINUTE
+
+
+async def test_an_abandoned_browser_is_closed_after_the_idle_time_and_a_used_one_is_not(chrome: FakeChrome) -> None:
+    clock = Clock()
+    sessions, shown = sessions_for(chrome, clock)
+    RUN_BROWSER.set("thread-idle")
+    await use(sessions, "browser_open", url=PAGE)
+    await settle(shown, "frame", 1)
+
+    clock.now += THIRTY_MINUTES - 1
+    await sessions.reap_idle()
+    assert browser_up(chrome)
+
+    # Any use starts the time again: a tool call, then the user's input or the thread being opened (`touch`).
+    await use(sessions, "browser_read")
+    clock.now += THIRTY_MINUTES - 1
+    await sessions.reap_idle()
+    assert browser_up(chrome)
+    sessions.touch("thread-idle")
+    clock.now += THIRTY_MINUTES - 1
+    await sessions.reap_idle()
+    assert browser_up(chrome)
+
+    clock.now += 1
+    await sessions.reap_idle()
+    assert_browser_gone(chrome)
+    assert sessions.sessions == {}
+    assert shown.updates()[-1] == {"status": "ended"}
+
+    # The next use launches a new one.
+    await use(sessions, "browser_open", url=PAGE)
+    assert sessions.sessions["thread-idle"].usable
+    await sessions.close_all()
+
+
+async def test_an_idle_browser_is_kept_while_a_run_holds_it_and_counted_from_the_end_of_the_run(chrome: FakeChrome) -> None:
+    clock = Clock()
+    sessions, _ = sessions_for(chrome, clock)
+    RUN_BROWSER.set("thread-held")
+    await use(sessions, "browser_open", url=PAGE)
+    sessions.hold("thread-held")
+    sessions.hold("thread-held")
+
+    clock.now += 3 * THIRTY_MINUTES
+    await sessions.reap_idle()
+    assert browser_up(chrome)
+    await sessions.release("thread-held")
+    await sessions.reap_idle()
+    assert browser_up(chrome), "one of two runs is still going"
+
+    await sessions.release("thread-held")
+    await sessions.reap_idle()
+    assert browser_up(chrome), "the idle time starts when the last run ends"
+    clock.now += THIRTY_MINUTES
+    await sessions.reap_idle()
+    assert_browser_gone(chrome)
+
+
+async def test_idle_browsers_of_other_threads_are_closed_on_their_own_time(chrome: FakeChrome) -> None:
+    clock = Clock()
+    sessions, _ = sessions_for(chrome, clock)
+    RUN_BROWSER.set("thread-old")
+    await use(sessions, "browser_open", url=PAGE)
+    clock.now += THIRTY_MINUTES - MINUTE
+    RUN_BROWSER.set("thread-new")
+    await use(sessions, "browser_open", url=PAGE)
+    old, new = sessions.sessions["thread-old"], sessions.sessions["thread-new"]
+    clock.now += MINUTE
+    await sessions.reap_idle()
+    assert set(sessions.sessions) == {"thread-new"} and old.closed and not new.closed
+    await sessions.close_all()
+
+
+async def test_the_idle_watch_closes_an_abandoned_browser_by_itself(chrome: FakeChrome, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("symphony_server.browser.IDLE_CHECK_SECONDS", 0.01)
+    clock = Clock()
+    sessions, _ = sessions_for(chrome, clock)
+    RUN_BROWSER.set("thread-watch")
+    await use(sessions, "browser_open", url=PAGE)
+    watch = asyncio.create_task(sessions.watch_idle())
+    try:
+        await asyncio.sleep(0.05)
+        assert browser_up(chrome)
+        clock.now += THIRTY_MINUTES
+        for _ in range(500):
+            if not sessions.sessions:
+                break
+            await asyncio.sleep(0.01)
+        assert_browser_gone(chrome)
+    finally:
+        watch.cancel()
+        await asyncio.gather(watch, return_exceptions=True)
+        await sessions.close_all()
+
+
+async def test_ending_a_voice_session_closes_the_browser_at_once_when_no_run_holds_it_and_after_the_run_when_one_does(chrome: FakeChrome) -> None:
+    sessions, shown = sessions_for(chrome)
+    RUN_BROWSER.set("thread-end")
+    await use(sessions, "browser_open", url=PAGE)
+    await sessions.end("thread-end")
+    assert_browser_gone(chrome)
+
+    await use(sessions, "browser_open", url=PAGE)
+    sessions.hold("thread-end")
+    await sessions.end("thread-end")
+    assert browser_up(chrome)
+    assert {"status": "ended"} != shown.updates()[-1]
+    await sessions.release("thread-end")
+    assert_browser_gone(chrome)
+    assert shown.updates()[-1] == {"status": "ended"}
+
+    # A new voice session on the thread before the run is over keeps the browser.
+    await use(sessions, "browser_open", url=PAGE)
+    sessions.hold("thread-end")
+    await sessions.end("thread-end")
+    sessions.resume("thread-end")
+    await sessions.release("thread-end")
+    assert browser_up(chrome)
+    await sessions.close_all()
