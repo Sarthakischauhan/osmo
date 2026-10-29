@@ -107,20 +107,23 @@ button { font: inherit; color: inherit; }
 .osmo-chart-last .down { color: #f87171; }
 .osmo-chart-axis { display: flex; justify-content: space-between; font: 10px var(--font-mono); color: var(--muted-foreground); margin-top: 4px; }
 
-.osmo-html { overflow: hidden; border-radius: var(--radius, 3px); background: var(--surface-1); }
-.osmo-html-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; background: var(--surface-2); }
-.osmo-html-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
-.osmo-html-tools { display: flex; align-items: center; gap: 2px; }
-.osmo-html-zoom { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
+.osmo-frame { overflow: hidden; border-radius: var(--radius, 3px); background: var(--surface-1); }
+.osmo-frame-bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; background: var(--surface-2); }
+.osmo-frame-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.osmo-frame-tools { display: flex; align-items: center; gap: 2px; }
+.osmo-frame-readout { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
 .osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius, 3px); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
 .osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
 .osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
 .osmo-icon-button:disabled { opacity: .35; cursor: default; }
-.osmo-html-viewport { position: relative; overflow: hidden; background: #111; }
-.osmo-html-viewport iframe { display: block; border: 0; background: #111; transform-origin: 0 0; }
-.osmo-html-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 4vh 4vw; background: rgba(0, 0, 0, .5); animation: rise .2s ease-out; }
-.osmo-html-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--surface-1); box-shadow: none; }
-.osmo-html-modal .osmo-html-viewport { flex: 1; }
+.osmo-frame-viewport { position: relative; overflow: hidden; background: #111; }
+.osmo-html iframe { display: block; border: 0; background: #111; transform-origin: 0 0; }
+.osmo-frame-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 4vh 4vw; background: rgba(0, 0, 0, .5); animation: rise .2s ease-out; }
+.osmo-frame-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--surface-1); box-shadow: none; }
+.osmo-frame-modal .osmo-frame-viewport { flex: 1; }
+
+.osmo-browser img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.osmo-browser-wait { margin: 0; padding: 48px 16px; text-align: center; font-size: 12px; color: var(--muted-foreground); }
 
 .dock { padding: 18px 0 22px; background: var(--background); display: flex; justify-content: center; }
 .orb-composer { display: flex; flex-direction: column; align-items: center; gap: 14px; }

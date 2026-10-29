@@ -4,8 +4,8 @@
 answers at once with its run id. `AgentRuns` follows each run's events, keeps the run's row in
 storage, and tells the thread's observer (the open voice bridge, if any) what happened:
 wire events for the browser, and `Notice`s for the voice model, each tagged with when it
-should be spoken: `interrupt` (failed, needs approval, done), `when_idle` (a new phase) or
-`silent` (added to the conversation without a response).
+should be spoken: `interrupt` (failed, needs approval, done) or `silent` (added to the conversation
+without a response). A run's phase is never spoken: it goes to the widget and to `agent_status`.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRe
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from symphony_server.browser import BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
@@ -48,7 +49,7 @@ from symphony_server.voices import provider_of
 
 log = logging.getLogger("symphony.agents")
 
-NoticeTag = Literal["interrupt", "when_idle", "silent"]
+NoticeTag = Literal["interrupt", "silent"]
 # A finished run's answer, as told to the voice model (it summarizes it out loud).
 RESULT_TOLD_MAX = 4000
 TASK_MAX = 4000
@@ -89,15 +90,21 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, *, desktops: dict[str, DesktopSession] | None = None) -> None:
+    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
         self.desktops = desktops if desktops is not None else {}
+        self.browsers = browsers
+        # A browser session's frames are shown on the thread of the run it belongs to.
+        self.browsers.show = self.show_session
+        self.session_threads: dict[str, str] = {}
         self.runs: dict[str, AgentRunRecord] = {}
         self.sessions: dict[str, str] = {}
         self.observers: dict[str, AgentObserver] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         # The approval each waiting run asks for, by run id.
         self.asking: dict[str, ApprovalRequest] = {}
+        # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
+        self.phases: dict[str, str] = {}
 
     def observe(self, thread_id: str, observer: AgentObserver) -> None:
         self.observers[thread_id] = observer
@@ -125,6 +132,7 @@ class AgentRuns:
         record = AgentRunRecord(runId=state.run_id, threadId=thread_id, task=task, status="running", createdAt=now, updatedAt=now)
         self.runs[record.runId] = record
         self.sessions[record.runId] = session_id
+        self.session_threads[session_id] = thread_id
         self.storage.save_run(record)
         self.spawn(self.follow(record.runId))
         return record
@@ -155,6 +163,7 @@ class AgentRuns:
     async def shutdown(self) -> None:
         for task in tuple(self.tasks):
             task.cancel()
+        await self.browsers.close_all()
 
     # ------------------------------------------------------------ run events
 
@@ -166,12 +175,13 @@ class AgentRuns:
         record = self.runs[run_id]
         kind = event.event_type
         if kind in ("run_completed", "run_failed", "run_limit_exceeded", "run_cancelled"):
-            self.desktops.pop(self.sessions.get(run_id, ""), None)
+            session_id = self.sessions.get(run_id, "")
+            self.desktops.pop(session_id, None)
+            await self.browsers.close(session_id)
         if kind == "tool_execution_started":
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
-            await self.notify(record, Notice(run_id, "when_idle", f"[agent {run_id}] now: {phase}"))
         elif kind == OSMO_WIDGET:
             await self.show(record, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
@@ -203,6 +213,10 @@ class AgentRuns:
     async def update(self, record: AgentRunRecord, status: AgentRunStatus, *, phase: str | None = None, result: str | None = None) -> None:
         changed = record.model_copy(update={"status": status, "result": result or record.result, "updatedAt": time.time()})
         self.runs[record.runId] = changed
+        if phase is None or status not in ("running", "waiting_approval"):
+            self.phases.pop(record.runId, None)
+        else:
+            self.phases[record.runId] = phase
         if status != "waiting_approval":
             self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
@@ -210,6 +224,12 @@ class AgentRuns:
 
     async def show(self, record: AgentRunRecord, event: ServerEvent) -> None:
         observer = self.observers.get(record.threadId)
+        if observer is not None:
+            await observer.show(event)
+
+    async def show_session(self, session_id: str, event: ServerEvent) -> None:
+        """Show `event` on the thread of the run with this session id (what browser frames use)."""
+        observer = self.observers.get(self.session_threads.get(session_id, ""))
         if observer is not None:
             await observer.show(event)
 
@@ -249,8 +269,8 @@ class AgentDesk:
         return record if record is not None and record.threadId == self.thread_id else None
 
 
-def run_status(record: AgentRunRecord) -> str:
-    return json.dumps({"run_id": record.runId, "status": record.status, "task": record.task, "result": record.result})
+def run_status(record: AgentRunRecord, phase: str | None = None) -> str:
+    return json.dumps({"run_id": record.runId, "status": record.status, "phase": phase, "task": record.task, "result": record.result})
 
 
 class RunAgentTool(Tool):
@@ -284,7 +304,7 @@ class AgentStatusTool(Tool):
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
         del sink
         record = self.desk.mine(str(args.get("run_id", "")))
-        return run_status(record) if record is not None else json.dumps({"error": "no such run in this conversation"})
+        return run_status(record, self.desk.runs.phases.get(record.runId)) if record is not None else json.dumps({"error": "no such run in this conversation"})
 
 
 class CancelAgentTool(Tool):

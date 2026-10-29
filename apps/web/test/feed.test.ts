@@ -66,6 +66,16 @@ describe("reduceFeed", () => {
     expect(turn?.role === "assistant" && turn.widgets[0]?.props).toEqual({ title: "z", body: "b" });
   });
 
+  it("streams browser frames into the widget wherever the conversation has moved, then freezes it", () => {
+    let feed = reduceFeed(emptyFeed, { type: "widget.render", widget: { id: "w-br", type: "browser", props: { status: "live" } } });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "How is it going?" });
+    feed = reduceFeed(feed, { type: "widget.update", id: "w-br", patch: { frame: "data:image/jpeg;base64,AAAA" } });
+    feed = reduceFeed(feed, { type: "widget.update", id: "w-br", patch: { frame: "data:image/jpeg;base64,BBBB" } });
+    feed = reduceFeed(feed, { type: "widget.update", id: "w-br", patch: { status: "ended" } });
+    const turn = feed.turns[0];
+    expect(turn?.role === "assistant" && turn.widgets[0]?.props).toEqual({ status: "ended", frame: "data:image/jpeg;base64,BBBB" });
+  });
+
   it("an update with a reused id touches only the newest widget, never older ones above", () => {
     let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "first" });
     feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w1", type: "card", props: { title: "old", body: "b" } } });

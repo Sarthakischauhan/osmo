@@ -42,4 +42,15 @@ describe("widgetSchema", () => {
     expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "" } }).success).toBe(false);
     expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "t".repeat(81) } }).success).toBe(false);
   });
+
+  it("accepts an agent browser with or without a frame, and nothing but a picture as the frame", () => {
+    const browser = (props: object) => widgetSchema.safeParse({ type: "browser", props }).success;
+    expect(browser({ status: "live" })).toBe(true);
+    expect(browser({ status: "ended", url: "https://example.com/", frame: "data:image/jpeg;base64,/9j/4AAQ" })).toBe(true);
+    expect(browser({ status: "paused" })).toBe(false);
+    expect(browser({ status: "live", frame: "https://example.com/a.png" })).toBe(false);
+    expect(browser({ status: "live", frame: "data:text/html;base64,PGI+" })).toBe(false);
+    expect(browser({ status: "live", extra: 1 })).toBe(false);
+    expect(describeWidget(widgetSchema.parse({ type: "browser", props: { status: "live" } }))).toBe("agent browser");
+  });
 });

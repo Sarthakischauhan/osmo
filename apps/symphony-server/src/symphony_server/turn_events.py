@@ -47,6 +47,16 @@ def activity_label(name: str, args: Mapping[str, Any]) -> str:
         return f"Fetching prices · {str(args.get('symbol', '')).upper()}"
     if name == "web_search":
         return f"Searching the web · {args.get('query', '')}"
+    if name == "browser_open":
+        return f"Opening {args.get('url', '')}"
+    if name == "browser_read":
+        return "Reading the page"
+    if name == "browser_click":
+        return f"Clicking · {args.get('target', '')}"
+    if name == "browser_type":
+        return f"Typing · {args.get('target', '')}"
+    if name == "browser_scroll":
+        return f"Scrolling {args.get('direction', '')}"
     if name == "create_image":
         return "Drawing a picture"
     return f"Running {name}"

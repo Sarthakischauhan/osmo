@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { createPortal } from "react-dom";
+import { CloseIcon, ExpandIcon, INLINE_HEIGHT, Icon, useFullscreen } from "./frame";
 import type { HtmlProps } from "./schema";
 
 /**
@@ -21,14 +22,6 @@ export function withCsp(html: string): string {
   return CSP + html;
 }
 
-function Icon({ children }: { children: ReactNode }) {
-  return (
-    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {children}
-    </svg>
-  );
-}
-
 const ReloadIcon = () => (
   <Icon>
     <path d="M20 12a8 8 0 1 1-2.34-5.66" />
@@ -47,17 +40,6 @@ const ZoomOutIcon = () => (
     <path d="M20 20l-4.4-4.4M8 11h6" />
   </Icon>
 );
-const ExpandIcon = () => (
-  <Icon>
-    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-  </Icon>
-);
-const CloseIcon = () => (
-  <Icon>
-    <path d="M6 6l12 12M18 6L6 18" />
-  </Icon>
-);
-
 interface FrameState {
   zoom: number;
   generation: number;
@@ -73,7 +55,7 @@ interface HtmlBodyProps {
 function HtmlFrame({ html, title, state, height }: HtmlBodyProps) {
   const scale = state.zoom;
   return (
-    <div className="osmo-html-viewport" style={height === undefined ? undefined : { height }}>
+    <div className="osmo-frame-viewport" style={height === undefined ? undefined : { height }}>
       <iframe
         key={state.generation}
         title={title}
@@ -98,16 +80,16 @@ interface HeaderProps {
 function HtmlHeader({ title, zoom, onReload, onZoom, trailing }: HeaderProps) {
   const index = ZOOM_LEVELS.findIndex((level) => level === zoom);
   return (
-    <header className="osmo-html-bar">
-      <span className="osmo-html-title">{title}</span>
-      <div className="osmo-html-tools" role="toolbar" aria-label={`${title} controls`}>
+    <header className="osmo-frame-bar">
+      <span className="osmo-frame-title">{title}</span>
+      <div className="osmo-frame-tools" role="toolbar" aria-label={`${title} controls`}>
         <button type="button" className="osmo-icon-button" aria-label="Reload" title="Reload" onClick={onReload}>
           <ReloadIcon />
         </button>
         <button type="button" className="osmo-icon-button" aria-label="Zoom out" title="Zoom out" disabled={index <= 0} onClick={() => onZoom(-1)}>
           <ZoomOutIcon />
         </button>
-        <span className="osmo-html-zoom" aria-live="polite">
+        <span className="osmo-frame-readout" aria-live="polite">
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -128,7 +110,7 @@ function HtmlHeader({ title, zoom, onReload, onZoom, trailing }: HeaderProps) {
 
 export function HtmlWidget({ html, title = "Widget" }: HtmlProps) {
   const [state, setState] = useState<FrameState>({ zoom: DEFAULT_ZOOM, generation: 0 });
-  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useFullscreen();
 
   const reload = () => setState((s) => ({ ...s, generation: s.generation + 1 }));
   const zoom = (direction: 1 | -1) =>
@@ -138,31 +120,22 @@ export function HtmlWidget({ html, title = "Widget" }: HtmlProps) {
       return next === undefined ? s : { ...s, zoom: next };
     });
 
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFullscreen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
-
   const header = (trailing: ReactNode) => (
     <HtmlHeader title={title} zoom={state.zoom} onReload={reload} onZoom={zoom} trailing={trailing} />
   );
 
   return (
-    <section className="osmo-html" aria-label={title}>
+    <section className="osmo-frame osmo-html" aria-label={title}>
       {header(
         <button type="button" className="osmo-icon-button" aria-label="Open fullscreen" title="Fullscreen" onClick={() => setFullscreen(true)}>
           <ExpandIcon />
         </button>,
       )}
-      {!fullscreen && <HtmlFrame html={html} title={title} state={state} height={320} />}
+      {!fullscreen && <HtmlFrame html={html} title={title} state={state} height={INLINE_HEIGHT} />}
       {fullscreen &&
         createPortal(
-          <div className="osmo-html-overlay" onClick={() => setFullscreen(false)}>
-            <div className="osmo-html-modal" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
+          <div className="osmo-frame-overlay" onClick={() => setFullscreen(false)}>
+            <div className="osmo-frame-modal" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
               {header(
                 <button type="button" className="osmo-icon-button" aria-label="Close fullscreen" title="Close (Esc)" onClick={() => setFullscreen(false)} autoFocus>
                   <CloseIcon />

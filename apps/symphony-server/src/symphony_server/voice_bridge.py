@@ -146,12 +146,11 @@ class VoiceBridge:
         self.selection = default_selection(access.models(), default_voice)
         self.state: OsmoState = "idle"
         self.state_detail: str | None = None
-        # Set while no answer is under way: when_idle notices and model switches wait for it.
+        # Set while no answer is under way: model switches wait for it.
         self.idle = asyncio.Event()
         self.idle.set()
         # Bumped on every barge-in, so a tool round started before it does not ask for another answer.
         self.barge_ins = 0
-        self.idle_notices: dict[str, Notice] = {}
         # A model switch asked for by set_voice mid-answer; applied once the answer ends.
         self.swap_after_turn = False
         # Ended utterances whose transcript has not arrived, oldest first. Transcription finishes
@@ -522,17 +521,11 @@ class VoiceBridge:
             RUN_DESKTOP.reset(token)
 
     async def turn_over(self) -> None:
-        """No answer is under way: speak a queued phase notice, or apply a deferred model switch."""
+        """No answer is under way: apply a deferred model switch, and go back to listening."""
         self.idle.set()
         if self.swap_after_turn:
             self.swap_after_turn = False
             await self.apply_swap("tool")
-        notices, self.idle_notices = list(self.idle_notices.values()), {}
-        if notices and self.voice is not None:
-            for notice in notices:
-                await self.voice.add_message("user", notice.text)
-            await self.ask(self.voice)
-            return
         await self.set_state("listening")
 
     async def ask(self, voice: VoiceSession) -> None:
@@ -564,15 +557,11 @@ class VoiceBridge:
         await self.emit(event)
 
     async def tell(self, notice: Notice) -> None:
-        """Relay an agent notice: `interrupt` now (cutting off any answer), `when_idle` once no
-        answer is under way (only a run's latest phase), `silent` into the conversation only."""
-        if notice.tag != "when_idle":
-            self.record("agent", notice.text)
+        """Relay an agent notice: `interrupt` now (cutting off any answer), `silent` into the
+        conversation only."""
+        self.record("agent", notice.text)
         voice = self.voice
         if voice is None:
-            return
-        if notice.tag == "when_idle" and not self.idle.is_set():
-            self.idle_notices[notice.run_id] = notice
             return
         if notice.tag == "interrupt" and not self.idle.is_set():
             self.barge_ins += 1
