@@ -38,10 +38,22 @@ export function runApp() {
   const broadcast = (channel, payload) => { for (const win of windows()) win.webContents.send(channel, payload); };
 
   const audio = createAudioPort((channel, payload) => { if (audioWindow && live(audioWindow.webContents)) audioWindow.webContents.send(channel, payload); });
+  // A call first asks macOS for the microphone: a stop while it asks means the call is over, so capture never opens.
+  let stops = 0;
+  const port = {
+    ...audio.port,
+    async start(callback) {
+      const version = stops;
+      await microphone();
+      if (version !== stops) throw new Error('Microphone capture stopped before it started');
+      return audio.port.start(callback);
+    },
+    stop() { stops++; audio.port.stop(); },
+  };
   const session = createSessionController({
     url: `${origin.replace(/^http/, 'ws')}/ws`,
     createSocket: url => new WebSocket(url),
-    audio: audio.port,
+    audio: port,
     desktop: { execute: value => execute(value) },
     onEvent: event => broadcast(CHANNELS.event, event),
     onStatus: snapshot => broadcast(CHANNELS.status, snapshot),
@@ -54,6 +66,14 @@ export function runApp() {
     worker?.kill();
     session.setDesktopEnabled(false);
     if (workspace && live(workspace.webContents)) workspace.webContents.send('desktop:status', status());
+  }
+
+  /** Electron never asks macOS for the microphone on its own, and a capture macOS has not allowed fails as a bare
+   * "Permission denied". Asking resolves at once, without a prompt, once the user has answered. */
+  async function microphone() {
+    if (process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('microphone') === 'granted') return;
+    if (await systemPreferences.askForMediaAccess('microphone')) return;
+    throw new Error('Allow Osmo in System Settings → Privacy & Security → Microphone, then quit Osmo (Cmd+Q) and reopen it.');
   }
 
   /** Only the page this app serves, in a window of this app: `allowed` names which windows may use the channel. */
@@ -95,7 +115,7 @@ export function runApp() {
       if (action.action === 'screenshot') {
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1440, height: 1440 } });
         if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
-          throw new Error('Allow Osmo in System Settings → Privacy & Security → Screen Recording, then restart Osmo.');
+          throw new Error('Allow Osmo in System Settings → Privacy & Security → Screen Recording, then quit Osmo (Cmd+Q) and reopen it.');
         }
         const source = sources.find(item => item.display_id === String(display.id));
         if (!source || source.thumbnail.isEmpty()) throw new Error('Primary display capture is unavailable');

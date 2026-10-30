@@ -75,4 +75,5 @@ export const dialog = { showMessageBox: async (...args) => { fake.dialogs.push(a
 export const Menu = { buildFromTemplate: template => template, setApplicationMenu() {} };
 export const desktopCapturer = { getSources: async () => [] };
 export const shell = { openExternal: async () => {} };
-export const systemPreferences = {};
+// The microphone is already allowed, as macOS answers once the user has.
+export const systemPreferences = { getMediaAccessStatus: () => 'granted', askForMediaAccess: async () => true };

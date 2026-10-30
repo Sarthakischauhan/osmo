@@ -99,8 +99,9 @@ PyAutoGUI's failsafe. These mechanisms do not roll back input already sent.
 
 ## OS setup and limits
 
-- **macOS:** grant Screen Recording and Accessibility to Osmo (or the development
-  Electron/Python processes if prompted); restart after granting Screen Recording.
+- **macOS:** grant Screen Recording and Accessibility to a signed Osmo build, then quit (Cmd+Q)
+  and reopen it. Unsigned builds lose the grants; in development, grant your terminal instead. See
+  [docs/desktop-signing.md](../../docs/desktop-signing.md).
 - **Windows:** use a Python interpreter with PyAutoGUI installed.
 - **Linux:** X11 is required for input. Wayland input is not supported in this first version.
 - Primary display only. Click coordinates are normalized relative to the full screenshot,
@@ -122,8 +123,10 @@ bun run --filter @osmo/desktop pack
 Build on the target OS. Electron Builder emits DMG, NSIS, or AppImage under `apps/desktop/release`.
 Web assets, Python server source, and a uv-managed CPython 3.12 runtime with the server and
 PyAutoGUI dependencies are included. The packaged app uses that runtime unless
-`OSMO_DESKTOP_PYTHON` overrides it. Signing, notarization, and automatic updates are still
-follow-up release work.
+`OSMO_DESKTOP_PYTHON` overrides it. On macOS, run `bun run --filter @osmo/desktop signing:create`
+once so local builds are signed with a stable self-signed identity
+([docs/desktop-signing.md](../../docs/desktop-signing.md)). Developer ID signing, notarization, and
+automatic updates are still follow-up release work.
 
 `OSMO_DESKTOP_URL` attaches to an already-running loopback HTTP origin and disables managed server
 startup; remote origins are rejected. `OSMO_DESKTOP_PYTHON` overrides the Python used for both
