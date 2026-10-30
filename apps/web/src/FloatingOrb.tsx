@@ -2,8 +2,10 @@ import { GlassOrb, type OrbMode } from "@osmo/osmo-composer";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BoxPlacement } from "./desktopBridge";
 import type { Runs } from "@/lib/runs";
-import { CompactAgentActivity, type DecideApproval } from "./CompactAgentActivity";
-import type { AgentActivity } from "./compact";
+import type { DecideApproval } from "./CompactAgentActivity";
+import { type AgentActivity, hasPreview } from "./compact";
+import type { Turn } from "./feed";
+import { OrbPreview } from "./OrbPreview";
 import { HoverPanel, type Scheduler } from "./hoverPanel";
 import { SingleClick } from "./singleClick";
 
@@ -13,6 +15,8 @@ export interface FloatingOrbProps {
   mode: OrbMode;
   outputLevel: () => number;
   runs: Runs;
+  /** The conversation so far; the box shows its latest spoken lines. */
+  turns: readonly Turn[];
   activity: AgentActivity;
   theme: "light" | "dark";
   onDecide: DecideApproval;
@@ -28,10 +32,11 @@ export interface FloatingOrbProps {
 
 /**
  * The floating window's whole content: the orb, and beside it (below, or above when the window had no room below) the
- * agent log while the pointer rests on the orb or an approval waits. It only shows what the session owner passes in;
+ * preview box while the pointer rests on the orb or an approval waits: the latest spoken lines, then the agent log
+ * with its approvals. It only shows what the session owner passes in;
  * it never opens a connection or a microphone.
  */
-export function FloatingOrb({ mode, outputLevel, runs, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight }: FloatingOrbProps) {
+export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight }: FloatingOrbProps) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const hover = useRef<HoverPanel<number>>();
@@ -53,7 +58,7 @@ export function FloatingOrb({ mode, outputLevel, runs, activity, theme, onDecide
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
   // The box reports its own height, so the window is exactly as tall as it needs.
-  const hasBox = open && (activity.cards.length > 0 || activity.elsewhere > 0);
+  const hasBox = open && hasPreview(turns, activity);
   useLayoutEffect(() => {
     const element = box.current;
     if (!hasBox || !element) {
@@ -88,7 +93,7 @@ export function FloatingOrb({ mode, outputLevel, runs, activity, theme, onDecide
       </button>
       {open && (
         <div ref={box} className="osmo-floating-box" data-placed={placement.placed > 0 || undefined} {...track("panel")} onPointerDown={() => hover.current?.pin()}>
-          <CompactAgentActivity activity={activity} runs={runs} onDecide={onDecide} />
+          <OrbPreview turns={turns} runs={runs} activity={activity} onDecide={onDecide} />
         </div>
       )}
     </div>

@@ -22,6 +22,33 @@ describe("the orb window's approvals", () => {
   });
 });
 
+const said = (role: "user" | "assistant", text: string, itemId: string): ServerEvent => ({ type: "transcript.delta", role, text, itemId, final: true });
+const spoken = (feed: ReturnType<typeof reduceOrbFeed>) => feed.turns.flatMap((turn) => (turn.role === "approval" ? [] : [turn.text]));
+
+describe("the orb window's spoken lines", () => {
+  const talked = [said("user", "find shoes", "u1"), said("assistant", "on it", "a1")].reduce((feed, event) => reduceOrbFeed(feed, { kind: "event", event }), emptyFeed);
+
+  it("come from the session's transcript events", () => {
+    expect(spoken(talked)).toEqual(["find shoes", "on it"]);
+  });
+
+  it("survive the approvals poll, which only replaces the approvals", () => {
+    const first = reduceOrbFeed(talked, { kind: "listed", approvals: [approval("a1", "r1")] });
+    expect(spoken(first)).toEqual(["find shoes", "on it"]);
+    expect(waiting(first)).toEqual(["a1"]);
+    const second = reduceOrbFeed(first, { kind: "listed", approvals: [approval("a2", "r2")] });
+    expect(spoken(second)).toEqual(["find shoes", "on it"]);
+    expect(waiting(second)).toEqual(["a2"]);
+  });
+
+  it("are dropped when another thread opens, and the waiting approvals are not", () => {
+    const asked = reduceOrbFeed(talked, { kind: "listed", approvals: [approval("a1", "r1")] });
+    const restarted = reduceOrbFeed(asked, { kind: "restart" });
+    expect(spoken(restarted)).toEqual([]);
+    expect(waiting(restarted)).toEqual(["a1"]);
+  });
+});
+
 describe("the session the orb starts", () => {
   it("uses the workspace picker's saved pick", () => {
     expect(savedStart(JSON.stringify({ model: "grok-voice", voice: "eve", effort: "low" }))).toEqual({ model: "grok-voice", voice: "eve", effort: "low" });

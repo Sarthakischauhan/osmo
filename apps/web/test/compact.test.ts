@@ -1,6 +1,6 @@
 import type { AgentRunStatus, ServerEvent } from "@osmo/osmo-composer";
 import { describe, expect, it } from "vitest";
-import { agentActivity } from "../src/compact";
+import { COMPACT_MESSAGES, agentActivity, compactMessages, hasPreview } from "../src/compact";
 import { type Feed, emptyFeed, reduceFeed } from "../src/feed";
 import { COMPLETED_LINGER_MS, type Runs, reduceRuns } from "../src/lib/runs";
 
@@ -47,5 +47,38 @@ describe("compact agent activity", () => {
     const events: ServerEvent[] = [update("r1", "waiting_approval", "Clicking"), approval("r1"), { type: "approval.resolved", approvalId: "p-r1", runId: "r1", approved: true }];
     const activity = agentActivity(runsOf(events), feedOf(events).turns, undefined, 5000);
     expect(activity.cards[0]?.approval).toBeUndefined();
+  });
+});
+
+const said = (role: "user" | "assistant", text: string, itemId: string, final = true): ServerEvent => ({ type: "transcript.delta", role, text, itemId, final });
+
+describe("the preview's spoken lines", () => {
+  it("are the latest ones, oldest first", () => {
+    const turns = feedOf([said("user", "one", "u1"), said("assistant", "two", "a1"), said("user", "three", "u2"), said("assistant", "four", "a2")]).turns;
+    expect(COMPACT_MESSAGES).toBe(3);
+    expect(compactMessages(turns).map((turn) => turn.text)).toEqual(["two", "three", "four"]);
+    expect(compactMessages(turns, 1).map((turn) => turn.text)).toEqual(["four"]);
+  });
+
+  it("include a user line whose transcript is still on its way, but not an empty answer", () => {
+    const turns = feedOf([said("user", "", "u1", false), { type: "state", state: "working", detail: "Searching" }]).turns;
+    expect(compactMessages(turns).map((turn) => turn.role)).toEqual(["user"]);
+    expect(compactMessages(feedOf([{ type: "state", state: "working", detail: "Searching" }]).turns)).toEqual([]);
+  });
+
+  it("leave approvals to the agent log", () => {
+    const turns = feedOf([said("user", "buy it", "u1"), approval("r1")]).turns;
+    expect(compactMessages(turns).map((turn) => turn.role)).toEqual(["user"]);
+  });
+});
+
+describe("whether the preview has anything to show", () => {
+  const none = agentActivity({}, [], undefined, 0);
+  it("does once something was said, or an agent runs here or elsewhere", () => {
+    expect(hasPreview([], none)).toBe(false);
+    expect(hasPreview(feedOf([said("user", "hi", "u1")]).turns, none)).toBe(true);
+    const events = [update("r1", "running", "Reading")];
+    expect(hasPreview([], agentActivity(runsOf(events), [], undefined, 0))).toBe(true);
+    expect(hasPreview([], agentActivity(runsOf(events, { r1: "other" }), [], "mine", 0))).toBe(true);
   });
 });

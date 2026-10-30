@@ -1,5 +1,8 @@
 /* Osmo's app styles. Colours come from the tokens in tailwind.css (dark default, `.light`). */
 :root {
+  /* Buttons and the orb's preview box are 8px; the orb in a message is fully round (Sarthak, Oct 30). */
+  --radius-button: 8px;
+  --radius-preview: 8px;
   --surface-1: color-mix(in srgb, var(--foreground) 5%, var(--background));
   --surface-2: color-mix(in srgb, var(--foreground) 8%, var(--background));
   --surface-3: color-mix(in srgb, var(--foreground) 12%, var(--background));
@@ -17,7 +20,7 @@ button { font: inherit; color: inherit; }
 .brand-mark { display: block; width: 18px; height: 18px; border-radius: 50%; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
 .clock { font: 11px var(--font-mono); color: var(--muted-foreground); }
-.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: 3px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.end { display: inline-flex; gap: 8px; align-items: center; padding: 7px 15px; border: 0; border-radius: var(--radius-button); background: var(--surface-2); cursor: pointer; font-size: 12px; }
 .end:hover { background: var(--surface-3); }
 
 .feed { max-width: 608px; margin: 0 auto; padding: 24px 0 64px; display: flex; flex-direction: column; gap: 18px; }
@@ -33,7 +36,7 @@ button { font: inherit; color: inherit; }
 .spoken { font-size: 10px; color: var(--muted-foreground); }
 
 .turn.assistant { display: grid; grid-template-columns: 28px 1fr; gap: 0; animation: rise .25s ease-out; }
-.avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 3px; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
+.avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
 .assistant-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
 
 /* chat-sdk (@sarchauhan/chat) renders text, tool rows and card/options widgets.
@@ -78,7 +81,7 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
 .canvas.chat-root .chat-question { border-radius: 3px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-subagent { border-radius: 3px; background: var(--surface-1); padding: 16px; }
-.canvas.chat-root .chat-subagent-inspect { border: 0; border-radius: 999px; padding: 5px 10px 5px 12px; gap: 6px; background: var(--surface-2); }
+.canvas.chat-root .chat-subagent-inspect { border: 0; border-radius: var(--radius-button); padding: 5px 10px 5px 12px; gap: 6px; background: var(--surface-2); }
 .canvas.chat-root .chat-subagent-inspect:hover { background: var(--surface-3); }
 .canvas.chat-root .chat-question-eyebrow { display: none; }
 .canvas.chat-root .chat-question h3 { font-size: 12px; margin: 0; }
@@ -87,7 +90,7 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question-option:hover,
 .canvas.chat-root .chat-question-option[data-selected="true"] { background: var(--surface-3); }
 .canvas.chat-root .chat-question footer { background: none; }
-.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--surface-3); color: var(--foreground); }
+.canvas.chat-root .chat-question button { border-radius: var(--radius-button); background: var(--surface-3); color: var(--foreground); }
 .canvas.chat-root .agent-tool { border-radius: 3px; background: var(--surface-1); font-size: 10px; }
 .canvas.chat-root .agent-tool-complete .agent-tool-state,
 .canvas.chat-root .agent-tool-complete .agent-tool-dot,
@@ -97,7 +100,7 @@ button { font: inherit; color: inherit; }
 
 .osmo-card-image { width: 100%; border-radius: var(--radius, 3px); margin-bottom: 10px; }
 .osmo-card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: var(--radius-button); background: var(--surface-2); cursor: pointer; font-size: 12px; }
 .osmo-card-actions button:hover { background: var(--surface-3); }
 
 .osmo-chart { border-radius: var(--radius, 3px); background: var(--surface-1); padding: 16px; }
@@ -116,7 +119,7 @@ button { font: inherit; color: inherit; }
 .osmo-frame-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .osmo-frame-tools { display: flex; align-items: center; gap: 2px; }
 .osmo-frame-readout { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
-.osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius, 3px); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
+.osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-button); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
 .osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
 .osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
 .osmo-icon-button:disabled { opacity: .35; cursor: default; }
@@ -203,14 +206,14 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-link:hover { color: var(--foreground); }
 .osmo-underline { font-size: 13px; text-decoration: underline; }
 
-.osmo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, opacity .15s ease-out; }
+.osmo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; border-radius: var(--radius-button); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, opacity .15s ease-out; }
 .osmo-btn-sm { height: 28px; }
 .osmo-btn-primary { background: var(--foreground); color: var(--background); }
 .osmo-btn-primary:hover { opacity: .88; }
 .osmo-btn-ghost { background: var(--accent); color: var(--foreground); }
 .osmo-btn-ghost:hover { background: var(--sidebar-accent); }
 .osmo-btn-destructive { background: var(--destructive); color: #fff; }
-.osmo-icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius, 3px); background: none; color: var(--muted-foreground); cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
+.osmo-icon-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-button); background: none; color: var(--muted-foreground); cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
 .osmo-icon-btn:hover { background: var(--accent); color: var(--foreground); }
 .osmo-tooltip-kbd { margin-left: 8px; color: inherit; opacity: .7; }
 
@@ -221,20 +224,20 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-sidebar-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--foreground); letter-spacing: -0.01em; }
 .osmo-sidebar-brand img { display: block; border-radius: 50%; }
 .osmo-sidebar-icons { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 4px; }
-.osmo-new-thread { display: flex; align-items: center; gap: 8px; height: 32px; margin: 4px 8px 0; padding: 0 8px; border: 0; border-radius: var(--radius, 3px); background: none; color: var(--foreground); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out; }
+.osmo-new-thread { display: flex; align-items: center; gap: 8px; height: 32px; margin: 4px 8px 0; padding: 0 8px; border: 0; border-radius: var(--radius-button); background: none; color: var(--foreground); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out; }
 .osmo-new-thread:hover { background: var(--accent); }
 .osmo-new-thread span { flex: 1; text-align: left; }
 .osmo-thread-group { padding: 0 8px; }
 .osmo-thread-group-label { height: auto; padding: 16px 8px 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
 /* Sidebar rows (GUI spec): plain text 13px/400 muted; a box only on hover; the open thread is foreground/500. */
-.osmo-thread-button { height: 30px; padding: 6px 8px; border: 0; border-radius: 3px; box-shadow: none; font-size: 13px; font-weight: 400; color: var(--muted-foreground); background: none; cursor: pointer; transition: background-color 120ms; }
+.osmo-thread-button { height: 30px; padding: 6px 8px; border: 0; border-radius: var(--radius-button); box-shadow: none; font-size: 13px; font-weight: 400; color: var(--muted-foreground); background: none; cursor: pointer; transition: background-color 120ms; }
 .osmo-thread-button:hover { background: var(--accent); }
 .osmo-thread-button[data-active="true"] { background: none; color: var(--foreground); font-weight: 500; }
 .osmo-thread-button[data-active="true"]:hover { background: var(--accent); }
-.osmo-thread-button:focus-visible, .osmo-thread-action:focus-visible { outline: 1px solid var(--ring); outline-offset: 0; border-radius: 3px; box-shadow: none; }
+.osmo-thread-button:focus-visible, .osmo-thread-action:focus-visible { outline: 1px solid var(--ring); outline-offset: 0; border-radius: var(--radius-button); box-shadow: none; }
 .osmo-thread-row .osmo-thread-button { padding-right: 32px; }
 .osmo-thread-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.osmo-thread-action { color: var(--muted-foreground); border-radius: var(--radius, 3px); cursor: pointer; }
+.osmo-thread-action { color: var(--muted-foreground); border-radius: var(--radius-button); cursor: pointer; }
 .osmo-rename { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 2px; outline: none; background: var(--background); box-shadow: inset 0 0 0 1px var(--fg-tertiary); color: var(--foreground); font: 13px var(--font-sans); }
 .osmo-sidebar-empty { padding: 16px 16px; color: var(--muted-foreground); font-size: 13px; }
 .osmo-sidebar-empty-title { margin-bottom: 2px; color: var(--foreground); font-size: 14px; font-weight: 500; }
@@ -251,7 +254,7 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-popover { width: 280px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--popover); color: var(--popover-foreground); }
 .osmo-section { display: flex; flex-direction: column; }
 .osmo-section-label { display: flex; justify-content: space-between; margin: 0 0 4px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--fg-tertiary); }
-.osmo-list-row { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 -8px; padding: 0 8px; border: 0; border-radius: var(--radius, 3px); background: none; color: var(--foreground); font-size: 13px; text-align: left; transition: background .15s ease-out; }
+.osmo-list-row { display: flex; align-items: center; gap: 12px; height: 40px; margin: 0 -8px; padding: 0 8px; border: 0; border-radius: var(--radius-button); background: none; color: var(--foreground); font-size: 13px; text-align: left; transition: background .15s ease-out; }
 button.osmo-list-row { cursor: pointer; }
 .osmo-list-row:hover, .osmo-list-row:focus-visible { background: var(--accent); }
 .osmo-list-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -287,7 +290,7 @@ button.osmo-list-row { cursor: pointer; }
 /* Native capabilities share the existing persistent thread sidebar. */
 .osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 [data-state="collapsed"] .osmo-desktop-footer { display: none; }
-.desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-button); background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .desktop-support.active { color: var(--background); background: var(--foreground); }
 .desktop-support-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); }
 .desktop-support.active .desktop-support-dot { background: var(--foreground); }
@@ -296,24 +299,26 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-provider-connections button { display: flex; justify-content: space-between; width: 100%; border: 0; background: none; padding: 6px 0; font-size: 12px; cursor: pointer; }
 .osmo-provider-connections button span { color: var(--fg-tertiary); font-size: 11px; }
 .osmo-appearance { display: flex; gap: 8px; }
-.osmo-appearance button { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1; border: 1px solid transparent; border-radius: var(--radius); background: none; color: var(--muted-foreground); padding: 7px; font-size: 12px; cursor: pointer; }
+.osmo-appearance button { display: flex; align-items: center; justify-content: center; gap: 10px; flex: 1; border: 1px solid transparent; border-radius: var(--radius-button); background: none; color: var(--muted-foreground); padding: 7px; font-size: 12px; cursor: pointer; }
 .osmo-appearance button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); border-color: var(--border); }
 .osmo-appearance .osmo-ascii { font-size: 2.5px; line-height: 1.15; opacity: 1; }
 .osmo-card-art { float: right; font-size: 9px; margin: 0 0 12px 20px; }
 @media (max-width: 600px) { .osmo-ascii-home .osmo-ascii { font-size: clamp(6px, 1.8vw, 9px); } }
 
 /* ---- Floating orb and agent log (#18) ---- */
-/* The floating window is the orb alone; while the pointer rests on it, the agent log opens below it. */
+/* The floating window is the orb alone; while the pointer rests on it (or an approval waits), the preview opens beside it: the latest spoken lines, then the agent log. */
 .osmo-floating { display: flex; flex-direction: column; align-items: flex-start; width: 100%; color: var(--foreground); }
 .osmo-floating[data-side="above"] { flex-direction: column-reverse; height: 100%; }
 /* The Electron orb window is transparent: only the orb and the box are drawn. */
 html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overflow: hidden; }
-/* Holds the box's width at the window's open width (BOX_WIDTH in apps/desktop/src/window-state.js), so its height measures the same before the window has grown. */
-.osmo-floating-box { width: 360px; visibility: hidden; }
+/* The box is never shrunk to the window's room: its own height is what sizes the window. Holds the box's width at the window's open width (BOX_WIDTH in apps/desktop/src/window-state.js), so its height measures the same before the window has grown. */
+.osmo-floating-box { flex: none; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; width: 360px; max-height: 400px; overflow-y: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-preview); background: var(--background); visibility: hidden; }
 .osmo-floating-box[data-placed] { visibility: visible; }
+.osmo-floating-box > * { flex: none; }
 .osmo-floating-orb { flex: none; position: relative; margin-left: var(--orb-left, 0px); display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
 .osmo-floating-orb .orb-canvas { transform: translate(-50%, -50%) scale(1.2); }
-.osmo-compact-agents { display: flex; flex-direction: column; gap: 8px; width: 100%; max-height: 288px; overflow-y: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--background); }
+.osmo-compact-transcript.canvas.chat-root { display: flex; flex-direction: column; gap: 10px; overflow: visible; scroll-padding-bottom: 0; }
+.osmo-compact-agents { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .osmo-compact-agent { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 3px; background: var(--surface-1); }
 .osmo-compact-agent-title { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .osmo-compact-agent-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
