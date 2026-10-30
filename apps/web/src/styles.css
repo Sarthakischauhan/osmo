@@ -22,7 +22,7 @@ button { font: inherit; color: inherit; }
 .feed { max-width: 608px; margin: 0 auto; padding: 24px 0 64px; display: flex; flex-direction: column; gap: 18px; }
 
 .turn.user { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 75%; animation: rise .25s ease-out; }
-.bubble { margin: 0; padding: 9px 14px; border-radius: 3px; background: var(--surface-3); font-size: 13px; }
+.bubble { margin: 0; padding: 9px 16px; border-radius: 999px; background: var(--surface-3); font-size: 13px; }
 .bubble[data-pending] { opacity: .7; }
 .heard-dots { display: inline-flex; gap: 4px; padding: 5px 2px; }
 .heard-dots i { width: 5px; height: 5px; border-radius: 3px; background: currentColor; opacity: .35; animation: heard 1.2s ease-in-out infinite; }
@@ -57,7 +57,7 @@ button { font: inherit; color: inherit; }
   --chat-user-bg: var(--surface-3);
   --chat-user-fg: var(--foreground);
   --chat-radius: 3px;
-  --chat-radius-lg: 3px;
+  --chat-radius-lg: 8px;
   --chat-font-sans: var(--font-sans);
   --chat-body-size: 13px;
 }
@@ -70,14 +70,14 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question button,
 .canvas.chat-root .chat-widget-header,
 .canvas.chat-root .chat-widget-meta { border: 0; box-shadow: none; outline: none; }
-.canvas.chat-root .chat-widget-card { border-radius: 3px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-widget-card { border-radius: 8px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-widget-header { padding: 0 0 6px; background: none; }
 .canvas.chat-root .chat-widget-body { padding: 0; }
 .canvas.chat-root .chat-widget-label-row { display: none; }
 .canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
-.canvas.chat-root .chat-question { border-radius: 3px; background: var(--surface-1); padding: 16px; }
-.canvas.chat-root .chat-subagent { border-radius: 3px; background: var(--surface-1); padding: 16px; }
-.canvas.chat-root .chat-subagent-inspect { border: 0; border-radius: 3px; padding: 5px 10px 5px 12px; gap: 6px; background: var(--surface-2); }
+.canvas.chat-root .chat-question { border-radius: 8px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-subagent { border-radius: 8px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-subagent-inspect { border: 0; border-radius: 999px; padding: 5px 10px 5px 12px; gap: 6px; background: var(--surface-2); }
 .canvas.chat-root .chat-subagent-inspect:hover { background: var(--surface-3); }
 .canvas.chat-root .chat-question-eyebrow { display: none; }
 .canvas.chat-root .chat-question h3 { font-size: 12px; margin: 0; }
@@ -86,8 +86,8 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question-option:hover,
 .canvas.chat-root .chat-question-option[data-selected="true"] { background: var(--surface-3); }
 .canvas.chat-root .chat-question footer { background: none; }
-.canvas.chat-root .chat-question button { border-radius: 3px; background: var(--surface-3); color: var(--foreground); }
-.canvas.chat-root .agent-tool { border-radius: 3px; background: var(--surface-1); font-size: 10px; }
+.canvas.chat-root .chat-question button { border-radius: 999px; background: var(--surface-3); color: var(--foreground); }
+.canvas.chat-root .agent-tool { border-radius: 8px; background: var(--surface-1); font-size: 10px; }
 .canvas.chat-root .agent-tool-complete .agent-tool-state,
 .canvas.chat-root .agent-tool-complete .agent-tool-dot,
 .canvas.chat-root .agent-tool-complete .agent-tool-chevron { display: none; }
@@ -96,7 +96,7 @@ button { font: inherit; color: inherit; }
 
 .osmo-card-image { width: 100%; border-radius: var(--radius, 3px); margin-bottom: 10px; }
 .osmo-card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: var(--radius, 3px); background: var(--surface-2); cursor: pointer; font-size: 12px; }
+.osmo-card-actions button { padding: 7px 14px; border: 0; border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 12px; }
 .osmo-card-actions button:hover { background: var(--surface-3); }
 
 .osmo-chart { border-radius: var(--radius, 3px); background: var(--surface-1); padding: 16px; }
@@ -202,7 +202,7 @@ kbd { font: 12px/16px var(--font-mono); color: var(--fg-tertiary); }
 .osmo-link:hover { color: var(--foreground); }
 .osmo-underline { font-size: 13px; text-decoration: underline; }
 
-.osmo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius, 3px); font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, opacity .15s ease-out; }
+.osmo-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, opacity .15s ease-out; }
 .osmo-btn-sm { height: 28px; }
 .osmo-btn-primary { background: var(--foreground); color: var(--background); }
 .osmo-btn-primary:hover { opacity: .88; }
@@ -285,9 +285,9 @@ button.osmo-list-row { cursor: pointer; }
 /* Native capabilities share the existing persistent thread sidebar. */
 .osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 [data-state="collapsed"] .osmo-desktop-footer { display: none; }
-.desktop-support { display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--accent); padding: 8px 10px; font-size: 12px; cursor: pointer; }
-.desktop-support.active { color: var(--foreground); border-color: var(--foreground); }
-.desktop-support-dot { width: 5px; height: 5px; border-radius: 3px; background: var(--muted-foreground); }
+.desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.desktop-support.active { color: var(--background); background: var(--foreground); }
+.desktop-support-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); }
 .desktop-support.active .desktop-support-dot { background: var(--foreground); }
 .desktop-support:disabled { opacity: .5; cursor: wait; }
 .osmo-provider-connections summary { color: var(--muted-foreground); font-size: 12px; padding: 4px 0; cursor: pointer; }
