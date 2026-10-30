@@ -30,7 +30,7 @@ import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
-import { type Feed, type RunCard, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
+import { type Feed, type RunCard, type Turn, conversationTitle, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
 
@@ -338,7 +338,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         <header className="topbar">
           <div className="brand">
             {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
-            <strong>{threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
+            <img className="brand-mark" src="/favicon.svg" alt="" width={18} height={18} />
+            <strong>{conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
             {(sidebar.state === "collapsed" || sidebar.isMobile) && <DesktopSupport desktop={desktop} />}

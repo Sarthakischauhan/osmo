@@ -92,6 +92,18 @@ BARGE_IN = "barge-in"
 SWAP_WAIT_S = 15.0
 # A thread is titled from its first utterance, cut to this length.
 TITLE_FROM_SPEECH_MAX = 60
+
+
+def conversation_title(text: str) -> str | None:
+    """A short title from the first line of a conversation, or None when there is nothing to name it with."""
+    line = " ".join(text.split())
+    if not line:
+        return None
+    cut = line[:TITLE_FROM_SPEECH_MAX].rsplit(" ", 1)[0] if len(line) > TITLE_FROM_SPEECH_MAX and " " in line[:TITLE_FROM_SPEECH_MAX] else line[:TITLE_FROM_SPEECH_MAX]
+    title = cut.strip(" \t.,;:!?-—–")
+    return title or None
+
+
 # An utterance's bubble waits this long for its transcript (some never come: noise, a failed
 # transcription, a closed voice session) before it is dropped.
 UNHEARD_WAIT_S = 10.0
@@ -366,10 +378,13 @@ class VoiceBridge:
             self.record("assistant", self.held.pop(0)[1])
 
     async def title_from(self, text: str) -> None:
-        """Name an untitled thread after its first utterance."""
+        """Name an untitled thread after the first thing said in it."""
         if self.thread is None or self.thread.title != DEFAULT_THREAD_TITLE:
             return
-        renamed = self.storage.rename_thread(self.thread.id, text[:TITLE_FROM_SPEECH_MAX])
+        title = conversation_title(text)
+        if title is None:
+            return
+        renamed = self.storage.rename_thread(self.thread.id, title)
         if renamed is not None:
             self.thread = renamed
             await self.emit(ThreadEvent(thread=renamed))

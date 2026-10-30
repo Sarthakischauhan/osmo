@@ -58,6 +58,16 @@ export interface Feed {
 
 export const emptyFeed: Feed = { turns: [], seq: 0 };
 
+/** The chat shell's title: the first thing said in this conversation, or undefined while it is still empty. */
+export function conversationTitle(turns: readonly Turn[]): string | undefined {
+  const said = turns.find((turn): turn is UserTurn => turn.role === "user" && turn.text.trim().length > 0);
+  if (said === undefined) return undefined;
+  const line = said.text.trim().replace(/\s+/g, " ");
+  const max = 60;
+  const cut = line.length > max && line.slice(0, max).includes(" ") ? line.slice(0, max).replace(/\s+\S*$/, "") : line.slice(0, max);
+  return cut.replace(/^[\s.,;:!?-]+|[\s.,;:!?-]+$/g, "") || undefined;
+}
+
 function withAssistant(feed: Feed, change: (turn: AssistantTurn) => AssistantTurn): Feed {
   const last = feed.turns[feed.turns.length - 1];
   if (last?.role === "assistant") {

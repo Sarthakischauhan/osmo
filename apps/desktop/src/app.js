@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, screen, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences } from 'electron';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,8 @@ import { boxLayout, defaultOrbBounds } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = localAppUrl(process.env.OSMO_DESKTOP_URL);
+// The same orb as docs/osmo-orb.svg, so the dock, taskbar and window match the mark in the README.
+const appIcon = nativeImage.createFromPath(path.join(here, '../assets/icon.png'));
 const STOP_SHORTCUT = 'CommandOrControl+Shift+Escape';
 
 /**
@@ -192,6 +194,7 @@ export function runApp() {
   }
 
   const webPreferences = { preload: path.join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false };
+  const chrome = { title: 'Osmo', icon: appIcon };
 
   /** The hidden window with the microphone and speakers: the only one allowed to capture, and no other page may. */
   function createAudio() {
@@ -214,7 +217,7 @@ export function runApp() {
 
   function createWorkspace() {
     workspace = new BrowserWindow({
-      title: 'Osmo', width: 1100, height: 800, minWidth: 520, minHeight: 600, backgroundColor: '#111111', show: false, webPreferences,
+      ...chrome, width: 1100, height: 800, minWidth: 520, minHeight: 600, backgroundColor: '#111111', show: false, webPreferences,
     });
     secure(workspace, { revokeOnNavigation: true });
     workspace.on('minimize', () => switcher.toOrb());
@@ -234,7 +237,7 @@ export function runApp() {
   function createFloating() {
     orbBounds = defaultOrbBounds(screen.getPrimaryDisplay().workArea);
     floating = new BrowserWindow({
-      ...orbBounds, frame: false, transparent: true, hasShadow: false, alwaysOnTop: true, resizable: false, movable: false,
+      ...orbBounds, ...chrome, frame: false, transparent: true, hasShadow: false, alwaysOnTop: true, resizable: false, movable: false,
       minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, show: false, webPreferences,
     });
     secure(floating, { revokeOnNavigation: false });
@@ -242,6 +245,9 @@ export function runApp() {
     void floating.loadURL(`${origin}/#orb`);
   }
 
+  // Before ready, so macOS shows Osmo (and the orb) instead of Electron in the Dock and menu bar.
+  app.setName('Osmo');
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(appIcon);
   if (!app.requestSingleInstanceLock()) app.quit();
   else {
     app.on('second-instance', () => switcher?.toFull());
