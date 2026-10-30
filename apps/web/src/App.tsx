@@ -353,7 +353,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
 
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
-            <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
+            <main className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
               {feed.turns.length === 0 ? (
                 <AsciiHome />
               ) : (

@@ -305,6 +305,10 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-card-art { float: right; font-size: 9px; margin: 0 0 12px 20px; }
 @media (max-width: 600px) { .osmo-ascii-home .osmo-ascii { font-size: clamp(6px, 1.8vw, 9px); } }
 
+/* Scroll containers scroll without a visible bar: wheel, touch, keys and programmatic scrolling still work. */
+.osmo-scroll { scrollbar-width: none; }
+.osmo-scroll::-webkit-scrollbar { display: none; }
+
 /* ---- Floating orb and agent log (#18) ---- */
 /* The floating window is the orb alone; while the pointer rests on it (or an approval waits), the preview opens beside it: the latest spoken lines, then the agent log. */
 .osmo-floating { display: flex; flex-direction: column; align-items: flex-start; width: 100%; color: var(--foreground); }

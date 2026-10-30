@@ -92,7 +92,7 @@ export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, o
         <GlassOrb mode={mode} outputLevel={outputLevel} />
       </button>
       {open && (
-        <div ref={box} className="osmo-floating-box" data-placed={placement.placed > 0 || undefined} {...track("panel")} onPointerDown={() => hover.current?.pin()}>
+        <div ref={box} className="osmo-floating-box osmo-scroll" data-placed={placement.placed > 0 || undefined} {...track("panel")} onPointerDown={() => hover.current?.pin()}>
           <OrbPreview turns={turns} runs={runs} activity={activity} onDecide={onDecide} />
         </div>
       )}
