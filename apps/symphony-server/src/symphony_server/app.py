@@ -9,6 +9,7 @@ live in SQLite (storage.py).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -28,7 +29,8 @@ from core_server import (
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-from symphony_server.browser import BROWSER_TOOL_NAMES, BrowserRunLink, BrowserSessions, browser_tools
+from symphony_server.browser import BROWSER_TOOL_NAMES, THREAD_ID, BrowserRunLink, BrowserSessions, browser_tools
+from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
@@ -101,7 +103,7 @@ def osmo_core_config(
         return DesktopRunLink(desktops.get(context.session_id) if desktops is not None else None)
 
     def browser_link(context: RunContext) -> BrowserRunLink:
-        return BrowserRunLink(context.session_id)
+        return BrowserRunLink(context.metadata.get(THREAD_ID))
 
     return build_config(
         registry=access.registry,
@@ -144,7 +146,14 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if settings.browser_path is not None:
+            # A server that was killed could not close its browsers: remove what it left behind.
+            reap_stale()
+        idle_watch = asyncio.create_task(browsers.watch_idle()) if settings.browser_path is not None else None
         yield
+        if idle_watch is not None:
+            idle_watch.cancel()
+            await asyncio.gather(idle_watch, return_exceptions=True)
         await agents.shutdown()
         await backend.shutdown()
         storage.close()

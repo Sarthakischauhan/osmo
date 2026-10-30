@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -41,10 +42,16 @@ from websockets.exceptions import WebSocketException
 from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
+from symphony_server.browser import BrowserSession
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
+from symphony_server.cdp import BrowserError
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
+    BrowserClick,
+    BrowserClose,
+    BrowserKey,
+    BrowserScroll,
     DesktopConfigure,
     DesktopResult,
     Interrupt,
@@ -88,6 +95,9 @@ TITLE_FROM_SPEECH_MAX = 60
 # An utterance's bubble waits this long for its transcript (some never come: noise, a failed
 # transcription, a closed voice session) before it is dropped.
 UNHEARD_WAIT_S = 10.0
+# Tools whose result needs no answer when the answer that called them already said something:
+# "I'll look into it" is enough, and a second line after run_agent returns only repeats it.
+ANNOUNCED_TOOLS = frozenset({"run_agent"})
 
 
 class VoiceToolSink(EventSink):
@@ -108,6 +118,8 @@ class VoiceToolSink(EventSink):
 class Response:
     """One voice model response as read off the session."""
 
+    # The answer's bubble in the browser: its deltas carry this id, and a `final` one ends it.
+    item_id: str = field(default_factory=lambda: f"a-{secrets.token_hex(6)}")
     text: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     done: ResponseDone | None = None
@@ -218,6 +230,14 @@ class VoiceBridge:
         elif isinstance(event, SessionEnd):
             await self.close_voice()
             await self.set_state("idle")
+            # The thread's browser lives between runs and reconnects, and ends with the session, once the runs
+            # still going on the thread have finished (they finish on their own and their results are stored).
+            if self.thread is not None:
+                await self.agents.browsers.end(self.thread.id)
+        elif isinstance(event, (BrowserClick, BrowserScroll, BrowserKey)):
+            self.spawn(self.drive_browser(event))
+        elif isinstance(event, BrowserClose):
+            await self.close_browser(event)
         elif isinstance(event, Interrupt):
             await self.interrupt()
         elif isinstance(event, WidgetAction):
@@ -253,6 +273,31 @@ class VoiceBridge:
         self.desk.thread_id = thread.id
         self.agents.observe(thread.id, self)
         await self.emit(ThreadEvent(thread=thread))
+        # A browser the thread already has (a reconnect, a reload) is shown again, with the page it is on.
+        session = self.agents.browsers.sessions.get(thread.id)
+        self.agents.browsers.resume(thread.id)
+        if session is not None:
+            await self.emit(session.render())
+
+    def browser_widget(self, widget_id: str) -> BrowserSession | None:
+        """The browser session of this thread, when `widget_id` is its widget (a client can only drive its own thread's)."""
+        session = self.agents.browsers.sessions.get(self.thread.id) if self.thread is not None else None
+        return session if session is not None and session.widget_id == widget_id else None
+
+    async def drive_browser(self, event: BrowserClick | BrowserScroll | BrowserKey) -> None:
+        """Pass the user's click, scroll or key on the thread's browser widget to the page (no approval: it is the user's own)."""
+        session = self.browser_widget(event.id)
+        if session is None or self.thread is None:
+            return
+        self.agents.browsers.touch(self.thread.id)
+        try:
+            await session.drive(event)
+        except BrowserError as exc:
+            log.warning("browser input failed: %s", exc)
+
+    async def close_browser(self, event: BrowserClose) -> None:
+        if self.thread is not None and self.browser_widget(event.id) is not None:
+            await self.agents.browsers.close(self.thread.id)
 
     def record(self, role: MessageRole, text: str) -> None:
         if self.thread is not None:
@@ -466,7 +511,7 @@ class VoiceBridge:
                 self.held.append((response.after or frozenset(), text))
                 self.store_held()
             if response.calls and response.done.error is None:
-                await self.run_tools(voice, response.calls)
+                await self.run_tools(voice, response.calls, spoke=bool(response.text))
             else:
                 await self.turn_over()
 
@@ -477,21 +522,26 @@ class VoiceBridge:
                 response.after = frozenset(self.unheard)
             if isinstance(event, TextDelta):
                 response.text.append(event.text)
-                await self.emit(TranscriptDelta(role="assistant", text=event.text))
+                await self.emit(TranscriptDelta(role="assistant", text=event.text, itemId=response.item_id))
             elif isinstance(event, ToolCall):
                 response.calls.append(event)
             else:
                 response.done = event
+        if response.text:
+            await self.emit(TranscriptDelta(role="assistant", text="".join(response.text), itemId=response.item_id, final=True))
         return response
 
-    async def run_tools(self, voice: VoiceSession, calls: list[ToolCall]) -> None:
+    async def run_tools(self, voice: VoiceSession, calls: list[ToolCall], *, spoke: bool) -> None:
         self.idle.clear()
         barge_ins = self.barge_ins
         for call in calls:
             await voice.add_tool_result(call.call_id, await self.run_tool(call))
-        if self.barge_ins == barge_ins:
+        if self.barge_ins != barge_ins:
+            return  # the user spoke meanwhile: the answer server VAD starts for that sees the results
+        if spoke and all(call.name in ANNOUNCED_TOOLS for call in calls):
+            await self.turn_over()
+        else:
             await voice.respond()
-        # Otherwise the user spoke meanwhile: the answer server VAD starts for that sees the results.
 
     async def run_tool(self, call: ToolCall) -> str:
         tool = self.tools.get(call.name)

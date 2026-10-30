@@ -12,7 +12,8 @@ export function trustedFrame(url, origin) {
   try { return new URL(url).origin === origin; } catch { return false; }
 }
 
-/** Microphone checks only. Electron passes the page URL, not a bare origin, as `requestingOrigin`. */
+/** Microphone checks only, for the one window `contents` (the hidden audio renderer): no other window may capture.
+ * Electron passes the page URL, not a bare origin, as `requestingOrigin`. */
 export function allowMicrophone(webContents, contents, permission, requestingOrigin, details, origin) {
   if (webContents !== contents || !details?.isMainFrame || permission !== 'media') return false;
   if (details.mediaType !== undefined && details.mediaType !== 'audio') return false;

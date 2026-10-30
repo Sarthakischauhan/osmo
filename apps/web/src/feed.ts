@@ -1,4 +1,4 @@
-import { BARGE_IN, type ServerEvent } from "@osmo/osmo-composer";
+import { type AgentRunStatus, BARGE_IN, type ServerEvent } from "@osmo/osmo-composer";
 import { isActionableWidget } from "@osmo/osmo-widgets";
 
 /** The canvas feed: what the user said, and each assistant turn's line, tool activity and widgets. */
@@ -11,6 +11,16 @@ export interface CanvasWidget {
   id: string;
   type: string;
   props: Record<string, unknown>;
+}
+
+/** A background agent run (`run_agent`), shown as a subagent card under the answer that started it. */
+export interface RunCard {
+  runId: string;
+  task: string;
+  status: AgentRunStatus;
+  /** Each step it started, in order. */
+  phases: string[];
+  result?: string;
 }
 
 /** A background agent's risky step waiting in the feed for Approve / Deny; `resolved` once answered. */
@@ -27,7 +37,7 @@ export interface ApprovalTurn {
 
 export type Turn =
   | UserTurn
-  | { role: "assistant"; key: string; text: string; activities: Activity[]; widgets: CanvasWidget[] }
+  | { role: "assistant"; key: string; text: string; itemId?: string; activities: Activity[]; widgets: CanvasWidget[]; runs: RunCard[] }
   | ApprovalTurn;
 
 /** `pending` while the utterance's transcript is still on its way. */
@@ -53,8 +63,41 @@ function withAssistant(feed: Feed, change: (turn: AssistantTurn) => AssistantTur
   if (last?.role === "assistant") {
     return { ...feed, turns: [...feed.turns.slice(0, -1), change(last)] };
   }
-  const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: "", activities: [], widgets: [] };
+  const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: "", activities: [], widgets: [], runs: [] };
   return { seq: feed.seq + 1, turns: [...feed.turns, change(fresh)] };
+}
+
+function lastAssistantIndex(turns: readonly Turn[]): number {
+  for (let i = turns.length - 1; i >= 0; i--) if (turns[i]?.role === "assistant") return i;
+  return -1;
+}
+
+function withRun(feed: Feed, at: number, run: RunCard): Feed {
+  const turn = feed.turns[at];
+  if (turn?.role !== "assistant") return feed;
+  const runs = turn.runs.some((r) => r.runId === run.runId) ? turn.runs.map((r) => (r.runId === run.runId ? run : r)) : [...turn.runs, run];
+  return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, runs } : existing)) };
+}
+
+/**
+ * A run's card stays under the answer that started it: the server reports a run as soon as
+ * run_agent starts it, while that answer is still the latest; later updates find the card.
+ */
+function trackRun(feed: Feed, event: Extract<ServerEvent, { type: "agent.update" }>): Feed {
+  const at = feed.turns.findIndex((turn) => turn.role === "assistant" && turn.runs.some((run) => run.runId === event.runId));
+  const turn = feed.turns[at];
+  const previous = turn?.role === "assistant" ? turn.runs.find((run) => run.runId === event.runId) : undefined;
+  const phases = previous?.phases ?? [];
+  const run: RunCard = {
+    runId: event.runId,
+    task: event.task,
+    status: event.status,
+    phases: event.status === "running" && event.phase ? [...phases, event.phase] : phases,
+    result: event.result ?? previous?.result,
+  };
+  if (at !== -1) return withRun(feed, at, run);
+  const last = lastAssistantIndex(feed.turns);
+  return last === -1 ? withAssistant(feed, (open) => ({ ...open, runs: [run] })) : withRun(feed, last, run);
 }
 
 function finishActivities(turn: AssistantTurn): AssistantTurn {
@@ -63,16 +106,44 @@ function finishActivities(turn: AssistantTurn): AssistantTurn {
     : turn;
 }
 
-/** A stored thread's conversation as feed turns (agent notices are the voice model's, not shown). */
-export function feedFromMessages(messages: readonly { role: "user" | "assistant" | "agent"; text: string }[]): Feed {
+interface StoredRun {
+  runId: string;
+  task: string;
+  status: AgentRunStatus;
+  result?: string | null;
+  createdAt: number;
+}
+
+/**
+ * A stored thread's conversation as feed turns (agent notices are the voice model's, not shown),
+ * each run's card under the first answer to what the user said before it started.
+ */
+export function feedFromMessages(
+  messages: readonly { role: "user" | "assistant" | "agent"; text: string; createdAt?: number }[],
+  runs: readonly StoredRun[] = [],
+): Feed {
   let feed = emptyFeed;
+  const said: number[] = [];
   for (const message of messages) {
     if (message.role === "user") {
       feed = { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: message.text }] };
     } else if (message.role === "assistant") {
-      const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: message.text, activities: [], widgets: [] };
+      const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: message.text, activities: [], widgets: [], runs: [] };
       feed = { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+    } else {
+      continue;
     }
+    said.push(message.createdAt ?? 0);
+  }
+  for (const run of runs) {
+    let asked = -1;
+    feed.turns.forEach((turn, i) => {
+      if (turn.role === "user" && (said[i] ?? 0) <= run.createdAt) asked = i;
+    });
+    let at = feed.turns.findIndex((turn, i) => i > asked && turn.role === "assistant");
+    if (at === -1) at = lastAssistantIndex(feed.turns);
+    const card: RunCard = { runId: run.runId, task: run.task, status: run.status, phases: [], result: run.result ?? undefined };
+    if (at !== -1) feed = withRun(feed, at, card);
   }
   return feed;
 }
@@ -100,17 +171,22 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
             : turn,
         ),
       };
-    case "thread":
     case "agent.update":
-      // The sidebar and the Running list show these.
+      return trackRun(feed, event);
+    case "thread":
+      // The sidebar shows these.
       return feed;
     case "transcript.delta":
       if (event.role === "user") {
         if (event.itemId !== undefined) return heard(feed, event.itemId, event.text, event.final === true);
         return { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: event.text }] };
       }
+      if (event.itemId !== undefined) return answered(feed, event.itemId, event.text, event.final === true);
       return withAssistant(feed, (turn) => ({ ...turn, text: turn.text + event.text }));
     case "widget.render":
+      // A thread has one browser: a render of a browser the feed already shows is the server putting it back
+      // (this client connected again), so it updates that widget where it is instead of adding another.
+      if (event.widget.type === "browser" && hasWidget(feed, event.widget.id)) return updateWidget(feed, event.widget.id, asRecord(event.widget.props));
       return withAssistant(feed, (turn) => ({
         ...finishActivities(turn),
         widgets: [...turn.widgets, { id: event.widget.id, type: event.widget.type, props: asRecord(event.widget.props) }],
@@ -155,6 +231,29 @@ function heard(feed: Feed, itemId: string, text: string, final: boolean): Feed {
   const full = final ? text : turn.text + text;
   if (final && !full) return { ...feed, turns: feed.turns.filter((_, i) => i !== at) };
   return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, text: full, pending: !final } : existing)) };
+}
+
+/**
+ * Each answer gets its own bubble, so "let me check" and the result it brings back are two
+ * messages. A bubble opened by tool activity before any text is the answer's own.
+ */
+function answered(feed: Feed, itemId: string, text: string, final: boolean): Feed {
+  const at = feed.turns.findIndex((turn) => turn.role === "assistant" && turn.itemId === itemId);
+  const turn = feed.turns[at];
+  if (turn?.role === "assistant") {
+    const full = final ? text : turn.text + text;
+    return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, text: full } : existing)) };
+  }
+  const last = feed.turns[feed.turns.length - 1];
+  if (last?.role === "assistant" && last.itemId === undefined && !last.text) {
+    return withAssistant(feed, (open) => ({ ...open, itemId, text }));
+  }
+  const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text, itemId, activities: [], widgets: [], runs: [] };
+  return { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
+}
+
+function hasWidget(feed: Feed, id: string): boolean {
+  return feed.turns.some((turn) => turn.role === "assistant" && turn.widgets.some((widget) => widget.id === id));
 }
 
 /**

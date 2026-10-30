@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "core-server",
-    "symphony-core",
+    "symphony-core==0.0.4",
     "symphony-harness",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -51,10 +51,16 @@ module = ["infisical_sdk", "infisical_sdk.*"]
 ignore_missing_imports = true
 
 
-# `uv sync` resolves the symphony packages at the rev requirements.txt pins. core-server comes from
-# the same symphony rev (its core_server is byte-identical to the vendored a335957 copy), because
-# the vendored pyproject's `{ workspace = true }` sources only resolve inside symphony's workspace.
+# symphony-core (imported as core_ai) is the PyPI release pinned in dependencies. core-server and
+# symphony-harness list symphony-core too, and uv takes their `{ workspace = true }` source for it from the
+# symphony checkout they come from, which would lock it to that git rev; the override makes every
+# requirement for it the PyPI release. `uv sync` resolves symphony-harness at the symphony rev
+# requirements.txt pins (its 0.0.1 on PyPI is not that code). core-server comes from the same rev (its
+# core_server is byte-identical to the vendored a335957 copy), because the vendored pyproject's
+# `{ workspace = true }` sources only resolve inside symphony's workspace.
+[tool.uv]
+override-dependencies = ["symphony-core==0.0.4"]
+
 [tool.uv.sources]
 core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_server" }
-symphony-core = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_ai" }
 symphony-harness = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_harness" }

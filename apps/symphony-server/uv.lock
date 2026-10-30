@@ -6,6 +6,9 @@ resolution-markers = [
     "python_full_version < '3.15'",
 ]
 
+[manifest]
+overrides = [{ name = "symphony-core", specifier = "==0.0.4" }]
+
 [[package]]
 name = "aenum"
 version = "3.1.17"
@@ -1637,12 +1640,16 @@ wheels = [
 [[package]]
 name = "symphony-core"
 version = "0.0.4"
-source = { git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=c69034780524a6093ee598bbeba67aba8c66226b#c69034780524a6093ee598bbeba67aba8c66226b" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dotenv" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4d/50/782631bb1d0e473e1930ad80f427a2b8a73ca9d79ed798a462d179ad1084/symphony_core-0.0.4.tar.gz", hash = "sha256:1b2a1c1053cb6fe757273cb42443d2a541dff4575ffaefd0d84ed7c3ea881bdc", size = 77634, upload-time = "2026-10-29T00:17:23.33Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/25/6714e91337a179c00a1aa676c969aba28cb401f180114396a5af60ca191e/symphony_core-0.0.4-py3-none-any.whl", hash = "sha256:0d3699f39c9534051c561a09625c813cf2a2327f59afc2179b6d19710109d37b", size = 95759, upload-time = "2026-10-29T00:17:21.781Z" },
 ]
 
 [[package]]
@@ -1697,7 +1704,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "symphony-core", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_ai&rev=c69034780524a6093ee598bbeba67aba8c66226b" },
+    { name = "symphony-core", specifier = "==0.0.4" },
     { name = "symphony-harness", git = "https://github.com/Sarthakischauhan/symphony?subdirectory=core_harness&rev=c69034780524a6093ee598bbeba67aba8c66226b" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },

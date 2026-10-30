@@ -1,9 +1,9 @@
 import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
-import { osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
+import { BrowserControlsContext, osmoWidgets, toWidgetPart } from "@osmo/osmo-widgets";
 import { MessageContent, WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
-import type { AgentPart } from "@sarchauhan/protocol";
+import type { AgentPart, AgentSubagent, AgentSubagentState } from "@sarchauhan/protocol";
 import {
   OrbComposer,
   type ServerEvent,
@@ -12,7 +12,6 @@ import {
   type VoiceSelection,
   orbMode,
   sameOriginSocketUrl,
-  useOsmoSession,
   usePersistedPick,
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
@@ -29,8 +28,9 @@ import { toast } from "sonner";
 import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
-import { type ChangeEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { type Feed, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useSession } from "./session";
+import { type Feed, type RunCard, type Turn, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
 
@@ -89,16 +89,19 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [registry, setRegistry] = useState<VoiceModel[]>([]);
   const [pick, save, pickMemory] = usePersistedPick(registry);
   savePick.current = save;
-  const session = useOsmoSession({
+  const session = useSession({
     url: sameOriginSocketUrl(window.location),
     model: pick?.model,
     voice: pick?.voice,
     effort: pick?.effort,
     threadId,
     onEvent,
-    desktop: desktop.adapter,
   });
   const { end } = session;
+  // In the Electron app the orb window starts calls too: it continues whichever thread this window has open.
+  useEffect(() => {
+    window.osmoDesktop?.session.openThread(threadId).catch(() => toast.error("Could not share the open thread with the orb"));
+  }, [threadId]);
   useEffect(() => {
     api.list().then(setThreads, () => toast.error("Could not load threads"));
   }, []);
@@ -116,7 +119,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         const ownRuns = new Set(detail.runs.map((run) => run.runId));
         // Approvals its runs still wait for go back into the stream.
         const waiting = approvals.current.filter((approval) => ownRuns.has(approval.runId));
-        dispatchFeed({ kind: "load", feed: waiting.reduce((shown, approval) => reduceFeed(shown, approval), feedFromMessages(detail.messages)) });
+        dispatchFeed({ kind: "load", feed: waiting.reduce((shown, approval) => reduceFeed(shown, approval), feedFromMessages(detail.messages, detail.runs)) });
       } catch {
         toast.error("Could not open that thread");
       }
@@ -255,7 +258,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     if (previousConnection.current !== "disconnected" && session.connection === "disconnected") void window.osmoDesktop?.setEnabled(false);
     previousConnection.current = session.connection;
   }, [session.connection]);
-  const { sendWidgetAction } = session;
+  const { sendWidgetAction, sendBrowserInput, closeBrowser } = session;
+  const browserControls = useMemo(() => ({ input: sendBrowserInput, close: closeBrowser }), [sendBrowserInput, closeBrowser]);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
     async (response: WidgetResponse) => {
@@ -313,10 +317,9 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     }
   }, []);
 
-  const shownRuns = visibleRuns(runs, now);
+  // This thread's runs are cards under the answers that started them; the list is for the others'.
+  const shownRuns = visibleRuns(runs, now).filter((run) => run.threadId !== undefined && run.threadId !== threadId);
   const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
-  const lastAssistant = [...feed.turns].reverse().find((turn): turn is AssistantTurn => turn.role === "assistant");
-  const steps = lastAssistant?.activities.map((activity) => activity.label) ?? [];
 
   return (
     <>
@@ -349,19 +352,21 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         </header>
 
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-          <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
-            {feed.turns.length === 0 ? (
-              <AsciiHome />
-            ) : (
-              <div className="feed">
-                {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
-                {feed.turns.map((turn) => (
-                  <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
-                ))}
-                <div ref={bottom} />
-              </div>
-            )}
-          </main>
+          <BrowserControlsContext.Provider value={browserControls}>
+            <main className="canvas chat-root" data-theme={theme} onChange={onFeedChange}>
+              {feed.turns.length === 0 ? (
+                <AsciiHome />
+              ) : (
+                <div className="feed">
+                  {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
+                  {feed.turns.map((turn) => (
+                    <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
+                  ))}
+                  <div ref={bottom} />
+                </div>
+              )}
+            </main>
+          </BrowserControlsContext.Provider>
         </WidgetProvider>
 
         <footer className="dock">
@@ -456,7 +461,7 @@ function Clock({ since }: { since: number }) {
   return <span className="clock">{`${mm}:${ss}`}</span>;
 }
 
-/** One assistant turn's spoken line and tool activity rows as chat-sdk parts; widgets render separately, keyed by id. */
+/** One assistant turn's spoken line, tool activity rows and agent runs as chat-sdk parts; widgets render separately, keyed by id. */
 function assistantParts(turn: AssistantTurn): AgentPart[] {
   const parts: AgentPart[] = [];
   if (turn.text) parts.push({ type: "text", text: turn.text });
@@ -469,5 +474,30 @@ function assistantParts(turn: AssistantTurn): AgentPart[] {
       state: activity.done ? "output-available" : "input-available",
     }),
   );
+  for (const run of turn.runs) parts.push({ type: "data", name: "subagent", id: run.runId, data: subagent(run) });
   return parts;
+}
+
+const SUBAGENT_STATE: Record<RunCard["status"], AgentSubagentState> = {
+  running: "running",
+  waiting_approval: "running",
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+};
+
+function subagent(run: RunCard): AgentSubagent {
+  return {
+    id: run.runId,
+    title: "Symphony",
+    task: run.task,
+    state: SUBAGENT_STATE[run.status],
+    error: run.status === "failed" ? run.result : undefined,
+    // The answer is the voice model's to tell; the card keeps it under View activity, after the steps.
+    messages: [...run.phases, ...(run.status === "completed" && run.result ? [run.result] : [])].map((text, i) => ({
+      id: `${run.runId}-${i}`,
+      role: "assistant",
+      parts: [{ type: "text", text }],
+    })),
+  };
 }

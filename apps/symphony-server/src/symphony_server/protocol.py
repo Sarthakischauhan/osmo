@@ -59,6 +59,43 @@ class WidgetAction(_Event):
     value: str | None = None
 
 
+class BrowserClick(_Event):
+    """The user clicked the browser widget's page. `x` and `y` are where, as fractions (0 to 1) of the displayed page."""
+
+    type: Literal["browser.click"]
+    id: str = Field(min_length=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class BrowserScroll(_Event):
+    """The user scrolled the browser widget's page by `deltaX` and `deltaY` (a WheelEvent's, in pixels) at `x`, `y` (as in `browser.click`)."""
+
+    type: Literal["browser.scroll"]
+    id: str = Field(min_length=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    deltaX: float
+    deltaY: float
+
+
+class BrowserKey(_Event):
+    """The user pressed a key with the browser widget's page focused; `key`, `code` and `keyCode` are a KeyboardEvent's."""
+
+    type: Literal["browser.key"]
+    id: str = Field(min_length=1)
+    key: str = Field(min_length=1)
+    code: str
+    keyCode: int = Field(ge=0)
+
+
+class BrowserClose(_Event):
+    """The user closed the thread's browser."""
+
+    type: Literal["browser.close"]
+    id: str = Field(min_length=1)
+
+
 class DesktopConfigure(_Event):
     type: Literal["desktop.configure"]
     enabled: bool
@@ -78,7 +115,20 @@ class DesktopRequest(_Event):
 
 
 ClientEvent = Annotated[
-    Union[SessionStart, SessionEnd, Interrupt, WidgetAction, SessionConfigure, VoicePreviewRequest, DesktopConfigure, DesktopResult],
+    Union[
+        SessionStart,
+        SessionEnd,
+        Interrupt,
+        WidgetAction,
+        BrowserClick,
+        BrowserScroll,
+        BrowserKey,
+        BrowserClose,
+        SessionConfigure,
+        VoicePreviewRequest,
+        DesktopConfigure,
+        DesktopResult,
+    ],
     Field(discriminator="type"),
 ]
 client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
@@ -94,8 +144,9 @@ class TranscriptDelta(_Event):
     type: Literal["transcript.delta"] = "transcript.delta"
     role: Literal["user", "assistant"]
     text: str
-    # User utterances carry an id: an empty delta opens the utterance's turn when speech stops,
-    # and the `final` one carries its whole transcript (empty when nothing was said).
+    # Each utterance and each answer carries an id, one bubble per id (like a chat SDK's text part):
+    # deltas append, and the `final` one carries the whole text (empty when nothing was said). An
+    # utterance's empty delta opens its bubble when speech stops.
     itemId: str | None = None
     final: bool | None = None
 

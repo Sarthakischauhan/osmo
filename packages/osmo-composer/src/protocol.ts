@@ -61,6 +61,17 @@ export type Thread = z.infer<typeof threadSchema>;
 export const agentRunStatusSchema = z.enum(["running", "waiting_approval", "completed", "failed", "cancelled"]);
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
 
+const widgetIdSchema = z.string().min(1);
+
+// The user's own hands on the agent browser widget (no approval). x and y are fractions (0 to 1) of the displayed page;
+// the key fields and the wheel deltas are those of the DOM KeyboardEvent and WheelEvent.
+const pageFraction = z.number().min(0).max(1);
+const browserClickSchema = z.object({ type: z.literal("browser.click"), x: pageFraction, y: pageFraction });
+const browserScrollSchema = z.object({ type: z.literal("browser.scroll"), x: pageFraction, y: pageFraction, deltaX: z.number(), deltaY: z.number() });
+const browserKeySchema = z.object({ type: z.literal("browser.key"), key: z.string().min(1), code: z.string(), keyCode: z.number().int().min(0) });
+export const browserInputSchema = z.discriminatedUnion("type", [browserClickSchema, browserScrollSchema, browserKeySchema]);
+export type BrowserInput = z.infer<typeof browserInputSchema>;
+
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
@@ -87,6 +98,10 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     action: z.string().min(1),
     value: z.string().optional(),
   }),
+  browserClickSchema.extend({ id: widgetIdSchema }),
+  browserScrollSchema.extend({ id: widgetIdSchema }),
+  browserKeySchema.extend({ id: widgetIdSchema }),
+  z.object({ type: z.literal("browser.close"), id: widgetIdSchema }),
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
@@ -97,7 +112,8 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),
     text: z.string(),
-    // User utterances: an empty delta opens the turn when speech stops; `final` carries the whole transcript.
+    // One bubble per itemId, utterance or answer (a chat SDK text part): deltas append, `final` carries
+    // the whole text. An utterance's empty delta opens its bubble when speech stops.
     itemId: z.string().optional(),
     final: z.boolean().optional(),
   }),

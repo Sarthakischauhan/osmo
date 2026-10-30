@@ -2,7 +2,7 @@ import type { ApprovalTurn } from "../feed";
 
 export interface ApprovalPromptProps {
   turn: ApprovalTurn;
-  /** The step of its run this approval is for (the run's started steps so far). */
+  /** The step of its run this approval is for (the run's started steps so far); 0 when the run was only listed by the server, which does not count them. */
   step: number | undefined;
   onDecide: (approved: boolean) => void;
 }
@@ -21,7 +21,7 @@ export function ApprovalPrompt({ turn, step, onDecide }: ApprovalPromptProps) {
   }
   return (
     <div id={`approval-${turn.approvalId}`} className="osmo-approval" role="group" aria-live="polite" aria-label="Approval needed">
-      <p className="osmo-approval-title">{step === undefined ? `Approve ${turn.summary.toLowerCase()}?` : `Approve step ${step}?`}</p>
+      <p className="osmo-approval-title">{step === undefined || step === 0 ? `Approve ${turn.summary.toLowerCase()}?` : `Approve step ${step}?`}</p>
       <p className="osmo-approval-call">
         {turn.tool} {turn.arguments}
       </p>

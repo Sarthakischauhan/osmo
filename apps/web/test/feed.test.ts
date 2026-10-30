@@ -76,6 +76,20 @@ describe("reduceFeed", () => {
     expect(turn?.role === "assistant" && turn.widgets[0]?.props).toEqual({ status: "ended", frame: "data:image/jpeg;base64,BBBB" });
   });
 
+  it("puts a browser widget back where it is when the server renders it again, and keeps other renders separate", () => {
+    let feed = reduceFeed(emptyFeed, { type: "widget.render", widget: { id: "w-br", type: "browser", props: { status: "live", frame: "data:image/jpeg;base64,AAAA" } } });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "How is it going?" });
+    feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w-br", type: "browser", props: { status: "live", url: "http://a.test/", frame: "data:image/jpeg;base64,BBBB" } } });
+    expect(feed.turns).toHaveLength(2);
+    const turn = feed.turns[0];
+    expect(turn?.role === "assistant" && turn.widgets).toEqual([
+      { id: "w-br", type: "browser", props: { status: "live", url: "http://a.test/", frame: "data:image/jpeg;base64,BBBB" } },
+    ]);
+    // A browser the feed has not seen is added, as any widget.
+    feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w-br2", type: "browser", props: { status: "live" } } });
+    expect(feed.turns.flatMap((t) => (t.role === "assistant" ? t.widgets.map((w) => w.id) : []))).toEqual(["w-br", "w-br2"]);
+  });
+
   it("an update with a reused id touches only the newest widget, never older ones above", () => {
     let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "first" });
     feed = reduceFeed(feed, { type: "widget.render", widget: { id: "w1", type: "card", props: { title: "old", body: "b" } } });
