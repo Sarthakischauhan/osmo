@@ -13,7 +13,8 @@
     "test": "node --test test/*.test.js",
     "pack": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder --dir",
     "dist": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder",
-    "prepare:python": "node scripts/prepare-python.js"
+    "prepare:python": "node scripts/prepare-python.js && node scripts/sign-python.js",
+    "signing:create": "node scripts/create-signing-identity.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",
@@ -40,11 +41,19 @@
       },
       {
         "from": "../symphony-server/src",
-        "to": "server/src"
+        "to": "server/src",
+        "filter": [
+          "**/*",
+          "!**/.env*"
+        ]
       },
       {
         "from": "../../vendor/core_server/src",
-        "to": "core-server/src"
+        "to": "core-server/src",
+        "filter": [
+          "**/*",
+          "!**/.env*"
+        ]
       },
       {
         "from": "build/python",
@@ -53,6 +62,12 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "hardenedRuntime": false,
+      "timestamp": "none",
+      "signIgnore": [
+        "/Contents/Resources/python/",
+        "\\.(pak|pyc|woff2?|nib|dat|bin|icns|asar)$"
+      ],
       "target": [
         "dmg"
       ],

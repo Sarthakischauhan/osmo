@@ -57,7 +57,7 @@ button { font: inherit; color: inherit; }
   --chat-user-bg: var(--surface-3);
   --chat-user-fg: var(--foreground);
   --chat-radius: 3px;
-  --chat-radius-lg: 8px;
+  --chat-radius-lg: 3px;
   --chat-font-sans: var(--font-sans);
   --chat-body-size: 13px;
 }
@@ -70,13 +70,13 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question button,
 .canvas.chat-root .chat-widget-header,
 .canvas.chat-root .chat-widget-meta { border: 0; box-shadow: none; outline: none; }
-.canvas.chat-root .chat-widget-card { border-radius: 8px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-widget-card { border-radius: 3px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-widget-header { padding: 0 0 6px; background: none; }
 .canvas.chat-root .chat-widget-body { padding: 0; }
 .canvas.chat-root .chat-widget-label-row { display: none; }
 .canvas.chat-root .chat-widget-title { font-size: 12px; font-weight: 600; }
-.canvas.chat-root .chat-question { border-radius: 8px; background: var(--surface-1); padding: 16px; }
-.canvas.chat-root .chat-subagent { border-radius: 8px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-question { border-radius: 3px; background: var(--surface-1); padding: 16px; }
+.canvas.chat-root .chat-subagent { border-radius: 3px; background: var(--surface-1); padding: 16px; }
 .canvas.chat-root .chat-subagent-inspect { border: 0; border-radius: 999px; padding: 5px 10px 5px 12px; gap: 6px; background: var(--surface-2); }
 .canvas.chat-root .chat-subagent-inspect:hover { background: var(--surface-3); }
 .canvas.chat-root .chat-question-eyebrow { display: none; }
@@ -87,7 +87,7 @@ button { font: inherit; color: inherit; }
 .canvas.chat-root .chat-question-option[data-selected="true"] { background: var(--surface-3); }
 .canvas.chat-root .chat-question footer { background: none; }
 .canvas.chat-root .chat-question button { border-radius: 999px; background: var(--surface-3); color: var(--foreground); }
-.canvas.chat-root .agent-tool { border-radius: 8px; background: var(--surface-1); font-size: 10px; }
+.canvas.chat-root .agent-tool { border-radius: 3px; background: var(--surface-1); font-size: 10px; }
 .canvas.chat-root .agent-tool-complete .agent-tool-state,
 .canvas.chat-root .agent-tool-complete .agent-tool-dot,
 .canvas.chat-root .agent-tool-complete .agent-tool-chevron { display: none; }
