@@ -1,4 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences } from 'electron';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -253,7 +254,7 @@ export function runApp() {
     app.on('second-instance', () => switcher?.toFull());
     app.whenReady().then(async () => {
       if (!process.env.OSMO_DESKTOP_URL) {
-        try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin }); }
+        try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin, token: process.env.OSMO_DESKTOP_TOKEN || randomBytes(32).toString('hex') }); }
         catch (error) {
           await dialog.showMessageBox({ type: 'error', message: 'Osmo could not start', detail: String(error) });
           app.quit();

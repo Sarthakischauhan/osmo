@@ -364,3 +364,13 @@ def test_core_server_routes_are_mounted(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok, monkeypatch) -> None:
+    monkeypatch.setenv("OSMO_DESKTOP_TOKEN", "desktop-secret")
+    with make_client(Settings(xai_base_url=grok.base_url)) as client:
+        anonymous = client.get("/api/health", headers={"X-Osmo-Desktop-Token": "wrong"})
+        trusted = client.get("/", headers={"X-Osmo-Desktop-Token": "desktop-secret"})
+    assert "x-osmo-desktop-token" not in anonymous.headers
+    assert trusted.headers["x-osmo-desktop-token"] == "desktop-secret"
+    assert trusted.headers["cache-control"] == "no-store"

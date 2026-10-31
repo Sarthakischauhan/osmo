@@ -92,6 +92,8 @@ class Storage(Protocol):
 
     def connections(self) -> list[ProviderConnection]: ...
 
+    def interrupt_unfinished(self, reason: str) -> int: ...
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -262,6 +264,17 @@ class SQLiteStorage:
         with self.transaction() as db:
             rows = db.execute("SELECT * FROM runs WHERE thread_id = ? ORDER BY created_at, run_id", (thread_id,)).fetchall()
         return [run_row(row) for row in rows]
+
+    def interrupt_unfinished(self, reason: str) -> int:
+        """Mark runs that cannot still be executing as failed. Live execution is in-process, so a
+        restart cannot resume one; the stored record must not keep saying that it is running."""
+        now = time.time()
+        with self.transaction() as db:
+            changed = db.execute(
+                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')",
+                (reason, now),
+            )
+        return changed.rowcount
 
     # ------------------------------------------------------------ provider connections
 

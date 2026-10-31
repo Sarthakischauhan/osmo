@@ -133,6 +133,17 @@ def provider_label(provider_id: str) -> str:
     return next(p.label for p in PROVIDERS if p.id == provider_id)
 
 
+# Public beta capability notes. They describe the current product, not every API a provider offers.
+PROVIDER_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "xai": ("Voice, background agents, and images",),
+    "openai": ("Vision and text models",),
+    "openrouter": ("Text models",),
+    "vercel": ("Text models",),
+    "gemini": ("Voice and text models",),
+    "sarvam": ("Voice",),
+}
+
+
 class TokenSet(BaseModel):
     """What an `authorization_code` provider's credential holds (as JSON in the SecretStore)."""
 
@@ -258,6 +269,8 @@ class ProviderInfo(BaseModel):
     label: str
     authKinds: list[AuthKind]
     connected: bool
+    # What a credential can unlock today. A connected provider is not necessarily a voice provider.
+    capabilities: list[str] = []
 
 
 class ProvidersResponse(BaseModel):
@@ -343,7 +356,16 @@ def create_provider_router(
     @router.get("")
     async def list_providers() -> ProvidersResponse:
         return ProvidersResponse(
-            providers=[ProviderInfo(id=p.id, label=p.label, authKinds=kinds(p), connected=store.connected(p.id)) for p in PROVIDERS]
+            providers=[
+                ProviderInfo(
+                    id=p.id,
+                    label=p.label,
+                    authKinds=kinds(p),
+                    connected=store.connected(p.id),
+                    capabilities=list(PROVIDER_CAPABILITIES.get(p.id, ())),
+                )
+                for p in PROVIDERS
+            ]
         )
 
     @router.post("/{provider_id}/key", status_code=204)

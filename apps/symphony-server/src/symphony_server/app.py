@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
@@ -161,6 +162,17 @@ def create_app(
         tracing.flush()
 
     app = FastAPI(title="symphony-server", lifespan=lifespan)
+    desktop_token = os.getenv("OSMO_DESKTOP_TOKEN") or ""
+
+    @app.middleware("http")
+    async def identify_desktop(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        presented = request.headers.get("x-osmo-desktop-token", "")
+        if desktop_token and presented == desktop_token:
+            response.headers["X-Osmo-Desktop-Token"] = desktop_token
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     install_middlewares(app, core_config, prefix="/api")
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
     app.include_router(create_provider_router(credentials, http_client, storage, settings.oauth_clients))
