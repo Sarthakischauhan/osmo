@@ -37,6 +37,7 @@ before(() => { runApp(); });
 beforeEach(async () => { await settle(); });
 
 test('the app starts in the orb: the always-on-top orb is showing, the workspace and the audio renderer are not', () => {
+  assert.equal(workspace().options.title, 'Osmo');
   assert.equal(orb().visible, true);
   assert.equal(workspace().visible, false);
   assert.equal(audioWindow().visible, false);

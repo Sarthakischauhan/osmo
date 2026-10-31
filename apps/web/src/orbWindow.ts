@@ -1,15 +1,27 @@
 import { type ServerEvent, voiceSelectionSchema } from "@osmo/osmo-composer";
 import type { StartOptions } from "./desktopBridge";
-import { type Feed, emptyFeed, reduceFeed } from "./feed";
+import { type Feed, reduceFeed } from "./feed";
 import type { ApprovalRequest } from "./lib/runs";
 
-/** The orb window's approvals: what the server lists as waiting (authoritative, as of its last poll), and live events since. */
-export type OrbFeedAction = { kind: "event"; event: ServerEvent } | { kind: "listed"; approvals: ApprovalRequest[] };
+/**
+ * The orb window's feed: the spoken lines and approvals the session's events carry, and the approvals the server lists
+ * as waiting (authoritative, as of its last poll). A poll replaces the approvals and leaves the spoken lines alone;
+ * `restart` is a different thread opening, whose lines are not the last thread's.
+ */
+export type OrbFeedAction = { kind: "event"; event: ServerEvent } | { kind: "listed"; approvals: ApprovalRequest[] } | { kind: "restart" };
+
+const withoutSpoken = (feed: Feed): Feed => ({ ...feed, turns: feed.turns.filter((turn) => turn.role === "approval") });
+const withoutApprovals = (feed: Feed): Feed => ({ ...feed, turns: feed.turns.filter((turn) => turn.role !== "approval") });
 
 export function reduceOrbFeed(feed: Feed, action: OrbFeedAction): Feed {
-  return action.kind === "event"
-    ? reduceFeed(feed, action.event)
-    : action.approvals.reduce<Feed>((next, approval) => reduceFeed(next, approval), emptyFeed);
+  switch (action.kind) {
+    case "event":
+      return reduceFeed(feed, action.event);
+    case "listed":
+      return action.approvals.reduce<Feed>((next, approval) => reduceFeed(next, approval), withoutApprovals(feed));
+    case "restart":
+      return withoutSpoken(feed);
+  }
 }
 
 /**

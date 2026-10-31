@@ -77,7 +77,7 @@ def test_providers_lists_auth_kinds_and_openrouter_alone_offers_oauth(tmp_path: 
     kinds = {p["id"]: p["authKinds"] for p in body["providers"]}
     assert kinds == {"xai": ["api_key"], "openai": ["api_key"], "openrouter": ["api_key", "oauth"], "vercel": ["api_key"], "gemini": ["api_key"], "sarvam": ["api_key"]}
     assert all(p["connected"] is False for p in body["providers"])
-    assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected"}
+    assert set(body["providers"][0]) == {"id", "label", "authKinds", "connected", "capabilities"}
 
 
 def test_key_validation_failure_stores_nothing(tmp_path: Path, fake: FakeProviders) -> None:
@@ -312,7 +312,7 @@ def test_api_through_any_store_never_returns_or_logs_the_secret(
         listing = client.get("/providers")
         bodies = [saved.text, listing.text, client.get("/voice-models").text]
         assert saved.status_code == 204 and connected(listing)["openai"] is True
-        assert set(listing.json()["providers"][0]) == {"id", "label", "authKinds", "connected"}
+        assert set(listing.json()["providers"][0]) == {"id", "label", "authKinds", "connected", "capabilities"}
         assert client.delete("/providers/openai").status_code == 204
         assert connected(client.get("/providers"))["openai"] is False
     assert all(GOOD_KEY not in body for body in bodies)

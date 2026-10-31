@@ -12,20 +12,27 @@ import { useSession } from "./session";
 const CLOSED: BoxPlacement & { placed: number } = { side: "below", orbLeft: 0, placed: 0 };
 
 /**
- * The always-on-top orb window: the orb, and on hover the agent log. It shares the voice session main owns with the
- * full window and keeps no connection, microphone or transcript of its own.
+ * The always-on-top orb window: the orb, and on hover the latest spoken lines and the agent log. It shares the voice
+ * session main owns with the full window and keeps no connection or microphone of its own; the lines are the transcript
+ * events it receives, for this thread.
  */
 export function OrbApp({ bridge }: { bridge: DesktopBridge }) {
   const [theme] = useAppearance();
   const [feed, dispatchFeed] = useReducer(reduceOrbFeed, emptyFeed);
   const [runs, setRuns] = useState<Runs>({});
   const [threadId, setThreadId] = useState<string>();
+  const openThread = useRef<string>();
   const [placement, setPlacement] = useState(CLOSED);
   const [now, setNow] = useState(Date.now());
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
-    if (event.type === "thread") setThreadId(event.thread.id);
+    if (event.type === "thread") {
+      // Another thread's lines are not this one's.
+      if (openThread.current !== event.thread.id) dispatchFeed({ kind: "restart" });
+      openThread.current = event.thread.id;
+      setThreadId(event.thread.id);
+    }
   }, []);
   const picked = useMemo(() => savedStart(readSavedPick()), []);
   const session = useSession({ url: "", ...picked, onEvent });
@@ -79,6 +86,7 @@ export function OrbApp({ bridge }: { bridge: DesktopBridge }) {
       mode={orbMode(connection, state, false)}
       outputLevel={session.outputLevel}
       runs={runs}
+      turns={feed.turns}
       activity={activity}
       theme={theme}
       onDecide={decide}

@@ -2,7 +2,18 @@ import type { AgentRunStatus } from "@osmo/osmo-composer";
 import { type ApprovalTurn, type Turn } from "./feed";
 import { COMPLETED_LINGER_MS, type RunView, type Runs } from "./lib/runs";
 
-/** What the floating orb's agent log shows: a cropped view of the same runs and approvals, never its own state. */
+/** What the floating orb's preview shows: a cropped view of the same feed and runs, never its own state. */
+
+/** The preview shows the latest 2-3 spoken lines (#18); it shows three. */
+export const COMPACT_MESSAGES = 3;
+
+type SpokenTurn = Extract<Turn, { role: "user" | "assistant" }>;
+
+/** The latest spoken lines, oldest first, while a line is still streaming or its transcript is on its way. Tool activity, widgets and approvals are not messages. */
+export function compactMessages(turns: readonly Turn[], limit: number = COMPACT_MESSAGES): SpokenTurn[] {
+  const spoken = turns.filter((turn): turn is SpokenTurn => (turn.role === "user" && (turn.text !== "" || turn.pending === true)) || (turn.role === "assistant" && turn.text !== ""));
+  return spoken.slice(-limit);
+}
 
 export interface AgentSummary {
   runId: string;
@@ -58,4 +69,9 @@ export function agentActivity(runs: Runs, turns: readonly Turn[], threadId: stri
     needingApproval: own.filter((run) => run.status === "waiting_approval").length,
     elsewhere: all.filter((run) => !own.includes(run) && LIVE.has(run.status)).length,
   };
+}
+
+/** Whether the preview has anything to show: a spoken line, or an agent (here or in another thread). */
+export function hasPreview(turns: readonly Turn[], activity: AgentActivity): boolean {
+  return compactMessages(turns).length > 0 || activity.cards.length > 0 || activity.elsewhere > 0;
 }

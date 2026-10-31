@@ -133,6 +133,22 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert grok.next_bytes() == b"\x01\x00\x02\x00"
 
 
+def test_the_first_utterance_names_the_thread(client: TestClient, grok: FakeGrok) -> None:
+    """The chat shell's thread takes its title from the conversation, not the default."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "session.start", "voice": "eve"}))
+        opened = next_event(ws, "thread")["thread"]
+        assert opened["title"] == "New conversation"
+        assert next_event(ws, "state")["state"] == "listening"
+        say(grok, "  Weather this weekend in Palo Alto?  ")
+        renamed = next_event(ws, "thread")["thread"]
+        assert renamed["id"] == opened["id"]
+        assert renamed["title"] == "Weather this weekend in Palo Alto"
+        say(grok, "And Sunday?")
+        # A later line does not replace a title taken from the conversation.
+        assert heard(ws)["text"] == "And Sunday?"
+
+
 def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
@@ -348,3 +364,13 @@ def test_core_server_routes_are_mounted(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok, monkeypatch) -> None:
+    monkeypatch.setenv("OSMO_DESKTOP_TOKEN", "desktop-secret")
+    with make_client(Settings(xai_base_url=grok.base_url)) as client:
+        anonymous = client.get("/api/health", headers={"X-Osmo-Desktop-Token": "wrong"})
+        trusted = client.get("/", headers={"X-Osmo-Desktop-Token": "desktop-secret"})
+    assert "x-osmo-desktop-token" not in anonymous.headers
+    assert trusted.headers["x-osmo-desktop-token"] == "desktop-secret"
+    assert trusted.headers["cache-control"] == "no-store"
