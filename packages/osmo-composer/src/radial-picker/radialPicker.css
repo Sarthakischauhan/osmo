@@ -95,13 +95,6 @@
   position: absolute; transform: translate(-50%, -50%);
   font-size: 13px; line-height: 1; color: var(--muted-foreground); opacity: 0.55; pointer-events: none;
 }
-.rp-mid-mark {
-  position: absolute; width: 4px; height: 4px; border-radius: 50%; transform: translate(-50%, -50%);
-  background: color-mix(in srgb, var(--foreground) 30%, transparent); pointer-events: none;
-}
-.rp-mid-mark[data-selected="true"] {
-  background: var(--foreground); transform: translate(-50%, -50%) scale(1.25);
-}
 
 .rp-meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; }
 .rp-meter i { width: 3px; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 18%, transparent); }

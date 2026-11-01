@@ -498,10 +498,12 @@ export function RadialPicker({
     }
     const activeIndex = active[key];
     const markers = moreMarkers(ring, count, offset);
-    const beforePos = polar(cx, cy, ring.radius, ring.high + ring.step * 0.45);
-    const afterPos = polar(cx, cy, ring.radius, ring.low - ring.step * 0.45);
-    const midSlot = Math.floor(ring.visible / 2);
-    const midPos = polar(cx, cy, ring.radius - 22, slotAngle(ring, midSlot));
+    const beforeAngle = ring.high + ring.step * 0.45;
+    const afterAngle = ring.low - ring.step * 0.45;
+    const beforePos = polar(cx, cy, ring.radius, beforeAngle);
+    const afterPos = polar(cx, cy, ring.radius, afterAngle);
+    const beforeRot = 90 - beforeAngle;
+    const afterRot = 90 - afterAngle;
     return (
       <div
         key={key}
@@ -517,21 +519,23 @@ export function RadialPicker({
         onFocus={() => onRingFocus(key)}
       >
         {markers.before && (
-          <span className="rp-more" data-dir="before" style={{ left: beforePos.x, top: beforePos.y }} aria-hidden="true">
+          <span
+            className="rp-more"
+            data-dir="before"
+            style={{ left: beforePos.x, top: beforePos.y, transform: `translate(-50%, -50%) rotate(${beforeRot}deg)` }}
+            aria-hidden="true"
+          >
             ‹
           </span>
         )}
         {items}
-        {(markers.before || markers.after) && (
-          <span
-            className="rp-mid-mark"
-            data-selected={selected >= 0 && Math.round(selected - offset) === midSlot ? "true" : undefined}
-            style={{ left: midPos.x, top: midPos.y }}
-            aria-hidden="true"
-          />
-        )}
         {markers.after && (
-          <span className="rp-more" data-dir="after" style={{ left: afterPos.x, top: afterPos.y }} aria-hidden="true">
+          <span
+            className="rp-more"
+            data-dir="after"
+            style={{ left: afterPos.x, top: afterPos.y, transform: `translate(-50%, -50%) rotate(${afterRot}deg)` }}
+            aria-hidden="true"
+          >
             ›
           </span>
         )}
