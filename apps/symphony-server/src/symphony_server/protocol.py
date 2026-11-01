@@ -149,6 +149,7 @@ class TranscriptDelta(_Event):
     # utterance's empty delta opens its bubble when speech stops.
     itemId: str | None = None
     final: bool | None = None
+    reasoning: str | None = None
 
 
 class RenderedWidget(_Event):
@@ -218,6 +219,7 @@ class AgentUpdate(_Event):
     task: str
     status: AgentRunStatus
     phase: str | None = None
+    reasoning: str | None = None
     result: str | None = None
 
 

@@ -2,7 +2,23 @@ import type { AgentRunStatus } from "@osmo/osmo-composer";
 import { type ApprovalTurn, type Turn } from "./feed";
 import { COMPLETED_LINGER_MS, type RunView, type Runs } from "./lib/runs";
 
-/** What the floating orb's agent log shows: a cropped view of the same runs and approvals, never its own state. */
+/** What the floating orb's preview shows: a cropped view of the same feed and runs, never its own state. */
+
+/** The preview shows the latest 2-3 spoken lines (#18); it shows three. */
+export const COMPACT_MESSAGES = 3;
+
+type SpokenTurn = Extract<Turn, { role: "user" | "assistant" }>;
+
+/** The latest visible conversation turns, including reasoning, tool activity and widgets before the assistant speaks. */
+export function compactMessages(turns: readonly Turn[], limit: number = COMPACT_MESSAGES): SpokenTurn[] {
+  const visible = turns.filter(
+    (turn): turn is SpokenTurn =>
+      (turn.role === "user" && (turn.text !== "" || turn.pending === true)) ||
+      (turn.role === "assistant" &&
+        (turn.text !== "" || Boolean(turn.reasoning) || turn.thinking === true || turn.activities.length > 0 || turn.widgets.length > 0)),
+  );
+  return visible.slice(-limit);
+}
 
 export interface AgentSummary {
   runId: string;
@@ -35,7 +51,7 @@ function shown(run: RunView, now: number): boolean {
 function detail(run: RunView): string | undefined {
   if (run.status === "completed" || run.status === "failed") return run.result ?? run.phase;
   if (run.status === "cancelled") return "Cancelled";
-  return run.phase;
+  return run.phase ?? run.reasoning;
 }
 
 /**
@@ -58,4 +74,9 @@ export function agentActivity(runs: Runs, turns: readonly Turn[], threadId: stri
     needingApproval: own.filter((run) => run.status === "waiting_approval").length,
     elsewhere: all.filter((run) => !own.includes(run) && LIVE.has(run.status)).length,
   };
+}
+
+/** Whether the preview has anything to show: a spoken line, or an agent (here or in another thread). */
+export function hasPreview(turns: readonly Turn[], activity: AgentActivity): boolean {
+  return compactMessages(turns).length > 0 || activity.cards.length > 0 || activity.elsewhere > 0;
 }

@@ -15,6 +15,7 @@ import {
   hitTest,
   itemAt,
   itemPresence,
+  moreMarkers,
   polar,
   slotAngle,
 } from "./geometry";
@@ -496,6 +497,13 @@ export function RadialPicker({
       );
     }
     const activeIndex = active[key];
+    const markers = moreMarkers(ring, count, offset);
+    const beforeAngle = ring.high + ring.step * 0.45;
+    const afterAngle = ring.low - ring.step * 0.45;
+    const beforePos = polar(cx, cy, ring.radius, beforeAngle);
+    const afterPos = polar(cx, cy, ring.radius, afterAngle);
+    const beforeRot = 90 - beforeAngle;
+    const afterRot = 90 - afterAngle;
     return (
       <div
         key={key}
@@ -510,8 +518,27 @@ export function RadialPicker({
         onKeyDown={(event) => onRingKey(key, event)}
         onFocus={() => onRingFocus(key)}
       >
+        {markers.before && (
+          <span
+            className="rp-more"
+            data-dir="before"
+            style={{ left: beforePos.x, top: beforePos.y, transform: `translate(-50%, -50%) rotate(${beforeRot}deg)` }}
+            aria-hidden="true"
+          >
+            ‹
+          </span>
+        )}
         {items}
-
+        {markers.after && (
+          <span
+            className="rp-more"
+            data-dir="after"
+            style={{ left: afterPos.x, top: afterPos.y, transform: `translate(-50%, -50%) rotate(${afterRot}deg)` }}
+            aria-hidden="true"
+          >
+            ›
+          </span>
+        )}
       </div>
     );
   };

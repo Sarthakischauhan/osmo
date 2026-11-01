@@ -19,8 +19,8 @@ const MODELS = {
 };
 const PROVIDERS = {
   providers: [
-    { id: "xai", label: "xAI", authKinds: ["api_key"], connected: false },
-    { id: "openai", label: "OpenAI", authKinds: ["api_key"], connected: false },
+    { id: "xai", label: "xAI", authKinds: ["api_key"], connected: false, capabilities: ["Voice"] },
+    { id: "openai", label: "OpenAI", authKinds: ["api_key"], connected: false, capabilities: ["Vision"] },
   ],
 };
 

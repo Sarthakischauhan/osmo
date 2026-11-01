@@ -11,6 +11,8 @@ export interface RunView {
   status: AgentRunStatus;
   /** The latest step the agent started (its tool activity), if any. */
   phase: string | undefined;
+  /** Streamed reasoning tokens from the agent model, if any. */
+  reasoning?: string;
   /** How many steps it has started so far. */
   steps: number;
   result: string | undefined;
@@ -75,6 +77,7 @@ export function reduceRuns(runs: Runs, event: ServerEvent, now: number): Runs {
     case "agent.update": {
       const previous = runs[event.runId];
       const phase = event.phase ?? undefined;
+      const reasoning = event.reasoning ? (previous?.reasoning ?? "") + event.reasoning : previous?.reasoning;
       // The server reports each tool the agent starts as a running update with its phase.
       const newStep = phase !== undefined && event.status === "running";
       const next: RunView = {
@@ -83,6 +86,7 @@ export function reduceRuns(runs: Runs, event: ServerEvent, now: number): Runs {
         task: event.task,
         status: event.status,
         phase: phase ?? previous?.phase,
+        ...(reasoning ? { reasoning } : {}),
         steps: (previous?.steps ?? 0) + (newStep ? 1 : 0),
         result: event.result ?? previous?.result,
         startedAt: previous?.startedAt ?? now,

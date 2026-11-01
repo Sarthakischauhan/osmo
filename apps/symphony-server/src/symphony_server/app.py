@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
@@ -34,7 +35,7 @@ from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
-from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard
+from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard, WriteCodeTool
 from symphony_server.memory import MemoryPersistence
 from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import ModelsEvent
@@ -65,7 +66,7 @@ log = logging.getLogger("symphony")
 
 
 # The voice model's own tools. Search, weather and prices go to the background agent.
-VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "set_voice"})
+VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "write_code", "set_voice"})
 # The background agent searches the web and browses it. The voice model owns the screen, widgets and pictures.
 AGENT_TOOLS = frozenset({"web_search", *BROWSER_TOOL_NAMES})
 
@@ -78,6 +79,7 @@ def osmo_tools(settings: Settings, client: httpx.AsyncClient, access: ModelAcces
         CreateImageTool(access.registry, board, settings.image_model),
         RenderWidgetTool(board),
         UpdateWidgetTool(board),
+        WriteCodeTool(),
         SetVoiceTool(access),
         WeatherTool(client),
         StockTool(client),
@@ -161,6 +163,17 @@ def create_app(
         tracing.flush()
 
     app = FastAPI(title="symphony-server", lifespan=lifespan)
+    desktop_token = os.getenv("OSMO_DESKTOP_TOKEN") or ""
+
+    @app.middleware("http")
+    async def identify_desktop(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        presented = request.headers.get("x-osmo-desktop-token", "")
+        if desktop_token and presented == desktop_token:
+            response.headers["X-Osmo-Desktop-Token"] = desktop_token
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     install_middlewares(app, core_config, prefix="/api")
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
     app.include_router(create_provider_router(credentials, http_client, storage, settings.oauth_clients))

@@ -43,8 +43,9 @@ from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.browser import BrowserSession
-from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
+from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
 from symphony_server.cdp import BrowserError
+from symphony_server.grok_compat import ReasoningDelta
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
@@ -92,6 +93,18 @@ BARGE_IN = "barge-in"
 SWAP_WAIT_S = 15.0
 # A thread is titled from its first utterance, cut to this length.
 TITLE_FROM_SPEECH_MAX = 60
+
+
+def conversation_title(text: str) -> str | None:
+    """A short title from the first line of a conversation, or None when there is nothing to name it with."""
+    line = " ".join(text.split())
+    if not line:
+        return None
+    cut = line[:TITLE_FROM_SPEECH_MAX].rsplit(" ", 1)[0] if len(line) > TITLE_FROM_SPEECH_MAX and " " in line[:TITLE_FROM_SPEECH_MAX] else line[:TITLE_FROM_SPEECH_MAX]
+    title = cut.strip(" \t.,;:!?-—–")
+    return title or None
+
+
 # An utterance's bubble waits this long for its transcript (some never come: noise, a failed
 # transcription, a closed voice session) before it is dropped.
 UNHEARD_WAIT_S = 10.0
@@ -110,6 +123,12 @@ class VoiceToolSink(EventSink):
     async def deliver(self, event_type: str, payload: dict[str, Any]) -> None:
         if event_type == OSMO_WIDGET:
             await self.bridge.emit(widget_event_adapter.validate_python(payload))
+        elif event_type == OSMO_CODE:
+            markdown = str(payload.get("markdown") or "").strip()
+            if markdown:
+                await self.bridge.emit(TranscriptDelta(role="assistant", text=f"\n\n{markdown}\n"))
+                self.bridge.held.append((frozenset(self.bridge.unheard), markdown))
+                self.bridge.store_held()
         elif event_type == OSMO_VOICE:
             await self.bridge.configure(SetVoiceArgs.model_validate(payload), "tool")
 
@@ -121,6 +140,7 @@ class Response:
     # The answer's bubble in the browser: its deltas carry this id, and a `final` one ends it.
     item_id: str = field(default_factory=lambda: f"a-{secrets.token_hex(6)}")
     text: list[str] = field(default_factory=list)
+    reasoning: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     done: ResponseDone | None = None
     # Utterances still awaiting their transcript when the response began; stored after them.
@@ -163,6 +183,9 @@ class VoiceBridge:
         self.idle.set()
         # Bumped on every barge-in, so a tool round started before it does not ask for another answer.
         self.barge_ins = 0
+        # Cancellation must also unblock a response reader if the provider omits response.done.
+        self.response_task: asyncio.Task[Response] | None = None
+        self.response_active = False
         # A model switch asked for by set_voice mid-answer; applied once the answer ends.
         self.swap_after_turn = False
         # Ended utterances whose transcript has not arrived, oldest first. Transcription finishes
@@ -366,10 +389,13 @@ class VoiceBridge:
             self.record("assistant", self.held.pop(0)[1])
 
     async def title_from(self, text: str) -> None:
-        """Name an untitled thread after its first utterance."""
+        """Name an untitled thread after the first thing said in it."""
         if self.thread is None or self.thread.title != DEFAULT_THREAD_TITLE:
             return
-        renamed = self.storage.rename_thread(self.thread.id, text[:TITLE_FROM_SPEECH_MAX])
+        title = conversation_title(text)
+        if title is None:
+            return
+        renamed = self.storage.rename_thread(self.thread.id, title)
         if renamed is not None:
             self.thread = renamed
             await self.emit(ThreadEvent(thread=renamed))
@@ -460,12 +486,17 @@ class VoiceBridge:
         if self.voice is voice:
             await self.voice_lost()
 
+    async def cancel_response(self, voice: VoiceSession) -> None:
+        await voice.cancel()
+        if voice is self.voice and self.response_task is not None and self.response_active:
+            self.response_task.cancel()
+
     async def on_voice_event(self, voice: VoiceSession, event: VoiceEvent) -> None:
         if isinstance(event, SpeechStarted):
             # Barge-in: stop the speech (never an agent run) and tell the client to flush its
             # playback queue now (a plain `listening` at the end of a turn must not cut audio off).
             self.barge_ins += 1
-            await voice.cancel()
+            await self.cancel_response(voice)
             await self.set_state("listening", BARGE_IN)
         elif isinstance(event, SpeechStopped):
             self.idle.clear()
@@ -485,7 +516,7 @@ class VoiceBridge:
             self.store_held()
             if not event.text:
                 # Noise, not words: drop whatever the model started saying about it.
-                await voice.cancel()
+                await self.cancel_response(voice)
                 await self.turn_over()
         elif isinstance(event, AudioDelta):
             await self.set_state("speaking")
@@ -502,7 +533,19 @@ class VoiceBridge:
         """Read the session's responses in order for as long as it is open: show and store each
         answer, and run the tools it calls, asking for the next answer with their results."""
         while self.voice is voice:
-            response = await self.read_response(voice)
+            task = asyncio.create_task(self.read_response(voice))
+            self.response_task = task
+            try:
+                response = await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                continue
+            finally:
+                if self.response_task is task:
+                    self.response_task = None
+                    self.response_active = False
             if response.done is None or self.voice is not voice:
                 return
             if response.text:
@@ -518,17 +561,29 @@ class VoiceBridge:
     async def read_response(self, voice: VoiceSession) -> Response:
         response = Response()
         async for event in voice.response():
+            self.response_active = True
             if response.after is None:
                 response.after = frozenset(self.unheard)
             if isinstance(event, TextDelta):
                 response.text.append(event.text)
                 await self.emit(TranscriptDelta(role="assistant", text=event.text, itemId=response.item_id))
+            elif isinstance(event, ReasoningDelta):
+                response.reasoning.append(event.text)
+                await self.emit(TranscriptDelta(role="assistant", text="", reasoning=event.text, itemId=response.item_id))
             elif isinstance(event, ToolCall):
                 response.calls.append(event)
             else:
                 response.done = event
-        if response.text:
-            await self.emit(TranscriptDelta(role="assistant", text="".join(response.text), itemId=response.item_id, final=True))
+        if response.text or response.reasoning:
+            await self.emit(
+                TranscriptDelta(
+                    role="assistant",
+                    text="".join(response.text),
+                    reasoning="".join(response.reasoning) or None,
+                    itemId=response.item_id,
+                    final=True,
+                )
+            )
         return response
 
     async def run_tools(self, voice: VoiceSession, calls: list[ToolCall], *, spoke: bool) -> None:
@@ -544,6 +599,7 @@ class VoiceBridge:
             await voice.respond()
 
     async def run_tool(self, call: ToolCall) -> str:
+        log.info("voice requested tool %s", call.name)
         tool = self.tools.get(call.name)
         if tool is None:
             return json.dumps({"error": f"unknown tool {call.name}"})
@@ -586,7 +642,7 @@ class VoiceBridge:
         if self.voice is None:
             return
         self.barge_ins += 1
-        await self.voice.cancel()
+        await self.cancel_response(self.voice)
         await self.set_state("listening", BARGE_IN)
 
     async def widget_action(self, action: WidgetAction) -> None:
@@ -595,7 +651,7 @@ class VoiceBridge:
             return
         text = action_text(action, widget)
         self.barge_ins += 1
-        await self.voice.cancel()
+        await self.cancel_response(self.voice)
         self.record("user", text)
         await self.set_state("thinking")
         await self.voice.add_message("user", text)
@@ -615,7 +671,7 @@ class VoiceBridge:
             return
         if notice.tag == "interrupt" and not self.idle.is_set():
             self.barge_ins += 1
-            await voice.cancel()
+            await self.cancel_response(voice)
             await self.emit(StateEvent(state=self.state, detail=BARGE_IN))
         await voice.add_message("user", notice.text)
         if notice.tag != "silent":

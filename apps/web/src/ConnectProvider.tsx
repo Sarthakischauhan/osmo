@@ -14,6 +14,7 @@ export const providerInfoSchema = z.object({
   label: z.string(),
   authKinds: z.array(z.enum(["api_key", "oauth"])),
   connected: z.boolean(),
+  capabilities: z.array(z.string()).default([]),
 });
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
 export const providersResponseSchema = z.object({ providers: z.array(providerInfoSchema) });
@@ -75,7 +76,10 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Connect {provider?.label}</DialogTitle>
-          <DialogDescription>Its models unlock once the server holds a working credential. Keys stay on the server.</DialogDescription>
+          <DialogDescription>
+            {provider?.capabilities.length ? `${provider.capabilities.join(" · ")}. ` : ""}
+            A credential unlocks only the capabilities listed. Keys stay on the server.
+          </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="api_key">
           <TabsList aria-label="How to connect" className="rounded-full">

@@ -14,7 +14,7 @@ DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
 DEFAULT_DATABASE_FILE = "~/.config/osmo/osmo.db"
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
-DEFAULT_AGENT_MODEL = "grok:grok-4.7"
+DEFAULT_AGENT_MODEL = "grok:grok-4.20-0309-reasoning"
 # Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
 # Clicking and typing in the agent browser can submit, buy or send, so they wait; opening, reading and
 # scrolling pages do not. Search does not wait unless it is added here.
@@ -23,7 +23,8 @@ DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type")
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
 # Style
-- Speak in one or two short sentences. Never read out lists, numbers tables, URLs or markup.
+- Speak in one or two short sentences. Never read out lists, numbers tables, URLs, code or markup.
+- When the user asks for a code snippet or example, call write_code with the code and language, and say one short line about it. Do not use render_widget for code snippets unless the user asks for an interactive HTML widget.
 
 # Widgets
 - Whenever an answer has structure (weather, choices, prices over time, a tool or mini app), call render_widget and then say one line about what is on screen, like "here are three options".
@@ -45,7 +46,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 # Tools
 - set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): choose a voice id and label from the catalog, then confirm in one short line.
-- Use render_widget and update_widget for anything the user should see. You do not search the web, check weather, or look up prices yourself; run_agent does.
+- Use write_code for code snippets, and render_widget / update_widget for structured cards, options, charts and interactive mini apps. You do not search the web, check weather, or look up prices yourself; run_agent does.
 """
 
 
@@ -59,6 +60,7 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "create_image": "image",
     "render_widget": "osmo",
     "update_widget": "osmo",
+    "write_code": "osmo",
     "set_voice": "osmo",
     "get_weather": "osmo",
     "get_stock_history": "osmo",

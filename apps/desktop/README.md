@@ -18,8 +18,8 @@ OSMO_DESKTOP_VISION_MODEL=openai:gpt-4.1 bun run desktop
 ```
 
 The app starts a loopback Python server, serves the built web UI, and stops its server on quit.
-If a server already runs at `127.0.0.1:8787`, it is reused and left running on quit. Configure that
-server with `OSMO_TOOLS=osmo,search,image,desktop` and `OSMO_DESKTOP_VISION_MODEL` yourself.
+It generates `OSMO_DESKTOP_TOKEN` for that process. A server already running on the port is reused
+only when it echoes that same token; another healthy local server is not trusted with native access.
 Connect the voice and vision providers through the existing Providers UI. No keys go into Electron.
 `openai:gpt-4.1` is an example image-capable text model; any compatible connected core_ai model can
 be selected. A realtime voice model is not a vision model.
