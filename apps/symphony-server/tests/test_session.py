@@ -168,6 +168,18 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
         wait_listening(ws)
 
 
+def test_grok_string_status_details_does_not_discard_tool_calls(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "show me")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.function_call_arguments.done", "response_id": "r1", "call_id": "c1", "name": "render_widget", "arguments": json.dumps(WEATHER_CARD)})
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed", "status_details": "unimplemented"}})
+        rendered = next_event(ws, "widget.render")["widget"]
+        assert rendered["type"] == "card"
+        assert tool_output(grok)["id"] == rendered["id"]
+
+
 def test_a_model_switch_replays_the_thread(client: TestClient, grok: FakeGrok) -> None:
     """History lives in the stored thread: a new voice session on another model is seeded from it."""
     with client.websocket_connect("/ws") as ws:
@@ -296,6 +308,24 @@ def test_barge_in_cancels_the_turn_and_drops_its_late_audio(client: TestClient, 
                 break
             seen.append(text if text is not None else message["bytes"])
         assert b"\x20\x00" * 4 not in seen
+
+
+def test_barge_in_recovers_when_cancelled_response_never_finishes(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "first question")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "First"})
+        assert heard(ws)["text"] == "first question"
+        assert next_event(ws, "transcript.delta")["text"] == "First"
+        grok.send({"type": "input_audio_buffer.speech_started"})
+        assert next_event(ws, "state")["detail"] == "barge-in"
+        grok.next_of("response.cancel")
+        # Some providers never send response.done for the cancelled response.
+        say(grok, "next question")
+        answer(grok, "Next answer", "r2")
+        assert heard(ws)["text"] == "next question"
+        assert next_event(ws, "transcript.delta")["text"] == "Next answer"
 
 
 def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGrok) -> None:

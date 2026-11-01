@@ -54,7 +54,7 @@ export async function startServer({ packaged, resourcesPath, origin, token = pro
   });
   let error = '';
   let exited = false;
-  child.stderr.on('data', chunk => { error = (error + chunk).slice(-4000); });
+  child.stderr.on('data', chunk => { error = (error + chunk).slice(-4000); process.stderr.write(chunk); });
   child.on('error', cause => { error = cause.message; exited = true; });
   child.on('exit', () => { exited = true; });
   const stop = () => child.kill();

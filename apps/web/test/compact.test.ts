@@ -60,10 +60,11 @@ describe("the preview's spoken lines", () => {
     expect(compactMessages(turns, 1).map((turn) => turn.text)).toEqual(["four"]);
   });
 
-  it("include a user line whose transcript is still on its way, but not an empty answer", () => {
+  it("includes pending transcripts and tool-only or widget-only answers", () => {
     const turns = feedOf([said("user", "", "u1", false), { type: "state", state: "working", detail: "Searching" }]).turns;
-    expect(compactMessages(turns).map((turn) => turn.role)).toEqual(["user"]);
-    expect(compactMessages(feedOf([{ type: "state", state: "working", detail: "Searching" }]).turns)).toEqual([]);
+    expect(compactMessages(turns).map((turn) => turn.role)).toEqual(["user", "assistant"]);
+    expect(compactMessages(feedOf([{ type: "state", state: "working", detail: "Searching" }]).turns)).toHaveLength(1);
+    expect(compactMessages(feedOf([{ type: "widget.render", widget: { id: "w", type: "card", props: { title: "Result" } } }]).turns)).toHaveLength(1);
   });
 
   it("leave approvals to the agent log", () => {

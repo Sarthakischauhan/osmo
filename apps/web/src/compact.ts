@@ -9,10 +9,10 @@ export const COMPACT_MESSAGES = 3;
 
 type SpokenTurn = Extract<Turn, { role: "user" | "assistant" }>;
 
-/** The latest spoken lines, oldest first, while a line is still streaming or its transcript is on its way. Tool activity, widgets and approvals are not messages. */
+/** The latest visible conversation turns, including tool activity and widgets before the assistant speaks. */
 export function compactMessages(turns: readonly Turn[], limit: number = COMPACT_MESSAGES): SpokenTurn[] {
-  const spoken = turns.filter((turn): turn is SpokenTurn => (turn.role === "user" && (turn.text !== "" || turn.pending === true)) || (turn.role === "assistant" && turn.text !== ""));
-  return spoken.slice(-limit);
+  const visible = turns.filter((turn): turn is SpokenTurn => (turn.role === "user" && (turn.text !== "" || turn.pending === true)) || (turn.role === "assistant" && (turn.text !== "" || turn.activities.length > 0 || turn.widgets.length > 0)));
+  return visible.slice(-limit);
 }
 
 export interface AgentSummary {

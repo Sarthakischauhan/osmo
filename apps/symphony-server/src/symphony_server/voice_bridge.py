@@ -175,6 +175,9 @@ class VoiceBridge:
         self.idle.set()
         # Bumped on every barge-in, so a tool round started before it does not ask for another answer.
         self.barge_ins = 0
+        # Cancellation must also unblock a response reader if the provider omits response.done.
+        self.response_task: asyncio.Task[Response] | None = None
+        self.response_active = False
         # A model switch asked for by set_voice mid-answer; applied once the answer ends.
         self.swap_after_turn = False
         # Ended utterances whose transcript has not arrived, oldest first. Transcription finishes
@@ -475,12 +478,17 @@ class VoiceBridge:
         if self.voice is voice:
             await self.voice_lost()
 
+    async def cancel_response(self, voice: VoiceSession) -> None:
+        await voice.cancel()
+        if voice is self.voice and self.response_task is not None and self.response_active:
+            self.response_task.cancel()
+
     async def on_voice_event(self, voice: VoiceSession, event: VoiceEvent) -> None:
         if isinstance(event, SpeechStarted):
             # Barge-in: stop the speech (never an agent run) and tell the client to flush its
             # playback queue now (a plain `listening` at the end of a turn must not cut audio off).
             self.barge_ins += 1
-            await voice.cancel()
+            await self.cancel_response(voice)
             await self.set_state("listening", BARGE_IN)
         elif isinstance(event, SpeechStopped):
             self.idle.clear()
@@ -500,7 +508,7 @@ class VoiceBridge:
             self.store_held()
             if not event.text:
                 # Noise, not words: drop whatever the model started saying about it.
-                await voice.cancel()
+                await self.cancel_response(voice)
                 await self.turn_over()
         elif isinstance(event, AudioDelta):
             await self.set_state("speaking")
@@ -517,7 +525,19 @@ class VoiceBridge:
         """Read the session's responses in order for as long as it is open: show and store each
         answer, and run the tools it calls, asking for the next answer with their results."""
         while self.voice is voice:
-            response = await self.read_response(voice)
+            task = asyncio.create_task(self.read_response(voice))
+            self.response_task = task
+            try:
+                response = await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                continue
+            finally:
+                if self.response_task is task:
+                    self.response_task = None
+                    self.response_active = False
             if response.done is None or self.voice is not voice:
                 return
             if response.text:
@@ -533,6 +553,7 @@ class VoiceBridge:
     async def read_response(self, voice: VoiceSession) -> Response:
         response = Response()
         async for event in voice.response():
+            self.response_active = True
             if response.after is None:
                 response.after = frozenset(self.unheard)
             if isinstance(event, TextDelta):
@@ -559,6 +580,7 @@ class VoiceBridge:
             await voice.respond()
 
     async def run_tool(self, call: ToolCall) -> str:
+        log.info("voice requested tool %s", call.name)
         tool = self.tools.get(call.name)
         if tool is None:
             return json.dumps({"error": f"unknown tool {call.name}"})
@@ -601,7 +623,7 @@ class VoiceBridge:
         if self.voice is None:
             return
         self.barge_ins += 1
-        await self.voice.cancel()
+        await self.cancel_response(self.voice)
         await self.set_state("listening", BARGE_IN)
 
     async def widget_action(self, action: WidgetAction) -> None:
@@ -610,7 +632,7 @@ class VoiceBridge:
             return
         text = action_text(action, widget)
         self.barge_ins += 1
-        await self.voice.cancel()
+        await self.cancel_response(self.voice)
         self.record("user", text)
         await self.set_state("thinking")
         await self.voice.add_message("user", text)
@@ -630,7 +652,7 @@ class VoiceBridge:
             return
         if notice.tag == "interrupt" and not self.idle.is_set():
             self.barge_ins += 1
-            await voice.cancel()
+            await self.cancel_response(voice)
             await self.emit(StateEvent(state=self.state, detail=BARGE_IN))
         await voice.add_message("user", notice.text)
         if notice.tag != "silent":

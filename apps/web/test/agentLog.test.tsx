@@ -71,8 +71,16 @@ describe("the orb's preview box", () => {
     expect(html.match(/Approve</g)).toHaveLength(1);
   });
 
-  it("leaves tool logs, widgets and run cards to the workspace", () => {
-    for (const text of ["Searching the web", "osmo-browser", "chat-subagent"]) expect(html).not.toContain(text);
+  it("shows tool activity without duplicating run cards", () => {
+    expect(html).toContain("Searching the web");
+    expect(html).not.toContain("chat-subagent");
+  });
+
+  it("renders a widget even before the assistant speaks", () => {
+    const widgetTurns = [{ type: "widget.render", widget: { id: "w", type: "card", props: { title: "Search result", body: "Found it" } } } as ServerEvent].reduce(reduceFeed, emptyFeed).turns;
+    const preview = renderToStaticMarkup(<OrbPreview turns={widgetTurns} runs={{}} activity={agentActivity({}, widgetTurns, undefined, 0)} onDecide={decide} />);
+    expect(preview).toContain("Search result");
+    expect(preview).toContain("Found it");
   });
 
   it("is the agent log alone when nothing has been said, and the lines alone when no agent runs", () => {
