@@ -35,7 +35,7 @@ from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
-from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard
+from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard, WriteCodeTool
 from symphony_server.memory import MemoryPersistence
 from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import ModelsEvent
@@ -66,7 +66,7 @@ log = logging.getLogger("symphony")
 
 
 # The voice model's own tools. Search, weather and prices go to the background agent.
-VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "set_voice"})
+VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "write_code", "set_voice"})
 # The background agent searches the web and browses it. The voice model owns the screen, widgets and pictures.
 AGENT_TOOLS = frozenset({"web_search", *BROWSER_TOOL_NAMES})
 
@@ -79,6 +79,7 @@ def osmo_tools(settings: Settings, client: httpx.AsyncClient, access: ModelAcces
         CreateImageTool(access.registry, board, settings.image_model),
         RenderWidgetTool(board),
         UpdateWidgetTool(board),
+        WriteCodeTool(),
         SetVoiceTool(access),
         WeatherTool(client),
         StockTool(client),

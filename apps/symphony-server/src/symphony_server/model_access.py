@@ -82,6 +82,6 @@ class ModelAccess:
         # Only xAI's endpoint is configurable (XAI_BASE_URL); the rest use core_ai's defaults.
         base_url = self.xai_base_url if model.provider == "xai" else None
         session = await open_voice_session(spec, config, self.keys[model.provider], base_url=base_url)
-        if model.provider == "xai" and isinstance(session, RealtimeApiSession):
+        if isinstance(session, RealtimeApiSession):
             install_grok_compat(session)
         return session

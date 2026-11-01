@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ScrollDirectionBar } from "@/components/ScrollDirectionBar"
 import {
   Tooltip,
   TooltipContent,
@@ -369,16 +370,21 @@ function SidebarSeparator({
 }
 
 function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
+  const scrollRef = React.useRef<HTMLDivElement>(null)
   return (
-    <div
-      data-slot="sidebar-content"
-      data-sidebar="content"
-      className={cn(
-        "osmo-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
-        className
-      )}
-      {...props}
-    />
+    <div className="osmo-scroll-host flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        data-slot="sidebar-content"
+        data-sidebar="content"
+        className={cn(
+          "osmo-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+          className
+        )}
+        {...props}
+      />
+      <ScrollDirectionBar target={scrollRef} label="Thread list scroll" />
+    </div>
   )
 }
 

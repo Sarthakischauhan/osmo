@@ -2,6 +2,7 @@ import type { AgentRunStatus, ServerEvent } from "@osmo/osmo-composer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApprovalPrompt } from "../src/components/ApprovalPrompt";
+import { computeScrollMetrics } from "../src/components/ScrollDirectionBar";
 import { CompactAgentActivity } from "../src/CompactAgentActivity";
 import { FloatingOrb } from "../src/FloatingOrb";
 import { OrbPreview } from "../src/OrbPreview";
@@ -91,6 +92,28 @@ describe("the orb's preview box", () => {
     const noAgents = renderToStaticMarkup(<OrbPreview turns={turns} runs={{}} activity={none} onDecide={decide} />);
     expect(noAgents).toContain("Find trail shoes");
     expect(noAgents).not.toContain("osmo-compact-agents");
+  });
+
+  it("renders reasoning / thinking blocks and keeps all turns scrollable in the preview box", () => {
+    const manyEvents: ServerEvent[] = [
+      { type: "transcript.delta", role: "user", text: "One", itemId: "u1", final: true },
+      { type: "transcript.delta", role: "assistant", text: "Two", itemId: "a1", final: true },
+      { type: "transcript.delta", role: "user", text: "Three", itemId: "u2", final: true },
+      { type: "transcript.delta", role: "assistant", text: "Four", reasoning: "Thinking step by step", itemId: "a2", final: true },
+    ];
+    const manyTurns = manyEvents.reduce(reduceFeed, emptyFeed).turns;
+    const preview = renderToStaticMarkup(<OrbPreview turns={manyTurns} runs={{}} activity={agentActivity({}, manyTurns, undefined, 0)} onDecide={decide} />);
+    for (const text of ["One", "Two", "Three", "Four", "Thinking step by step"]) expect(preview).toContain(text);
+    expect(preview).toContain("md-thinking");
+  });
+});
+
+describe("scroll direction bar metrics", () => {
+  it("reports direction availability and centered ratio for scrollable containers", () => {
+    expect(computeScrollMetrics(0, 200, 200).scrollable).toBe(false);
+    expect(computeScrollMetrics(0, 600, 200)).toEqual({ scrollable: true, canUp: false, canDown: true, ratio: 0 });
+    expect(computeScrollMetrics(200, 600, 200)).toEqual({ scrollable: true, canUp: true, canDown: true, ratio: 0.5 });
+    expect(computeScrollMetrics(400, 600, 200)).toEqual({ scrollable: true, canUp: true, canDown: false, ratio: 1 });
   });
 });
 

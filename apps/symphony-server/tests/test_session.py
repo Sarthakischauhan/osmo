@@ -124,7 +124,7 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert session["turn_detection"] == {"type": "server_vad"}
         names = {tool["name"] for tool in session["tools"]}
         assert names == {
-            "render_widget", "update_widget", "set_voice",
+            "render_widget", "update_widget", "write_code", "set_voice",
             "run_agent", "agent_status", "cancel_agent",
         }
         assert all(tool["type"] == "function" for tool in session["tools"])
@@ -178,6 +178,42 @@ def test_grok_string_status_details_does_not_discard_tool_calls(client: TestClie
         rendered = next_event(ws, "widget.render")["widget"]
         assert rendered["type"] == "card"
         assert tool_output(grok)["id"] == rendered["id"]
+
+
+def test_write_code_emits_fenced_markdown_without_creating_a_widget(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "show me a go server")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send(
+            {
+                "type": "response.function_call_arguments.done",
+                "response_id": "r1",
+                "call_id": "c1",
+                "name": "write_code",
+                "arguments": json.dumps({"language": "go", "code": 'package main\nfunc main() {}'}),
+            }
+        )
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+        delta = next_event(ws, "transcript.delta")
+        while delta.get("role") != "assistant" or "```go" not in delta.get("text", ""):
+            delta = next_event(ws, "transcript.delta")
+        assert "package main" in delta["text"]
+        assert tool_output(grok)["shown"] == "go snippet (2 lines)"
+
+
+def test_realtime_reasoning_deltas_are_streamed_to_the_browser(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "think about this")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.reasoning_summary_text.delta", "response_id": "r1", "delta": "Considering options..."})
+        grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "Here is my answer."})
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+        reasoning_event = next_event(ws, "transcript.delta")
+        while reasoning_event.get("reasoning") != "Considering options...":
+            reasoning_event = next_event(ws, "transcript.delta")
+        assert reasoning_event["role"] == "assistant"
 
 
 def test_a_model_switch_replays_the_thread(client: TestClient, grok: FakeGrok) -> None:

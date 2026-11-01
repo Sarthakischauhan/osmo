@@ -59,4 +59,7 @@ def activity_label(name: str, args: Mapping[str, Any]) -> str:
         return f"Scrolling {args.get('direction', '')}"
     if name == "create_image":
         return "Drawing a picture"
+    if name == "write_code":
+        lang = str(args.get("language") or "").strip()
+        return f"Writing {lang} code" if lang else "Writing code"
     return f"Running {name}"

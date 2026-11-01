@@ -116,6 +116,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     // the whole text. An utterance's empty delta opens its bubble when speech stops.
     itemId: z.string().optional(),
     final: z.boolean().optional(),
+    reasoning: z.string().optional(),
   }),
   // The spec's payload is (id, type, props); it is nested under `widget`
   // because `type` is already the event discriminator.
@@ -145,6 +146,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     task: z.string(),
     status: agentRunStatusSchema,
     phase: z.string().nullish(),
+    reasoning: z.string().nullish(),
     result: z.string().nullish(),
   }),
   // An agent run waits for the user: answer with `POST /api/approvals/{approvalId}`.

@@ -18,7 +18,7 @@ export interface OrbPreviewProps {
  * entries carry Approve / Deny. Tool activity, widgets and run cards stay in the workspace.
  */
 export function OrbPreview({ turns, runs, activity, onDecide }: OrbPreviewProps) {
-  const messages = compactMessages(turns);
+  const messages = compactMessages(turns, Number.POSITIVE_INFINITY);
   return (
     <>
       {messages.length > 0 && (

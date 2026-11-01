@@ -43,8 +43,9 @@ from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.browser import BrowserSession
-from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
+from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
 from symphony_server.cdp import BrowserError
+from symphony_server.grok_compat import ReasoningDelta
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
@@ -122,6 +123,12 @@ class VoiceToolSink(EventSink):
     async def deliver(self, event_type: str, payload: dict[str, Any]) -> None:
         if event_type == OSMO_WIDGET:
             await self.bridge.emit(widget_event_adapter.validate_python(payload))
+        elif event_type == OSMO_CODE:
+            markdown = str(payload.get("markdown") or "").strip()
+            if markdown:
+                await self.bridge.emit(TranscriptDelta(role="assistant", text=f"\n\n{markdown}\n"))
+                self.bridge.held.append((frozenset(self.bridge.unheard), markdown))
+                self.bridge.store_held()
         elif event_type == OSMO_VOICE:
             await self.bridge.configure(SetVoiceArgs.model_validate(payload), "tool")
 
@@ -133,6 +140,7 @@ class Response:
     # The answer's bubble in the browser: its deltas carry this id, and a `final` one ends it.
     item_id: str = field(default_factory=lambda: f"a-{secrets.token_hex(6)}")
     text: list[str] = field(default_factory=list)
+    reasoning: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     done: ResponseDone | None = None
     # Utterances still awaiting their transcript when the response began; stored after them.
@@ -559,12 +567,23 @@ class VoiceBridge:
             if isinstance(event, TextDelta):
                 response.text.append(event.text)
                 await self.emit(TranscriptDelta(role="assistant", text=event.text, itemId=response.item_id))
+            elif isinstance(event, ReasoningDelta):
+                response.reasoning.append(event.text)
+                await self.emit(TranscriptDelta(role="assistant", text="", reasoning=event.text, itemId=response.item_id))
             elif isinstance(event, ToolCall):
                 response.calls.append(event)
             else:
                 response.done = event
-        if response.text:
-            await self.emit(TranscriptDelta(role="assistant", text="".join(response.text), itemId=response.item_id, final=True))
+        if response.text or response.reasoning:
+            await self.emit(
+                TranscriptDelta(
+                    role="assistant",
+                    text="".join(response.text),
+                    reasoning="".join(response.reasoning) or None,
+                    itemId=response.item_id,
+                    final=True,
+                )
+            )
         return response
 
     async def run_tools(self, voice: VoiceSession, calls: list[ToolCall], *, spoke: bool) -> None:

@@ -18,6 +18,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
+import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
 import { AsciiHome } from "@/components/home/AsciiHome";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
@@ -246,6 +247,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   );
   speaking.current = session.state === "speaking";
   const bottom = useRef<HTMLDivElement>(null);
+  const feedScrollRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -353,19 +355,22 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
 
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
-            <main className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
-              {feed.turns.length === 0 ? (
-                <AsciiHome />
-              ) : (
-                <div className="feed">
-                  {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
-                  {feed.turns.map((turn) => (
-                    <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
-                  ))}
-                  <div ref={bottom} />
-                </div>
-              )}
-            </main>
+            <div className="osmo-scroll-host">
+              <main ref={feedScrollRef} className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
+                {feed.turns.length === 0 ? (
+                  <AsciiHome />
+                ) : (
+                  <div className="feed">
+                    {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
+                    {feed.turns.map((turn) => (
+                      <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
+                    ))}
+                    <div ref={bottom} />
+                  </div>
+                )}
+              </main>
+              <ScrollDirectionBar target={feedScrollRef} label="Conversation scroll" />
+            </div>
           </BrowserControlsContext.Provider>
         </WidgetProvider>
 

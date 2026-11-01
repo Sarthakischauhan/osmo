@@ -9,9 +9,14 @@ export const COMPACT_MESSAGES = 3;
 
 type SpokenTurn = Extract<Turn, { role: "user" | "assistant" }>;
 
-/** The latest visible conversation turns, including tool activity and widgets before the assistant speaks. */
+/** The latest visible conversation turns, including reasoning, tool activity and widgets before the assistant speaks. */
 export function compactMessages(turns: readonly Turn[], limit: number = COMPACT_MESSAGES): SpokenTurn[] {
-  const visible = turns.filter((turn): turn is SpokenTurn => (turn.role === "user" && (turn.text !== "" || turn.pending === true)) || (turn.role === "assistant" && (turn.text !== "" || turn.activities.length > 0 || turn.widgets.length > 0)));
+  const visible = turns.filter(
+    (turn): turn is SpokenTurn =>
+      (turn.role === "user" && (turn.text !== "" || turn.pending === true)) ||
+      (turn.role === "assistant" &&
+        (turn.text !== "" || Boolean(turn.reasoning) || turn.thinking === true || turn.activities.length > 0 || turn.widgets.length > 0)),
+  );
   return visible.slice(-limit);
 }
 
@@ -46,7 +51,7 @@ function shown(run: RunView, now: number): boolean {
 function detail(run: RunView): string | undefined {
   if (run.status === "completed" || run.status === "failed") return run.result ?? run.phase;
   if (run.status === "cancelled") return "Cancelled";
-  return run.phase;
+  return run.phase ?? run.reasoning;
 }
 
 /**

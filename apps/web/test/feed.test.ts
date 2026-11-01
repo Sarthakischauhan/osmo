@@ -190,4 +190,19 @@ describe("approval turns", () => {
     ]);
     expect(feed.turns.map((t) => t.role)).toEqual(["user", "assistant"]);
   });
+
+  it("tracks thinking state, reasoning tokens, and preserves code snippets on final transcript", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Show go code", itemId: "u1", final: true });
+    feed = reduceFeed(feed, { type: "state", state: "thinking" });
+    expect(feed.turns[1]).toMatchObject({ role: "assistant", thinking: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "", reasoning: "Planning minimal HTTP server...", itemId: "a1" });
+    expect(feed.turns[1]).toMatchObject({ role: "assistant", reasoning: "Planning minimal HTTP server...", thinking: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Here is a minimal server.", itemId: "a1" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "\n\n```go\npackage main\n```\n" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Here is a minimal server.", itemId: "a1", final: true });
+    const turn = feed.turns[1];
+    expect(turn?.role === "assistant" && turn.text).toContain("```go\npackage main\n```");
+    expect(turn?.role === "assistant" && turn.reasoning).toBe("Planning minimal HTTP server...");
+    expect(turn?.role === "assistant" && turn.thinking).toBe(false);
+  });
 });

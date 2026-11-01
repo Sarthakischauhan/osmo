@@ -65,11 +65,19 @@ export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, o
       onBoxHeight(0);
       return;
     }
-    onBoxHeight(element.offsetHeight);
-    const observer = new ResizeObserver(() => onBoxHeight(element.offsetHeight));
+    const report = () => {
+      onBoxHeight(Math.min(400, element.offsetHeight));
+    };
+    report();
+    const observer = new ResizeObserver(report);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hasBox, onBoxHeight]);
+  }, [hasBox, onBoxHeight, turns, activity]);
+  useEffect(() => {
+    const element = box.current;
+    if (!hasBox || !element) return;
+    element.scrollTop = element.scrollHeight;
+  }, [hasBox, turns.length]);
   const track = (region: "orb" | "panel") => ({
     onPointerEnter: () => hover.current?.enter(region),
     onPointerLeave: () => hover.current?.leave(region),

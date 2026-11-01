@@ -57,9 +57,16 @@ export function FeedTurn({ turn, step, onDecide, compact = false }: FeedTurnProp
 }
 
 
-/** One assistant turn's spoken line, tool activity rows and agent runs as chat-sdk parts; widgets render separately, keyed by id. */
+/** One assistant turn's spoken line, reasoning, tool activity rows and agent runs as chat-sdk parts; widgets render separately, keyed by id. */
 function assistantParts(turn: AssistantTurn, compact: boolean): AgentPart[] {
   const parts: AgentPart[] = [];
+  if (turn.reasoning || turn.thinking) {
+    parts.push({
+      type: "reasoning",
+      text: turn.reasoning ?? "",
+      state: turn.thinking ? "streaming" : "done",
+    });
+  }
   if (turn.text) parts.push({ type: "text", text: turn.text });
   if (compact) return parts;
   turn.activities.forEach((activity, i) =>
@@ -84,6 +91,21 @@ const SUBAGENT_STATE: Record<RunCard["status"], AgentSubagentState> = {
 };
 
 function subagent(run: RunCard): AgentSubagent {
+  const reasoningMessages = run.reasoning
+    ? [
+        {
+          id: `${run.runId}-reasoning`,
+          role: "assistant" as const,
+          parts: [
+            {
+              type: "reasoning" as const,
+              text: run.reasoning,
+              state: (run.status === "running" || run.status === "waiting_approval" ? "streaming" : "done") as "streaming" | "done",
+            },
+          ],
+        },
+      ]
+    : [];
   return {
     id: run.runId,
     title: "Symphony",
@@ -91,10 +113,13 @@ function subagent(run: RunCard): AgentSubagent {
     state: SUBAGENT_STATE[run.status],
     error: run.status === "failed" ? run.result : undefined,
     // The answer is the voice model's to tell; the card keeps it under View activity, after the steps.
-    messages: [...run.phases, ...(run.status === "completed" && run.result ? [run.result] : [])].map((text, i) => ({
-      id: `${run.runId}-${i}`,
-      role: "assistant",
-      parts: [{ type: "text", text }],
-    })),
+    messages: [
+      ...reasoningMessages,
+      ...[...run.phases, ...(run.status === "completed" && run.result ? [run.result] : [])].map((text, i) => ({
+        id: `${run.runId}-${i}`,
+        role: "assistant" as const,
+        parts: [{ type: "text" as const, text }],
+      })),
+    ],
   };
 }

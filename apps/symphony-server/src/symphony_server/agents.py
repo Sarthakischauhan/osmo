@@ -188,6 +188,10 @@ class AgentRuns:
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
+        elif kind == "reasoning_delta":
+            delta = str(event.payload.get("delta") or "")
+            if delta:
+                await self.show(record.threadId, AgentUpdate(runId=record.runId, task=record.task, status=record.status, reasoning=delta))
         elif kind == OSMO_WIDGET:
             await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
