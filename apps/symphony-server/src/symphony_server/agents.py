@@ -34,6 +34,7 @@ from symphony_server.approvals import (
     ApprovalResolvedPayload,
 )
 from symphony_server.canvas import OSMO_WIDGET
+from symphony_server.agent_model import AGENT_MODEL_SETTING
 from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import (
     AgentUpdate,
@@ -90,8 +91,11 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None) -> None:
+    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None, auto_model: bool = False) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
+        self.auto_model = auto_model
+        # The model chosen in the app (agent_model.py); it wins over OSMO_AGENT_MODEL and automatic selection.
+        self.chosen_model: str | None = storage.setting(AGENT_MODEL_SETTING)
         self.desktops = desktops if desktops is not None else {}
         self.browsers = browsers
         # A thread's browser session shows its widget on the thread (whoever observes it).
@@ -114,16 +118,60 @@ class AgentRuns:
         if self.observers.get(thread_id) is observer:
             del self.observers[thread_id]
 
+    def choose_model(self, model_id: str | None) -> None:
+        """Run agents on `model_id` from now on; None goes back to OSMO_AGENT_MODEL or automatic selection."""
+        self.storage.save_setting(AGENT_MODEL_SETTING, model_id)
+        self.chosen_model = model_id
+
+    async def select_model(self) -> str:
+        """The model chosen in the app; else a usable subscription or key model unless the operator
+        configured one explicitly."""
+        if self.chosen_model:
+            return self.chosen_model
+        model_id = self.model_id
+        if self.auto_model and self.access.subscriptions is not None:
+            # Stable priority avoids switching models based on connection timing. An explicit
+            # OSMO_AGENT_MODEL always wins over automatic subscription selection.
+            from core_ai.providers.defaults import DEFAULT_MODELS
+
+            for candidate, namespace in (("xai", "grok"), ("openai", "openai"), ("anthropic", "anthropic")):
+                if self.access.subscriptions.store.token(candidate) is not None and await self.access.prepare(candidate):
+                    if candidate in self.access.tokens:
+                        return DEFAULT_MODELS[namespace]
+            # A voice API key may be the only connected provider. Do not require an xAI
+            # key when OpenAI, Gemini, Anthropic or Vercel can run the agent instead.
+            if model_id == self.model_id:
+                for candidate, namespace in (("xai", "grok"), ("openai", "openai"), ("anthropic", "anthropic"), ("gemini", "gemini"), ("vercel", "vercel")):
+                    if not (self.access.credentials.secret(candidate) and await self.access.prepare(candidate)):
+                        continue
+                    picked = await self.key_model(candidate, namespace, DEFAULT_MODELS[namespace])
+                    if picked is not None:
+                        model_id = picked
+                        break
+        return model_id
+
+    async def key_model(self, provider: str, namespace: str, catalog_default: str) -> str | None:
+        """The model `provider`'s API key runs agents on: the configured default when it is this
+        provider's, else core_ai's; None when the key lists text models and has neither (an xAI
+        key limited to voice lists none), so selection moves on to the next provider."""
+        candidates = [self.model_id] if provider_of(self.model_id) == provider else []
+        candidates.append(catalog_default)
+        available = await self.access.key_text_models(provider)
+        if available is None:
+            return candidates[0]
+        return next((model for model in candidates if model.split(":", 1)[1] in available), None)
+
     async def start(self, thread_id: str, task: str, *, desktop: DesktopSession | None = None) -> AgentRunRecord | str:
-        """Submit `task` as a run for `thread_id`; the record, or why it could not start."""
-        provider = provider_of(self.model_id)
+        """Submit `task` for `thread_id`; the record, or why it could not start."""
+        model_id = await self.select_model()
+        provider = provider_of(model_id)
         if provider is None or not await self.access.prepare(provider):
-            label = provider_label(provider) if provider is not None else self.model_id
-            return f"the agent model ({self.model_id}) needs {label} connected"
+            label = provider_label(provider) if provider is not None else model_id
+            return f"the agent model ({model_id}) needs {label} connected"
         session_id = f"agent-{secrets.token_hex(8)}"
         if desktop is not None:
             self.desktops[session_id] = desktop
-        request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=self.model_id)
+        request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=model_id)
         try:
             state = await self.backend.submit(RunSubmission(RunContext(session_id=session_id, metadata={THREAD_ID: thread_id}), request))
         except RunCapacityError as exc:

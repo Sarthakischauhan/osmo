@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from symphony_server.browser import BROWSER_TOOL_NAMES, THREAD_ID, BrowserRunLink, BrowserSessions, browser_tools
 from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
+from symphony_server.agent_model import create_agent_model_router
 from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
 from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard, WriteCodeTool
@@ -40,6 +41,13 @@ from symphony_server.memory import MemoryPersistence
 from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import ModelsEvent
 from symphony_server.providers import CredentialStore, TokenRefresher, create_provider_router
+from symphony_server.subscriptions import (
+    SubscriptionLogins,
+    SubscriptionRefresher,
+    SubscriptionStore,
+    create_subscription_router,
+    subscription_id,
+)
 from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
 from symphony_server.settings import TOOL_CATEGORIES, Settings
@@ -125,13 +133,18 @@ def create_app(
     settings: Settings,
     *,
     http_client: httpx.AsyncClient,
+    oauth_http_client: httpx.Client | None = None,
     secret_store: SecretStore | None = None,
     registry: ModelRegistry | None = None,
     context_limits: Mapping[str, int] | None = None,
 ) -> FastAPI:
     credentials = CredentialStore(secret_store or open_secret_store(settings))
     refresher = TokenRefresher(credentials, http_client, settings.oauth_clients)
-    access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url, refresher)
+    # core_ai's OAuth calls are sync: subscription logins and refreshes use this client, in threads.
+    oauth_client = oauth_http_client or httpx.Client(timeout=30.0)
+    subscription_store = SubscriptionStore(credentials)
+    subscriptions = SubscriptionRefresher(subscription_store, oauth_client)
+    access = ModelAccess(registry or ModelRegistry(), credentials, settings.xai_base_url, refresher, subscriptions, http_client)
     for provider in CORE_NAMESPACES:
         access.connect(provider)
     storage = SQLiteStorage(settings.database_file)
@@ -144,7 +157,19 @@ def create_app(
     previews = PreviewCache(access, settings.preview_cache_dir)
     preview_limiter = KeyedRateLimiter(PREVIEW_RATE_LIMIT, PREVIEW_RATE_WINDOW_S, PREVIEW_CLIENTS_MAX)
     backend = InProcessRunBackend(RunExecutor(core_config))
-    agents = AgentRuns(backend, storage, broker, access, settings.agent_model, browsers, desktops=desktops)
+    agents = AgentRuns(backend, storage, broker, access, settings.agent_model, browsers, desktops=desktops, auto_model=settings.agent_model_auto)
+
+    def subscription_connected(provider: str) -> None:
+        storage.save_connection(subscription_id(provider), "oauth")
+        access.connect(provider)
+
+    def subscription_removed(provider: str) -> None:
+        storage.remove_connection(subscription_id(provider))
+        access.connect(provider)
+
+    logins = SubscriptionLogins(
+        subscription_store, subscription_connected, client=oauth_client, bind_loopback=settings.subscription_loopback
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -156,10 +181,12 @@ def create_app(
         if idle_watch is not None:
             idle_watch.cancel()
             await asyncio.gather(idle_watch, return_exceptions=True)
+        logins.close_all()
         await agents.shutdown()
         await backend.shutdown()
         storage.close()
         await http_client.aclose()
+        oauth_client.close()
         tracing.flush()
 
     app = FastAPI(title="symphony-server", lifespan=lifespan)
@@ -177,9 +204,11 @@ def create_app(
     install_middlewares(app, core_config, prefix="/api")
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
     app.include_router(create_provider_router(credentials, http_client, storage, settings.oauth_clients))
+    app.include_router(create_subscription_router(subscription_store, logins, subscription_removed, subscriptions))
     app.include_router(create_thread_router(storage))
     app.include_router(create_approval_router(broker))
     app.include_router(create_run_router(agents))
+    app.include_router(create_agent_model_router(agents))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:

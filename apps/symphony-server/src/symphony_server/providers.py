@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from symphony_server.secret_store import DEFAULT_OWNER, AuthKind, ProviderAuth, SecretStore, SecretStoreError
 from symphony_server.settings import OAuthClient
 from symphony_server.storage import Storage
+from symphony_server.subscriptions import SUBSCRIPTIONS, subscription_id
 from symphony_server.voices import VoiceModel
 
 log = logging.getLogger("symphony.providers")
@@ -62,6 +63,8 @@ class ProviderSpec:
     # The header `validate_url` takes the key in, and the prefix before the key.
     key_header: str = "Authorization"
     key_prefix: str = "Bearer "
+    # Other headers `validate_url` needs, as (name, value) pairs.
+    validate_headers: tuple[tuple[str, str], ...] = ()
 
 
 
@@ -71,9 +74,9 @@ class ProviderSpec:
 #   (https://vercel.com/docs/sign-in-with-vercel/authorization-server-api); its access token
 #   authenticates AI Gateway model requests (https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway,
 #   "Vercel Access Token Authentication"). Offered only when OSMO_VERCEL_OAUTH_CLIENT_ID is set.
-# - xAI: API key only. The console issues keys; auth.x.ai is documented only for xAI's own
-#   Grok Build CLI, with no third-party client registration.
-# - OpenAI: API key only. "Sign in with ChatGPT" tokens are documented for Responses API inference
+# - xAI, OpenAI, Anthropic: an API key here (voice, images, text), and separately a subscription
+#   sign-in (SuperGrok, ChatGPT, Claude) through core_ai's OAuth logins, for text only; see subscriptions.py.
+#   "Sign in with ChatGPT" tokens are documented for Responses API inference
 #   (https://developers.openai.com/siwc/token-sharing-open-source), not the Realtime API Osmo talks to.
 # - Gemini: API key only. Google OAuth works for the Gemini API (https://ai.google.dev/gemini-api/docs/oauth),
 #   but core_ai's Gemini text and Live clients send only `x-goog-api-key` / `?key=`.
@@ -82,6 +85,16 @@ class ProviderSpec:
 PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(id="xai", label="xAI", validate_url="https://api.x.ai/v1/models"),
     ProviderSpec(id="openai", label="OpenAI", validate_url="https://api.openai.com/v1/models"),
+    # Anthropic keys go in `x-api-key` with an `anthropic-version`; `GET /v1/models` needs the key
+    # (https://docs.anthropic.com/en/api/models-list).
+    ProviderSpec(
+        id="anthropic",
+        label="Anthropic",
+        validate_url="https://api.anthropic.com/v1/models",
+        key_header="x-api-key",
+        key_prefix="",
+        validate_headers=(("anthropic-version", "2023-06-01"),),
+    ),
     ProviderSpec(
         id="openrouter",
         label="OpenRouter",
@@ -137,6 +150,7 @@ def provider_label(provider_id: str) -> str:
 PROVIDER_CAPABILITIES: dict[str, tuple[str, ...]] = {
     "xai": ("Voice, background agents, and images",),
     "openai": ("Vision and text models",),
+    "anthropic": ("Text models",),
     "openrouter": ("Text models",),
     "vercel": ("Text models",),
     "gemini": ("Voice and text models",),
@@ -262,15 +276,28 @@ def with_locks(models: tuple[VoiceModel, ...], store: CredentialStore) -> tuple[
     return tuple(m.model_copy(update={"locked": not store.connected(m.provider)}) for m in models)
 
 
+class SubscriptionInfo(BaseModel):
+    """A provider's subscription sign-in (subscriptions.py), offered next to its API key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    connected: bool
+    # What the subscription unlocks; less than an API key (no voice or images).
+    capabilities: list[str]
+
+
 class ProviderInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
     label: str
     authKinds: list[AuthKind]
+    # Whether the provider's API key (or OAuth key) is stored; a subscription does not count.
     connected: bool
     # What a credential can unlock today. A connected provider is not necessarily a voice provider.
     capabilities: list[str] = []
+    subscription: SubscriptionInfo | None = None
 
 
 class ProvidersResponse(BaseModel):
@@ -353,6 +380,13 @@ def create_provider_router(
         store.save(auth)
         storage.save_connection(auth.provider, auth.kind)
 
+    def subscription_info(provider_id: str) -> SubscriptionInfo | None:
+        sub = SUBSCRIPTIONS.get(provider_id)
+        if sub is None:
+            return None
+        connected = store.stored(subscription_id(provider_id)) is not None
+        return SubscriptionInfo(label=sub.label, connected=connected, capabilities=list(sub.capabilities))
+
     @router.get("")
     async def list_providers() -> ProvidersResponse:
         return ProvidersResponse(
@@ -363,6 +397,7 @@ def create_provider_router(
                     authKinds=kinds(p),
                     connected=store.connected(p.id),
                     capabilities=list(PROVIDER_CAPABILITIES.get(p.id, ())),
+                    subscription=subscription_info(p.id),
                 )
                 for p in PROVIDERS
             ]
@@ -374,7 +409,7 @@ def create_provider_router(
         try:
             response = await client.get(
                 spec.validate_url,
-                headers={spec.key_header: spec.key_prefix + body.key.get_secret_value()},
+                headers={spec.key_header: spec.key_prefix + body.key.get_secret_value(), **dict(spec.validate_headers)},
                 timeout=VALIDATE_TIMEOUT_S,
             )
         except httpx.HTTPError as exc:

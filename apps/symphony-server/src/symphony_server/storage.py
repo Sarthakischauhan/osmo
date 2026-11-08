@@ -94,6 +94,10 @@ class Storage(Protocol):
 
     def interrupt_unfinished(self, reason: str) -> int: ...
 
+    def setting(self, key: str) -> str | None: ...
+
+    def save_setting(self, key: str, value: str | None) -> None: ...
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS threads (
@@ -125,6 +129,10 @@ CREATE TABLE IF NOT EXISTS provider_connections (
     provider TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
     connected_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -294,3 +302,20 @@ class SQLiteStorage:
         with self.transaction() as db:
             rows = db.execute("SELECT * FROM provider_connections ORDER BY provider").fetchall()
         return [ProviderConnection(provider=row["provider"], kind=row["kind"], connectedAt=row["connected_at"]) for row in rows]
+
+    # ------------------------------------------------------------ settings
+
+    def setting(self, key: str) -> str | None:
+        with self.transaction() as db:
+            row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def save_setting(self, key: str, value: str | None) -> None:
+        """Store `value` under `key`; None removes it."""
+        with self.transaction() as db:
+            if value is None:
+                db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                db.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value)
+                )

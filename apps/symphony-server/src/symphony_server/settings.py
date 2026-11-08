@@ -31,7 +31,15 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - Never describe a widget out loud in detail; the tool result tells you what was shown.
 - Use options for any "pick one" moment; give each choice a short id. A tap arrives as a user message starting with [Tapped on screen].
 - For weather cards, use the built-in art prop (sun, moon, cloud, rain, snow, storm, wind or stars) instead of drawing ASCII in the body.
-- Use chart (line) for stock history; use card for weather or summaries; use html for calculators, mini apps or anything custom. html must be a complete, self-contained document with inline CSS and JS, dark background (#111), light text.
+- Use chart (line) for stock history; use card for weather or summaries; use html for calculators, mini apps or anything custom. HTML widgets must be complete, self-contained documents with inline CSS and JS, no network access, and follow the Osmo Canvas design pattern below.
+
+# Osmo Canvas design pattern (interactive HTML widgets)
+- Make a compact, calm instrument panel: one clear title, one short context line when needed, the primary value or action first, then supporting controls and details. Use a shared alignment edge and a simple responsive grid; do not leave large empty columns or make users hunt for the key result.
+- Use Osmo's monochrome palette: background #0a0a0a, surface #111111 / #171717, primary text #ededed, muted text #a1a1a1, subtle borders rgba(255,255,255,.10). Reserve Osmo green #3ecf8e for positive/success, amber #f5a524 for attention, and red #f87171 for destructive/error. On light surfaces use #fff / #f5f5f5 with #171717 text and accessible contrast. No arbitrary brand colors, gradients, glows, or decorative illustrations; color communicates meaning.
+- Use system sans-serif typography, consistent type roles (title, body, label, caption), tabular numerals for comparable values, and mono only for short technical identifiers. Keep spacing on a 4px rhythm, align peer controls, and use restrained 2–4px corner radii and thin borders.
+- Make the layout fluid for narrow iframe widths: stack columns, keep controls touch-friendly, wrap long labels, and avoid horizontal scrolling. Use semantic HTML, visible keyboard focus, explicit labels, sufficient contrast, and clear hover/disabled states.
+- Keep copy concise and scannable; show units and useful defaults. Update results immediately when controls change, preserve user input, and provide an honest empty/error state. Avoid fake metrics, unexplained abbreviations, and unnecessary decoration.
+- Keep widgets self-contained with inline CSS and JS (no remote assets, fonts, imports, or network calls); initialize controls on load, handle invalid/empty input, and never rely on parent-page CSS or untrusted HTML from external sources.
 - To change a widget already on screen, call update_widget with its id.
 
 # Background agent
@@ -127,8 +135,13 @@ class Settings:
     # SQLite file for threads, messages, agent runs and provider connections; None keeps them in memory.
     database_file: Path | None = None
     agent_model: str = DEFAULT_AGENT_MODEL
+    # When no explicit model is configured, prefer a connected subscription for agent runs.
+    agent_model_auto: bool = False
     approval_tools: tuple[str, ...] = DEFAULT_APPROVAL_TOOLS
     oauth_clients: dict[str, OAuthClient] = field(default_factory=dict)
+    # Listen on localhost:1455 for the ChatGPT sign-in redirect (OSMO_SUBSCRIPTION_LOOPBACK=0 turns it
+    # off, e.g. when the server is not on the user's machine; they paste the redirect URL instead).
+    subscription_loopback: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -149,9 +162,11 @@ class Settings:
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
             database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
-            agent_model=os.getenv("OSMO_AGENT_MODEL", DEFAULT_AGENT_MODEL),
+            agent_model=os.getenv("OSMO_AGENT_MODEL") or DEFAULT_AGENT_MODEL,
+            agent_model_auto=not bool(os.getenv("OSMO_AGENT_MODEL")),
             approval_tools=approval_tools(os.getenv("OSMO_APPROVAL_TOOLS")),
             oauth_clients=oauth_clients_from_env(),
+            subscription_loopback=os.getenv("OSMO_SUBSCRIPTION_LOOPBACK", "1") != "0",
         )
 
 
