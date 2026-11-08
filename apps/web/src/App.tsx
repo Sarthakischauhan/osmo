@@ -1,4 +1,4 @@
-import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
+import { useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
 import { BrowserControlsContext, osmoWidgets } from "@osmo/osmo-widgets";
 import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
@@ -29,6 +29,7 @@ import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
+import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { FeedTurn } from "./FeedTurn";
 import { type Feed, conversationTitle, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
@@ -215,6 +216,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
   const providers = catalog?.providers ?? NO_PROVIDERS;
   const [connecting, setConnecting] = useState<ProviderInfo>();
+  const [agentModelOpen, setAgentModelOpen] = useState(false);
+  const [returnToAgentSettings, setReturnToAgentSettings] = useState(false);
   // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
     if (catalog !== undefined) setRegistry(catalog.models);
@@ -333,7 +336,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onFork={forkThread}
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
-        footer={desktop.available ? <DesktopSupport desktop={desktop} /> : undefined}
+        onOpenSettings={() => setAgentModelOpen(true)}
       />
       <SidebarInset className="app">
         <header className="topbar">
@@ -343,7 +346,6 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             <strong>{conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
-            {(sidebar.state === "collapsed" || sidebar.isMobile) && <DesktopSupport desktop={desktop} />}
             {session.startedAt !== undefined && <Clock since={session.startedAt} />}
             {connected && (
               <button type="button" className="end" onClick={session.end}>
@@ -402,12 +404,26 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       <ConnectProviderDialog
         provider={connecting}
         onOpenChange={(open) => {
-          if (!open) setConnecting(undefined);
+          if (!open) {
+            setConnecting(undefined);
+            if (returnToAgentSettings) setAgentModelOpen(true);
+            setReturnToAgentSettings(false);
+          }
         }}
         onConnected={() => {
           setConnecting(undefined);
+          if (returnToAgentSettings) setAgentModelOpen(true);
+          setReturnToAgentSettings(false);
           refresh();
         }}
+      />
+      <AgentModelDialog
+        open={agentModelOpen}
+        onOpenChange={setAgentModelOpen}
+        providers={providers}
+        onCredentialsChanged={refresh}
+        onConnectKey={(provider) => { setReturnToAgentSettings(true); setAgentModelOpen(false); setConnecting(provider); }}
+        desktop={desktop}
       />
       <Toaster position="top-center" theme={theme} />
     </>

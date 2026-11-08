@@ -288,6 +288,76 @@ button.osmo-list-row { cursor: pointer; }
 .app:has(.rp[data-open="true"]) .osmo-ascii { opacity: .15; }
 
 /* Native capabilities share the existing persistent thread sidebar. */
+/* Background agent: the same quiet surfaces, 13px rows and compact radii as the sidebar. */
+.osmo-agent-settings { display: flex; flex-direction: column; gap: 24px; width: 560px; padding: 28px; border-radius: var(--radius, 3px); background: var(--background); }
+.osmo-agent-settings-header { gap: 8px; padding-right: 28px; text-align: left; }
+.osmo-agent-settings-header [data-slot="dialog-title"] { line-height: 24px; }
+.osmo-agent-settings-header [data-slot="dialog-description"] { max-width: 450px; line-height: 20px; }
+.osmo-agent-settings-icon { display: grid; place-items: center; width: 32px; height: 32px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius, 3px); color: var(--muted-foreground); }
+.osmo-agent-section { display: flex; flex-direction: column; gap: 12px; }
+.osmo-agent-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.osmo-agent-section-heading h3 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
+.osmo-agent-section-heading p { margin: 2px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+.osmo-agent-mode { color: var(--fg-tertiary); font-size: 11px; line-height: 20px; }
+.osmo-agent-current { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--accent); border-radius: var(--radius, 3px); font-size: 12px; }
+.osmo-agent-current span { color: var(--muted-foreground); }
+.osmo-agent-current strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; text-align: right; }
+.osmo-model-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 58px; padding: 9px 12px; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); cursor: pointer; }
+.osmo-model-trigger:hover, .osmo-model-trigger[data-state="open"] { background: var(--accent); border-color: var(--ring); }
+.osmo-model-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.osmo-model-trigger:disabled { opacity: .6; cursor: wait; }
+.osmo-model-trigger > span { display: grid; gap: 3px; min-width: 0; }
+.osmo-model-trigger-caption { color: var(--muted-foreground); font-size: 11px; }
+.osmo-model-trigger strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.osmo-model-trigger > svg { flex: none; color: var(--muted-foreground); }
+.osmo-model-popover { z-index: 70; width: var(--radix-popover-trigger-width); max-width: calc(100vw - 32px); padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); box-shadow: 0 14px 40px rgb(0 0 0 / .24); }
+.osmo-model-command { background: var(--popover); color: var(--popover-foreground); }
+.osmo-model-command [data-slot="command-input-wrapper"] { height: 44px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.osmo-model-command [data-slot="command-input"] { min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--foreground); outline: none; box-shadow: none; }
+.osmo-model-command [data-slot="command-input"]:focus, .osmo-model-command [data-slot="command-input"]:focus-visible { border: 0; outline: none; box-shadow: none; }
+.osmo-model-list { max-height: min(300px, 45vh); overscroll-behavior: contain; padding: 5px; }
+.osmo-model-command [data-slot="command-group-heading"] { padding: 10px 8px 6px; color: var(--muted-foreground); font-size: 11px; font-weight: 600; }
+.osmo-model-command [data-slot="command-group"] + [data-slot="command-group"] { border-top: 1px solid var(--border); }
+.osmo-model-command [data-slot="command-item"] { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px; border-radius: 5px; cursor: pointer; }
+.osmo-model-command [data-slot="command-item"][data-selected="true"] { background: var(--accent); color: var(--foreground); }
+.osmo-model-command [data-slot="command-item"] > svg { margin-left: auto; flex: none; }
+.osmo-model-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.osmo-model-copy strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.osmo-model-copy small { color: var(--muted-foreground); font-size: 11px; }
+.osmo-model-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted-foreground); }
+.osmo-agent-disclosure, .osmo-agent-provider-list { border: 1px solid var(--border); border-radius: var(--radius, 3px); }
+.osmo-agent-disclosure summary, .osmo-agent-provider summary { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; list-style: none; cursor: pointer; font-size: 13px; }
+.osmo-agent-disclosure summary::-webkit-details-marker, .osmo-agent-provider summary::-webkit-details-marker { display: none; }
+.osmo-agent-disclosure summary:hover, .osmo-agent-provider summary:hover { background: var(--accent); }
+.osmo-agent-disclosure summary svg { margin-left: auto; color: var(--fg-tertiary); }
+/* Keep the focus indicator inside the search row instead of drawing across its icon and edges. */
+.osmo-agent-disclosure [data-slot="command-input-wrapper"] { height: 40px; }
+.osmo-agent-disclosure [data-slot="command-input-wrapper"]:focus-within { box-shadow: inset 0 0 0 1px var(--ring); }
+.osmo-agent-disclosure [data-slot="command-input"] { height: 100%; min-width: 0; padding: 0; outline: none; box-shadow: none; }
+.osmo-agent-disclosure [data-slot="command-list"] { overscroll-behavior: contain; }
+.osmo-agent-disclosure [data-slot="command-group"] { padding: 4px 8px; }
+.osmo-agent-disclosure [data-slot="command-group"] + [data-slot="command-group"] { border-top: 1px solid var(--border); }
+.osmo-agent-disclosure [data-slot="command-item"] { min-height: 36px; border-bottom: 1px solid var(--border); border-radius: 0; cursor: pointer; }
+.osmo-agent-disclosure [data-slot="command-item"]:last-child { border-bottom: 0; }
+.osmo-agent-disclosure[open] summary svg, .osmo-agent-provider[open] summary svg { transform: rotate(180deg); }
+.osmo-agent-provider + .osmo-agent-provider { border-top: 1px solid var(--border); }
+.osmo-agent-provider-name { flex: 1; font-weight: 500; }
+.osmo-agent-provider-status { color: var(--fg-tertiary); font-size: 12px; }
+.osmo-agent-provider summary svg { flex-shrink: 0; color: var(--muted-foreground); }
+.osmo-agent-provider-body { display: grid; gap: 16px; padding: 12px; border-top: 1px solid var(--border); }
+.osmo-agent-key-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted-foreground); font-size: 12px; }
+.osmo-agent-note, .osmo-agent-footnote, .osmo-agent-error { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+.osmo-agent-error { color: var(--destructive); }
+.osmo-agent-footnote { color: var(--fg-tertiary); }
+@media (max-width: 600px) { .osmo-agent-settings { padding: 20px; gap: 20px; } .osmo-agent-provider-status { font-size: 11px; } }
+.osmo-settings-divider { height: 1px; background: var(--border); }
+.osmo-settings-desktop { display: flex; }
+.osmo-settings-footer { padding: 8px; border-top: 1px solid var(--border); }
+[data-state="collapsed"] .osmo-settings-footer { align-items: center; }
+.osmo-settings-button { width: calc(100% - 16px); }
+.osmo-agent-model { margin: 0 8px; }
+.osmo-agent-model > span:first-of-type { flex: 0 0 auto; }
+.osmo-agent-model .osmo-agent-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg-tertiary); font-size: 12px; font-weight: 400; }
 .osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 [data-state="collapsed"] .osmo-desktop-footer { display: none; }
 .desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-button); background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }

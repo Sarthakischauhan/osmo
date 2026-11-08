@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SubscriptionSignIn } from "./SubscriptionSignIn";
 
 /** One entry of symphony-server's `GET /providers` (never carries a secret). */
 export const providerInfoSchema = z.object({
@@ -15,6 +16,10 @@ export const providerInfoSchema = z.object({
   authKinds: z.array(z.enum(["api_key", "oauth"])),
   connected: z.boolean(),
   capabilities: z.array(z.string()).default([]),
+  /** Sign in with a subscription (SuperGrok, ChatGPT, Claude): text only, next to the API key. */
+  subscription: z
+    .object({ label: z.string(), connected: z.boolean(), capabilities: z.array(z.string()) })
+    .nullish(),
 });
 export type ProviderInfo = z.infer<typeof providerInfoSchema>;
 export const providersResponseSchema = z.object({ providers: z.array(providerInfoSchema) });
@@ -47,6 +52,7 @@ export interface ConnectProviderDialogProps {
 export function ConnectProviderDialog({ provider, onOpenChange, onConnected, startOAuth = (url) => window.location.assign(url) }: ConnectProviderDialogProps) {
   const form = useForm<KeyForm>({ resolver: zodResolver(keyFormSchema), defaultValues: { key: "" } });
   const oauth = provider?.authKinds.includes("oauth") === true;
+  const subscription = provider?.subscription ?? undefined;
 
   const submit = async ({ key }: KeyForm) => {
     if (!provider) return;
@@ -110,7 +116,8 @@ export function ConnectProviderDialog({ provider, onOpenChange, onConnected, sta
             </Form>
           </TabsContent>
           <TabsContent value="oauth" className="grid gap-4 pt-4">
-            {oauth ? (
+            {provider && subscription && <SubscriptionSignIn provider={{ ...provider, subscription }} onChanged={onConnected} />}
+            {subscription ? null : oauth ? (
               <>
                 <p className="m-0 text-sm text-foreground/60">Sign in to {provider?.label} and approve Osmo; it hands the server a key for your account.</p>
                 <Button className="justify-self-end rounded-full" onClick={() => provider && startOAuth(`/providers/${encodeURIComponent(provider.id)}/oauth/start`)}>

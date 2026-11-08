@@ -14,6 +14,7 @@ export default defineConfig({
       "/ws": { target: process.env.SYMPHONY_URL ?? "ws://127.0.0.1:8787", ws: true },
       "/voice-models": { target: http },
       "/providers": { target: http },
+      "/agent-model": { target: http },
       "/api": { target: http },
     },
   },

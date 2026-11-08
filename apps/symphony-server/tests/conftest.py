@@ -176,7 +176,16 @@ def make_client(
 ) -> TestClient:
     """The app with every outbound HTTP call answered by `handler` (by default: fail the test)."""
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(settings, http_client=http_client, secret_store=secret_store, context_limits=context_limits, registry=registry)
+    # core_ai's sync OAuth calls (subscription sign-in and refresh) go to the same handler.
+    oauth_client = httpx.Client(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings,
+        http_client=http_client,
+        oauth_http_client=oauth_client,
+        secret_store=secret_store,
+        context_limits=context_limits,
+        registry=registry,
+    )
     return TestClient(app)
 
 
