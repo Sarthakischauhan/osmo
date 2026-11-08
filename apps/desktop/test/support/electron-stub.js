@@ -59,6 +59,8 @@ const display = { id: 1, bounds: { x: 0, y: 0, width: 1600, height: 900 }, workA
 
 export const app = {
   isPackaged: false,
+  setName() {},
+  dock: undefined,
   requestSingleInstanceLock: () => true,
   whenReady: () => Promise.resolve(),
   on(name, listener) { fake.appListeners.set(name, [...(fake.appListeners.get(name) ?? []), listener]); },
@@ -75,5 +77,6 @@ export const dialog = { showMessageBox: async (...args) => { fake.dialogs.push(a
 export const Menu = { buildFromTemplate: template => template, setApplicationMenu() {} };
 export const desktopCapturer = { getSources: async () => [] };
 export const shell = { openExternal: async () => {} };
+export const nativeImage = { createFromPath: () => ({}) };
 // The microphone is already allowed, as macOS answers once the user has.
 export const systemPreferences = { getMediaAccessStatus: () => 'granted', askForMediaAccess: async () => true };

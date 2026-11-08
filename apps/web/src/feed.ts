@@ -20,6 +20,8 @@ export interface RunCard {
   status: AgentRunStatus;
   /** Each step it started, in order. */
   phases: string[];
+  /** Streamed reasoning/thinking tokens from the agent model. */
+  reasoning?: string;
   result?: string;
 }
 
@@ -37,7 +39,18 @@ export interface ApprovalTurn {
 
 export type Turn =
   | UserTurn
-  | { role: "assistant"; key: string; text: string; itemId?: string; activities: Activity[]; widgets: CanvasWidget[]; runs: RunCard[] }
+  | {
+      role: "assistant";
+      key: string;
+      text: string;
+      itemId?: string;
+      reasoning?: string;
+      thinking?: boolean;
+      thought?: boolean;
+      activities: Activity[];
+      widgets: CanvasWidget[];
+      runs: RunCard[];
+    }
   | ApprovalTurn;
 
 /** `pending` while the utterance's transcript is still on its way. */
@@ -57,6 +70,16 @@ export interface Feed {
 }
 
 export const emptyFeed: Feed = { turns: [], seq: 0 };
+
+/** The chat shell's title: the first thing said in this conversation, or undefined while it is still empty. */
+export function conversationTitle(turns: readonly Turn[]): string | undefined {
+  const said = turns.find((turn): turn is UserTurn => turn.role === "user" && turn.text.trim().length > 0);
+  if (said === undefined) return undefined;
+  const line = said.text.trim().replace(/\s+/g, " ");
+  const max = 60;
+  const cut = line.length > max && line.slice(0, max).includes(" ") ? line.slice(0, max).replace(/\s+\S*$/, "") : line.slice(0, max);
+  return cut.replace(/^[\s.,;:!?-]+|[\s.,;:!?-]+$/g, "") || undefined;
+}
 
 function withAssistant(feed: Feed, change: (turn: AssistantTurn) => AssistantTurn): Feed {
   const last = feed.turns[feed.turns.length - 1];
@@ -88,11 +111,13 @@ function trackRun(feed: Feed, event: Extract<ServerEvent, { type: "agent.update"
   const turn = feed.turns[at];
   const previous = turn?.role === "assistant" ? turn.runs.find((run) => run.runId === event.runId) : undefined;
   const phases = previous?.phases ?? [];
+  const reasoning = event.reasoning ? (previous?.reasoning ?? "") + event.reasoning : previous?.reasoning;
   const run: RunCard = {
     runId: event.runId,
     task: event.task,
     status: event.status,
     phases: event.status === "running" && event.phase ? [...phases, event.phase] : phases,
+    ...(reasoning ? { reasoning } : {}),
     result: event.result ?? previous?.result,
   };
   if (at !== -1) return withRun(feed, at, run);
@@ -101,9 +126,10 @@ function trackRun(feed: Feed, event: Extract<ServerEvent, { type: "agent.update"
 }
 
 function finishActivities(turn: AssistantTurn): AssistantTurn {
-  return turn.activities.some((a) => !a.done)
+  const next = turn.activities.some((a) => !a.done)
     ? { ...turn, activities: turn.activities.map((a) => ({ ...a, done: true })) }
     : turn;
+  return next.thinking ? { ...next, thinking: false, thought: true } : next;
 }
 
 interface StoredRun {
@@ -181,8 +207,13 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
         if (event.itemId !== undefined) return heard(feed, event.itemId, event.text, event.final === true);
         return { seq: feed.seq + 1, turns: [...feed.turns, { role: "user", key: `u${feed.seq}`, text: event.text }] };
       }
-      if (event.itemId !== undefined) return answered(feed, event.itemId, event.text, event.final === true);
-      return withAssistant(feed, (turn) => ({ ...turn, text: turn.text + event.text }));
+      if (event.itemId !== undefined) return answered(feed, event.itemId, event.text, event.final === true, event.reasoning);
+      return withAssistant(feed, (turn) => ({
+        ...turn,
+        text: turn.text + event.text,
+        ...(event.reasoning ? { reasoning: (turn.reasoning ?? "") + event.reasoning } : {}),
+        ...(turn.thinking && event.text ? { thinking: false, thought: true } : {}),
+      }));
     case "widget.render":
       // A thread has one browser: a render of a browser the feed already shows is the server putting it back
       // (this client connected again), so it updates that widget where it is instead of adding another.
@@ -196,13 +227,20 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
     case "state":
       // BARGE_IN only tells the client to flush queued audio; it is neither a step nor the end of one.
       if (event.detail === BARGE_IN) return feed;
+      if (event.state === "thinking") {
+        return withAssistant(feed, (turn) => ({ ...turn, thinking: true }));
+      }
       if (event.state === "working" && event.detail) {
         const label = event.detail;
-        return withAssistant(feed, (turn) => ({ ...turn, activities: [...turn.activities, { label, done: false }] }));
+        return withAssistant(feed, (turn) => ({
+          ...turn,
+          ...(turn.thinking ? { thinking: false, thought: true } : {}),
+          activities: [...turn.activities, { label, done: false }],
+        }));
       }
       {
         const last = feed.turns[feed.turns.length - 1];
-        return last?.role === "assistant" && last.activities.some((a) => !a.done)
+        return last?.role === "assistant" && (last.activities.some((a) => !a.done) || last.thinking)
           ? withAssistant(feed, finishActivities)
           : feed;
       }
@@ -237,18 +275,48 @@ function heard(feed: Feed, itemId: string, text: string, final: boolean): Feed {
  * Each answer gets its own bubble, so "let me check" and the result it brings back are two
  * messages. A bubble opened by tool activity before any text is the answer's own.
  */
-function answered(feed: Feed, itemId: string, text: string, final: boolean): Feed {
+function answered(feed: Feed, itemId: string, text: string, final: boolean, reasoning?: string): Feed {
   const at = feed.turns.findIndex((turn) => turn.role === "assistant" && turn.itemId === itemId);
   const turn = feed.turns[at];
   if (turn?.role === "assistant") {
-    const full = final ? text : turn.text + text;
-    return { ...feed, turns: feed.turns.map((existing, i) => (i === at ? { ...turn, text: full } : existing)) };
+    const codeSuffix = final && turn.text.includes("```") && !text.includes("```") ? turn.text.slice(turn.text.indexOf("\n\n```")) : "";
+    const full = (final ? text : turn.text + text) + codeSuffix;
+    const nextReasoning = reasoning !== undefined ? (final ? reasoning : (turn.reasoning ?? "") + reasoning) : turn.reasoning;
+    const doneThinking = Boolean(turn.thinking && (full || final));
+    return {
+      ...feed,
+      turns: feed.turns.map((existing, i) =>
+        i === at
+          ? {
+              ...turn,
+              text: full,
+              ...(nextReasoning !== undefined ? { reasoning: nextReasoning } : {}),
+              ...(doneThinking ? { thinking: false, thought: true } : final ? { thinking: false } : {}),
+            }
+          : existing,
+      ),
+    };
   }
   const last = feed.turns[feed.turns.length - 1];
-  if (last?.role === "assistant" && last.itemId === undefined && !last.text) {
-    return withAssistant(feed, (open) => ({ ...open, itemId, text }));
+  if (last?.role === "assistant" && last.itemId === undefined && (!last.text || last.text.trimStart().startsWith("```"))) {
+    return withAssistant(feed, (open) => ({
+      ...open,
+      itemId,
+      text: open.text ? `${open.text.trimEnd()}\n\n${text}` : text,
+      ...(reasoning !== undefined ? { reasoning: (open.reasoning ?? "") + reasoning } : {}),
+      ...(open.thinking && (text || final) ? { thinking: false, thought: true } : {}),
+    }));
   }
-  const fresh: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text, itemId, activities: [], widgets: [], runs: [] };
+  const fresh: AssistantTurn = {
+    role: "assistant",
+    key: `a${feed.seq}`,
+    text,
+    itemId,
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    activities: [],
+    widgets: [],
+    runs: [],
+  };
   return { seq: feed.seq + 1, turns: [...feed.turns, fresh] };
 }
 

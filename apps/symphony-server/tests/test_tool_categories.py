@@ -44,7 +44,7 @@ def tool_names(categories: str | None) -> set[str]:
 
 
 def test_osmo_tools_follows_the_enabled_categories() -> None:
-    osmo = {"render_widget", "update_widget", "set_voice", "get_weather", "get_stock_history"}
+    osmo = {"render_widget", "update_widget", "write_code", "set_voice", "get_weather", "get_stock_history"}
     assert tool_names(None) == osmo | {"web_search", "create_image"}
     assert tool_names("desktop") == {"computer"}
     assert tool_names("browser") == {"browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll"}

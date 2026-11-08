@@ -104,6 +104,8 @@ class AgentRuns:
         self.asking: dict[str, ApprovalRequest] = {}
         # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
         self.phases: dict[str, str] = {}
+        # A previous process may have stored a run as live. Its executor did not survive, so the record must say so.
+        self.storage.interrupt_unfinished("Interrupted when Osmo restarted. Start it again if you still want it.")
 
     def observe(self, thread_id: str, observer: AgentObserver) -> None:
         self.observers[thread_id] = observer
@@ -186,6 +188,10 @@ class AgentRuns:
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
+        elif kind == "reasoning_delta":
+            delta = str(event.payload.get("delta") or "")
+            if delta:
+                await self.show(record.threadId, AgentUpdate(runId=record.runId, task=record.task, status=record.status, reasoning=delta))
         elif kind == OSMO_WIDGET:
             await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:

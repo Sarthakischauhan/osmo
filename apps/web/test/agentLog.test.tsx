@@ -2,8 +2,10 @@ import type { AgentRunStatus, ServerEvent } from "@osmo/osmo-composer";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ApprovalPrompt } from "../src/components/ApprovalPrompt";
+import { computeScrollMetrics } from "../src/components/ScrollDirectionBar";
 import { CompactAgentActivity } from "../src/CompactAgentActivity";
 import { FloatingOrb } from "../src/FloatingOrb";
+import { OrbPreview } from "../src/OrbPreview";
 import { agentActivity } from "../src/compact";
 import { emptyFeed, reduceFeed } from "../src/feed";
 import { type Runs, reduceRuns } from "../src/lib/runs";
@@ -11,6 +13,7 @@ import { type Runs, reduceRuns } from "../src/lib/runs";
 const update = (runId: string, status: AgentRunStatus, phase?: string, result?: string): ServerEvent => ({ type: "agent.update", runId, task: `task ${runId}`, status, phase, result });
 const events: ServerEvent[] = [
   { type: "transcript.delta", role: "user", text: "Find trail shoes", itemId: "u1", final: true },
+  { type: "transcript.delta", role: "assistant", text: "Looking at three shops now", itemId: "a1", final: true },
   { type: "state", state: "working", detail: "Searching the web" },
   { type: "widget.render", widget: { id: "w1", type: "browser", props: { url: "http://shop" } } },
   update("r1", "running", "Reading the shop"),
@@ -47,6 +50,73 @@ describe("the agent log", () => {
   });
 });
 
+describe("the orb's preview box", () => {
+  const html = renderToStaticMarkup(<OrbPreview turns={turns} runs={runs} activity={activity} onDecide={decide} />);
+
+  it("shows the spoken lines and then the agent log", () => {
+    for (const text of ["Find trail shoes", "Looking at three shops now", "task r1", "task r2", "task r3"]) expect(html).toContain(text);
+    expect(html.indexOf("Find trail shoes")).toBeLessThan(html.indexOf("Looking at three shops now"));
+    expect(html.indexOf("Looking at three shops now")).toBeLessThan(html.indexOf("task r1"));
+  });
+
+  it("renders the lines as the workspace does: the user's bubble and the assistant's avatar", () => {
+    expect(html).toContain('class="turn user"');
+    expect(html).toContain('class="turn assistant"');
+    expect(html).toContain('class="avatar"');
+  });
+
+  it("keeps Approve / Deny, once, inside the waiting agent's entry", () => {
+    const entry = html.split("<article").find((part) => part.includes("task r2"));
+    expect(entry).toContain("Approve");
+    expect(entry).toContain("Deny");
+    expect(html.match(/Approve</g)).toHaveLength(1);
+  });
+
+  it("shows tool activity without duplicating run cards", () => {
+    expect(html).toContain("Searching the web");
+    expect(html).not.toContain("chat-subagent");
+  });
+
+  it("renders a widget even before the assistant speaks", () => {
+    const widgetTurns = [{ type: "widget.render", widget: { id: "w", type: "card", props: { title: "Search result", body: "Found it" } } } as ServerEvent].reduce(reduceFeed, emptyFeed).turns;
+    const preview = renderToStaticMarkup(<OrbPreview turns={widgetTurns} runs={{}} activity={agentActivity({}, widgetTurns, undefined, 0)} onDecide={decide} />);
+    expect(preview).toContain("Search result");
+    expect(preview).toContain("Found it");
+  });
+
+  it("is the agent log alone when nothing has been said, and the lines alone when no agent runs", () => {
+    const noLines = renderToStaticMarkup(<OrbPreview turns={[]} runs={runs} activity={activity} onDecide={decide} />);
+    expect(noLines).not.toContain("osmo-compact-transcript");
+    expect(noLines).toContain("task r1");
+    const none = agentActivity({}, turns, undefined, 0);
+    const noAgents = renderToStaticMarkup(<OrbPreview turns={turns} runs={{}} activity={none} onDecide={decide} />);
+    expect(noAgents).toContain("Find trail shoes");
+    expect(noAgents).not.toContain("osmo-compact-agents");
+  });
+
+  it("renders reasoning / thinking blocks and keeps all turns scrollable in the preview box", () => {
+    const manyEvents: ServerEvent[] = [
+      { type: "transcript.delta", role: "user", text: "One", itemId: "u1", final: true },
+      { type: "transcript.delta", role: "assistant", text: "Two", itemId: "a1", final: true },
+      { type: "transcript.delta", role: "user", text: "Three", itemId: "u2", final: true },
+      { type: "transcript.delta", role: "assistant", text: "Four", reasoning: "Thinking step by step", itemId: "a2", final: true },
+    ];
+    const manyTurns = manyEvents.reduce(reduceFeed, emptyFeed).turns;
+    const preview = renderToStaticMarkup(<OrbPreview turns={manyTurns} runs={{}} activity={agentActivity({}, manyTurns, undefined, 0)} onDecide={decide} />);
+    for (const text of ["One", "Two", "Three", "Four", "Thinking step by step"]) expect(preview).toContain(text);
+    expect(preview).toContain("md-thinking");
+  });
+});
+
+describe("scroll direction bar metrics", () => {
+  it("reports direction availability and centered ratio for scrollable containers", () => {
+    expect(computeScrollMetrics(0, 200, 200).scrollable).toBe(false);
+    expect(computeScrollMetrics(0, 600, 200)).toEqual({ scrollable: true, canUp: false, canDown: true, ratio: 0 });
+    expect(computeScrollMetrics(200, 600, 200)).toEqual({ scrollable: true, canUp: true, canDown: true, ratio: 0.5 });
+    expect(computeScrollMetrics(400, 600, 200)).toEqual({ scrollable: true, canUp: true, canDown: false, ratio: 1 });
+  });
+});
+
 describe("the approval prompt's title", () => {
   const turn = turns.find((item) => item.role === "approval");
   const title = (step: number | undefined) => (turn?.role === "approval" ? renderToStaticMarkup(<ApprovalPrompt turn={turn} step={step} onDecide={() => undefined} />) : "");
@@ -66,7 +136,7 @@ describe("the approval prompt's title", () => {
 describe("the floating orb at rest", () => {
   it("is the orb alone: no header, Expand, End or log", () => {
     const html = renderToStaticMarkup(
-      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={{ side: "below", orbLeft: 0, placed: 0 }} onBoxHeight={() => undefined} />,
+      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} turns={turns} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={{ side: "below", orbLeft: 0, placed: 0 }} onBoxHeight={() => undefined} />,
     );
     expect(html).toContain("osmo-floating-orb");
     for (const text of ["Expand", "End", "<header", "osmo-compact-agents"]) expect(html).not.toContain(text);
@@ -76,7 +146,7 @@ describe("the floating orb at rest", () => {
 describe("where the floating orb puts its box", () => {
   const render = (placement: { side: "below" | "above"; orbLeft: number; placed: number }) =>
     renderToStaticMarkup(
-      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={placement} onBoxHeight={() => undefined} />,
+      <FloatingOrb mode="idle" outputLevel={() => 0} runs={runs} turns={turns} activity={activity} theme="dark" onDecide={decide} onTalk={() => undefined} onExpand={() => undefined} placement={placement} onBoxHeight={() => undefined} />,
     );
 
   it("tells the layout which side the box is on and where the orb sits in the window", () => {

@@ -4,9 +4,9 @@
 /** The floating window around the orb alone (#18), and how far in from the work area's lower right it starts. */
 export const ORB_SIZE = { width: 112, height: 112 };
 export const ORB_MARGIN = 24;
-/** The hover box: as wide as the window while it is open, and as tall as its agent log, up to this. */
+/** The hover box: as wide as the window while it is open, and as tall as its spoken lines and agent log, up to this. */
 export const BOX_WIDTH = 360;
-export const BOX_MAX_HEIGHT = 288;
+export const BOX_MAX_HEIGHT = 400;
 
 /** The orb's own 112 px box in the lower right of `workArea`. */
 export function defaultOrbBounds(workArea) {

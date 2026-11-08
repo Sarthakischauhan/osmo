@@ -1,6 +1,25 @@
 import { BARGE_IN } from "@osmo/osmo-composer";
 import { describe, expect, it } from "vitest";
-import { emptyFeed, pendingChoice, reduceFeed, feedFromMessages } from "../src/feed";
+import { conversationTitle, emptyFeed, pendingChoice, reduceFeed, feedFromMessages } from "../src/feed";
+
+describe("conversationTitle", () => {
+  it("uses the first thing said, and nothing while the conversation is empty", () => {
+    expect(conversationTitle(emptyFeed.turns)).toBeUndefined();
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "", itemId: "u1" });
+    expect(conversationTitle(feed.turns)).toBeUndefined();
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "user", text: "Weather this weekend in Palo Alto?", itemId: "u1", final: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Sunny." });
+    expect(conversationTitle(feed.turns)).toBe("Weather this weekend in Palo Alto");
+  });
+
+  it("stops on a word before the length cap", () => {
+    const line = "Please look at the screen and tell me where the browser settings live exactly";
+    const feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: line });
+    const title = conversationTitle(feed.turns);
+    expect(title).toBe("Please look at the screen and tell me where the browser");
+    expect((title ?? "").length).toBeLessThanOrEqual(60);
+  });
+});
 
 describe("reduceFeed", () => {
   it("ignores the barge-in audio flush signal, even while working", () => {
@@ -170,5 +189,20 @@ describe("approval turns", () => {
       { role: "assistant", text: "hello" },
     ]);
     expect(feed.turns.map((t) => t.role)).toEqual(["user", "assistant"]);
+  });
+
+  it("tracks thinking state, reasoning tokens, and preserves code snippets on final transcript", () => {
+    let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Show go code", itemId: "u1", final: true });
+    feed = reduceFeed(feed, { type: "state", state: "thinking" });
+    expect(feed.turns[1]).toMatchObject({ role: "assistant", thinking: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "", reasoning: "Planning minimal HTTP server...", itemId: "a1" });
+    expect(feed.turns[1]).toMatchObject({ role: "assistant", reasoning: "Planning minimal HTTP server...", thinking: true });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Here is a minimal server.", itemId: "a1" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "\n\n```go\npackage main\n```\n" });
+    feed = reduceFeed(feed, { type: "transcript.delta", role: "assistant", text: "Here is a minimal server.", itemId: "a1", final: true });
+    const turn = feed.turns[1];
+    expect(turn?.role === "assistant" && turn.text).toContain("```go\npackage main\n```");
+    expect(turn?.role === "assistant" && turn.reasoning).toBe("Planning minimal HTTP server...");
+    expect(turn?.role === "assistant" && turn.thinking).toBe(false);
   });
 });

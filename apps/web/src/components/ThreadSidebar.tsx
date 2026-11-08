@@ -65,7 +65,12 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
   return (
     <Sidebar collapsible="icon" className="osmo-sidebar">
       <SidebarHeader className="osmo-sidebar-header">
-        {!collapsed && <strong className="osmo-sidebar-brand">Osmo</strong>}
+        {!collapsed && (
+          <span className="osmo-sidebar-brand">
+            <img src="/favicon.svg" alt="" width={18} height={18} />
+            <strong>Osmo</strong>
+          </span>
+        )}
         <IconButton label={collapsed ? "Expand sidebar" : "Collapse sidebar"} hint="⌘B" onClick={toggleSidebar}>
           <PanelLeft size={16} />
         </IconButton>

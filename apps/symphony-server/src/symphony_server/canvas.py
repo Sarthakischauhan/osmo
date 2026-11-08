@@ -32,9 +32,12 @@ from symphony_server.widgets import (
 
 # Sink event carrying a `widget.render` or `widget.update` wire event.
 OSMO_WIDGET = "osmo.widget"
+# Sink event carrying a fenced markdown code block to append to the assistant message.
+OSMO_CODE = "osmo.code"
 # Widgets remembered for taps and updates (LRU across all sessions).
 WIDGETS_MAX = 512
 IMAGE_PROMPT_MAX = 2000
+CODE_MAX = 20_000
 
 
 class WidgetBoard:
@@ -154,3 +157,31 @@ class CreateImageTool(Tool):
         title = str(args.get("title") or prompt)[:120]
         source = f"data:{media_type};base64,{base64.b64encode(image).decode('ascii')}"
         return await show(self.board, sink, CardWidget(type="card", props=CardProps(title=title, body="", image=source)))
+
+
+class WriteCodeTool(Tool):
+    """Writes a syntax-highlighted code snippet directly into the assistant message without a widget."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="write_code",
+            description="Show a code snippet directly in the conversation message (not a widget). Do not read the code out loud.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The source code to display."},
+                    "language": {"type": "string", "description": "Language tag, e.g. 'go', 'python', 'typescript', 'rust'."},
+                },
+                "required": ["code"],
+            },
+        )
+
+    async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        code = str(args.get("code", "")).strip("\n")[:CODE_MAX]
+        if not code.strip():
+            return json.dumps({"shown": None, "error": "code must not be empty"})
+        lang = "".join(ch for ch in str(args.get("language") or "").strip().lower() if ch.isalnum() or ch in ("-", "+", "_"))[:24]
+        block = f"```{lang}\n{code}\n```"
+        await sink.emit(OSMO_CODE, {"markdown": block})
+        return json.dumps({"shown": f"{lang or 'code'} snippet ({len(code.splitlines())} lines)"})
+

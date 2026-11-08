@@ -13,6 +13,9 @@ from collections.abc import Callable
 from core_ai import GeminiProvider, GrokProvider, ModelRegistry, OpenAIProvider, VercelProvider
 from core_ai.providers.base import BaseProvider
 from core_ai.voice import VoiceConfig, VoiceSession, open_voice_session, voice_model
+from core_ai.voice.realtime_api import RealtimeApiSession
+
+from symphony_server.grok_compat import install_grok_compat
 
 from symphony_server.provider_router import ProviderRouter
 from symphony_server.providers import CredentialStore, TokenRefresher, with_locks
@@ -78,4 +81,7 @@ class ModelAccess:
             raise LookupError(f"{model.id} is not in the core_ai voice catalog")
         # Only xAI's endpoint is configurable (XAI_BASE_URL); the rest use core_ai's defaults.
         base_url = self.xai_base_url if model.provider == "xai" else None
-        return await open_voice_session(spec, config, self.keys[model.provider], base_url=base_url)
+        session = await open_voice_session(spec, config, self.keys[model.provider], base_url=base_url)
+        if isinstance(session, RealtimeApiSession):
+            install_grok_compat(session)
+        return session

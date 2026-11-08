@@ -28,6 +28,23 @@ def test_threads_messages_and_runs_survive_a_restart(tmp_path: Path) -> None:
     assert [(c.provider, c.kind) for c in reopened.connections()] == [("xai", "api_key")]
 
 
+def test_restart_marks_unfinished_runs_interrupted(tmp_path: Path) -> None:
+    path = tmp_path / "osmo.db"
+    storage = SQLiteStorage(path)
+    thread = storage.create_thread()
+    storage.save_run(AgentRunRecord(runId="live", threadId=thread.id, task="research", status="running", createdAt=1, updatedAt=1))
+    storage.save_run(AgentRunRecord(runId="asking", threadId=thread.id, task="click", status="waiting_approval", createdAt=2, updatedAt=2))
+    storage.save_run(AgentRunRecord(runId="done", threadId=thread.id, task="done", status="completed", result="ok", createdAt=3, updatedAt=3))
+    storage.close()
+
+    reopened = SQLiteStorage(path)
+    assert reopened.interrupt_unfinished("Interrupted when Osmo restarted.") == 2
+    live, asking, done = reopened.get_run("live"), reopened.get_run("asking"), reopened.get_run("done")
+    assert live is not None and asking is not None and done is not None
+    assert (live.status, asking.status, done.status) == ("failed", "failed", "completed")
+    assert reopened.interrupt_unfinished("again") == 0
+
+
 def test_fork_copies_messages_through_one_and_delete_cascades() -> None:
     storage = SQLiteStorage(None)
     thread = storage.create_thread("Trip")
