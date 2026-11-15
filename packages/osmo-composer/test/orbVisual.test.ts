@@ -22,16 +22,17 @@ describe("orbMode", () => {
 });
 
 describe("step", () => {
-  it("follows the output level only while speaking, with fast attack and slower release", () => {
+  it("follows the voice in every state, with fast attack and slower release", () => {
     const frame = initialFrame("speaking");
     step(frame, "speaking", 1, 0.05, false);
     const attacked = frame.level;
     expect(attacked).toBeGreaterThan(0.5);
     step(frame, "speaking", 0, 0.05, false);
     expect(frame.level).toBeGreaterThan(attacked * 0.6);
+    expect(frame.level).toBeLessThan(attacked);
     const listening = initialFrame("listening");
     step(listening, "listening", 1, 0.05, false);
-    expect(listening.level).toBe(0);
+    expect(listening.level).toBeGreaterThan(0.5);
   });
 
   it("freezes motion when reduced motion is requested", () => {

@@ -411,7 +411,7 @@ class VoiceBridge:
         if isinstance(picked, Selection):
             self.selection = picked
         provider = self.model().provider
-        if not await self.access.prepare(provider):
+        if not await self.access.prepare(provider, voice=True):
             await self.set_state("idle", f"{provider_label(provider)} is not connected: add a key in Providers")
             return
         if not await self.open_voice():
@@ -435,7 +435,7 @@ class VoiceBridge:
     async def open_voice(self) -> bool:
         """Open a voice session on the selected model, seed it with the thread so far, and read it."""
         model = self.model()
-        if not await self.access.prepare(model.provider):
+        if not await self.access.prepare(model.provider, voice=True):
             return False
         try:
             voice = await self.access.open_voice(model, self.voice_config())

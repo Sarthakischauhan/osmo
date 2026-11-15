@@ -18,6 +18,19 @@ export function defaultOrbBounds(workArea) {
 }
 
 /**
+ * The orb dragged by (`dx`, `dy`) px from `orb`, kept wholly inside `workArea` (the work area of the display it lands
+ * on, so it can cross to another screen but never off every screen).
+ */
+export function moveOrb(orb, workArea, dx, dy) {
+  const clamp = (value, low, high) => Math.round(Math.min(Math.max(value, low), high));
+  return {
+    ...ORB_SIZE,
+    x: clamp(orb.x + dx, workArea.x, workArea.x + workArea.width - ORB_SIZE.width),
+    y: clamp(orb.y + dy, workArea.y, workArea.y + workArea.height - ORB_SIZE.height),
+  };
+}
+
+/**
  * The floating window while the hover box is `height` tall (0: closed, the orb's own box). The box opens below the orb
  * and flips above it when it would not fit in the work area. The orb never moves on screen, so the window grows
  * around it: `orbLeft` is where the orb sits inside the window (the window is kept inside the work area sideways).

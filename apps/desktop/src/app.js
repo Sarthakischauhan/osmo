@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { createAudioPort } from './audio-port.js';
 import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
 import { pythonExecutable, startServer } from './server.js';
-import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateStart } from './session-contract.js';
+import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
 import { SWITCH_ACCELERATOR, createWindowSwitch } from './window-mode.js';
-import { boxLayout, defaultOrbBounds } from './window-state.js';
+import { boxLayout, defaultOrbBounds, moveOrb } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = localAppUrl(process.env.OSMO_DESKTOP_URL);
@@ -27,6 +27,7 @@ export function runApp() {
   let floating;
   let audioWindow;
   let orbBounds;
+  let boxHeight = 0;
   let switcher;
   let quitting = false;
   let enabled = false;
@@ -171,13 +172,25 @@ export function runApp() {
   ipcMain.handle(CHANNELS.audioReady, event => { authorize(event, audioWindow); audio.ready(); });
   ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
   ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
-  // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got.
+  // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got;
+  // a drag moves the orb, and the window (with any open box) follows it.
+  const place = () => {
+    const layout = boxLayout(orbBounds, screen.getDisplayMatching(orbBounds).workArea, boxHeight);
+    floating.setBounds(layout.bounds);
+    return { side: layout.side, orbLeft: layout.orbLeft };
+  };
   ipcMain.handle(CHANNELS.showFull, event => { authorize(event, floating); switcher.toFull(); });
   ipcMain.handle(CHANNELS.box, (event, height) => {
     authorize(event, floating);
-    const layout = boxLayout(orbBounds, screen.getDisplayMatching(orbBounds).workArea, validateBoxHeight(height));
-    floating.setBounds(layout.bounds);
-    return { side: layout.side, orbLeft: layout.orbLeft };
+    boxHeight = validateBoxHeight(height);
+    return place();
+  });
+  ipcMain.handle(CHANNELS.move, (event, value) => {
+    authorize(event, floating);
+    const { dx, dy } = validateOrbMove(value);
+    const target = { ...orbBounds, x: orbBounds.x + dx, y: orbBounds.y + dy };
+    orbBounds = moveOrb(orbBounds, screen.getDisplayMatching(target).workArea, dx, dy);
+    return place();
   });
 
   /** The page's own rules for each window: it may not navigate away or open windows. */

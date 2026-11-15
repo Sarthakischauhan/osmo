@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Orb thought bubble</title>
+  <style>
+    :root {
+      --background: #0c0c0e;
+      --foreground: #ededed;
+      --muted-foreground: #a1a1aa;
+      --border: #27272a;
+      --surface-1: #16161a;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--background); color: var(--foreground); font: 14px/20px ui-sans-serif, system-ui, sans-serif; }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    p.note { margin: 0; color: var(--muted-foreground); font-size: 12px; }
+    .stage { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 28px; min-height: 100vh; }
+    .panel { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-height: 460px; border: 1px solid var(--border); border-radius: 16px; padding: 24px 16px 36px; background: #101013; }
+    .label { align-self: flex-start; margin-bottom: auto; }
+    .pill { display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px; font-size: 11px; letter-spacing: .02em; }
+    .pill.off { background: #27272a; color: #d4d4d8; }
+    .pill.on { background: #312e81; color: #e0e7ff; }
+    .composer { position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+    .orb-activity { --cloud-radius: 18px; --cloud-pad: 8px; --cloud-gap: 78px; pointer-events: none; position: absolute; z-index: 2; bottom: 100%; left: 50%; translate: -50% 0; width: min(320px, 86%); padding-bottom: var(--cloud-gap); transform-origin: 50% 100%; animation: cloud-in .32s cubic-bezier(.2, .9, .3, 1.2) both; }
+    .orb-activity > section { padding: var(--cloud-pad); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--cloud-radius); box-shadow: 0 10px 32px #0004; animation: cloud-float 4.5s ease-in-out .32s infinite; }
+    .orb-activity::before, .orb-activity::after { content: ""; position: absolute; left: 50%; border-radius: 50%; background: var(--background); border: 1px solid var(--border); box-shadow: 0 4px 12px #0003; }
+    .orb-activity::before { width: 11px; height: 11px; bottom: 40px; margin-left: -4px; }
+    .orb-activity::after { width: 7px; height: 7px; bottom: 12px; margin-left: -4px; }
+    .thinking { margin: 0; padding: 8px 10px; background: var(--surface-1); border-radius: 10px; font-size: 12px; white-space: pre-wrap; }
+    .thinking strong { display: block; }
+    .thinking p { margin: 4px 0 0; }
+    .orb { width: 72px; height: 72px; border: 0; padding: 0; background: none; }
+    .orb svg { width: 72px; height: 72px; display: block; }
+    .caption { margin: 0; font-size: 11px; color: var(--muted-foreground); }
+    .absent { height: 0; }
+    @keyframes cloud-in { from { opacity: 0; transform: translateY(10px) scale(.9); } to { opacity: 1; transform: none; } }
+    @keyframes cloud-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <section class="panel" data-state="listening">
+      <div class="label">
+        <h1>Listening</h1>
+        <p class="note">Session just started, or the agent is idle. Same for Gemini, Grok, OpenAI.</p>
+        <span class="pill off">bubble hidden</span>
+      </div>
+      <div class="composer" data-state="listening">
+        <div class="orb" aria-hidden>
+          <svg viewBox="0 0 240 240"><defs><radialGradient id="orb" cx="35%" cy="28%" r="72%"><stop stop-color="#fff"/><stop offset=".2" stop-color="#dfe3ff"/><stop offset=".56" stop-color="#a5b4fc"/><stop offset=".88" stop-color="#6366f1"/><stop offset="1" stop-color="#4338ca"/></radialGradient></defs><circle cx="120" cy="120" r="68" fill="url(#orb)"/></svg>
+        </div>
+        <p class="caption">Listening · just talk</p>
+      </div>
+    </section>
+    <section class="panel" data-state="thinking">
+      <div class="label">
+        <h1>Thinking</h1>
+        <p class="note">Only while the agent is thinking or working. Hover no longer opens it.</p>
+        <span class="pill on">bubble visible</span>
+      </div>
+      <div class="composer" data-state="thinking">
+        <div class="orb-activity">
+          <section aria-label="Orb activity">
+            <div class="thinking"><strong>Thinking</strong><p>Checking the calendar before answering…</p></div>
+          </section>
+        </div>
+        <div class="orb" aria-hidden>
+          <svg viewBox="0 0 240 240"><defs><radialGradient id="orb2" cx="35%" cy="28%" r="72%"><stop stop-color="#fff"/><stop offset=".2" stop-color="#ede9fe"/><stop offset=".56" stop-color="#c4b5fd"/><stop offset="1" stop-color="#7c3aed"/></radialGradient></defs><circle cx="120" cy="120" r="68" fill="url(#orb2)"/></svg>
+        </div>
+        <p class="caption">Thinking…</p>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

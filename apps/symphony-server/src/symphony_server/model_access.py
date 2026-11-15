@@ -21,8 +21,10 @@ import httpx
 from core_ai import AnthropicProvider, GeminiProvider, GrokProvider, ModelRegistry, OpenAIProvider, VercelProvider
 from core_ai.providers.base import BaseProvider
 from core_ai.voice import VoiceConfig, VoiceSession, open_voice_session, voice_model
+from core_ai.voice.gemini.realtime import GeminiVoiceSession
 from core_ai.voice.realtime_api import RealtimeApiSession
 
+from symphony_server.gemini_live import install_gemini_live
 from symphony_server.grok_compat import install_grok_compat
 
 from symphony_server.provider_router import ProviderRouter
@@ -151,4 +153,7 @@ class ModelAccess:
         session = await open_voice_session(spec, config, self.keys[model.provider], base_url=base_url)
         if isinstance(session, RealtimeApiSession):
             install_grok_compat(session)
+        elif isinstance(session, GeminiVoiceSession):
+            # Live rejects lowercase thinkingLevel and closes before setupComplete.
+            install_gemini_live(session)
         return session

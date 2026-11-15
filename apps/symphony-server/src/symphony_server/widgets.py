@@ -144,7 +144,11 @@ RENDER_WIDGET_PARAMETERS: dict[str, Any] = {
                 "options: {prompt, choices: [{id,label,detail?}]}; "
                 "chart: {kind: 'line'|'bar', series: [{name, points: [{x, y}]}]}; "
                 "html: {html, title?} (a complete self-contained document shown under a header bar with "
-                "title, reload, zoom and fullscreen; it runs in a sandboxed iframe with no network)"
+                "title, reload, zoom and fullscreen; it runs in a sandboxed iframe with no network. Follow Osmo Canvas: "
+                "compact instrument-panel layout, monochrome #0a0a0a/#ededed with restrained green #3ecf8e, "
+                "amber #f5a524 and red #f87171 only for semantic status, system sans-serif, 4px spacing rhythm, "
+                "2-4px radii, responsive stacked layout, accessible labelled controls and visible keyboard focus; "
+                "self-contained inline CSS/JS only, no remote resources.)"
             ),
         },
     },

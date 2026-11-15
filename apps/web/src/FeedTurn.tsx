@@ -38,6 +38,7 @@ export function FeedTurn({ turn, step, onDecide, compact = false }: FeedTurnProp
     case "approval":
       return <ApprovalPrompt turn={turn} step={step} onDecide={(approved) => void onDecide(turn.approvalId, turn.runId, approved)} />;
     case "assistant":
+      if (!turn.text && (compact || (turn.activities.length === 0 && turn.runs.length === 0 && turn.widgets.length === 0))) return null;
       return (
         <div className="turn assistant">
           <span className="avatar" aria-hidden />
@@ -60,13 +61,6 @@ export function FeedTurn({ turn, step, onDecide, compact = false }: FeedTurnProp
 /** One assistant turn's spoken line, reasoning, tool activity rows and agent runs as chat-sdk parts; widgets render separately, keyed by id. */
 function assistantParts(turn: AssistantTurn, compact: boolean): AgentPart[] {
   const parts: AgentPart[] = [];
-  if (turn.reasoning || turn.thinking) {
-    parts.push({
-      type: "reasoning",
-      text: turn.reasoning ?? "",
-      state: turn.thinking ? "streaming" : "done",
-    });
-  }
   if (turn.text) parts.push({ type: "text", text: turn.text });
   if (compact) return parts;
   turn.activities.forEach((activity, i) =>

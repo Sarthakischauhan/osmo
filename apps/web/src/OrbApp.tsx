@@ -80,11 +80,25 @@ export function OrbApp({ bridge }: { bridge: DesktopBridge }) {
     },
     [bridge],
   );
+  // A drag step re-places the open box too (it may flip sides); it answers for the box height already placed.
+  const onMove = useCallback(
+    (dx: number, dy: number) => {
+      const id = ++request.current;
+      bridge.orb.move(dx, dy).then(
+        (layout) => {
+          if (id === request.current) setPlacement((previous) => ({ ...previous, ...layout }));
+        },
+        () => undefined,
+      );
+    },
+    [bridge],
+  );
 
   return (
     <FloatingOrb
       mode={orbMode(connection, state, false)}
       outputLevel={session.outputLevel}
+      inputLevel={session.inputLevel}
       runs={runs}
       turns={feed.turns}
       activity={activity}
@@ -94,6 +108,7 @@ export function OrbApp({ bridge }: { bridge: DesktopBridge }) {
       onExpand={onExpand}
       placement={placement}
       onBoxHeight={onBoxHeight}
+      onMove={onMove}
     />
   );
 }

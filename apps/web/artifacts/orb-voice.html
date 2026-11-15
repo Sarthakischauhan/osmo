@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Voice-reactive orb</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #0c0c0e; color: #ededed; font: 14px/20px ui-sans-serif, system-ui, sans-serif; }
+    .stage { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; padding: 28px; }
+    figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; border: 1px solid #27272a; border-radius: 16px; padding: 18px 8px 16px; background: #101013; }
+    canvas { width: 220px; height: 220px; }
+    figcaption { font-size: 12px; color: #a1a1aa; text-align: center; }
+    strong { color: #ededed; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <figure><canvas id="quiet" width="440" height="440"></canvas><figcaption><strong>Quiet</strong><br>level 0 · listening</figcaption></figure>
+    <figure><canvas id="talk" width="440" height="440"></canvas><figcaption><strong>You talking</strong><br>level 0.72 · listening</figcaption></figure>
+    <figure><canvas id="speak" width="440" height="440"></canvas><figcaption><strong>Osmo speaking</strong><br>level 0.9 · speaking</figcaption></figure>
+  </div>
+  <script>
+    const VERT = `attribute vec2 a; void main(){ gl_Position = vec4(a,0.0,1.0); }`;
+    const FRAG = `precision mediump float;
+uniform vec2 uRes; uniform float uTime; uniform float uLevel; uniform float uWobble; uniform float uGlow;
+uniform vec3 uLight; uniform vec3 uMid; uniform vec3 uDeep;
+float edge(float a, float t, float amount) {
+  float n = sin(2.0*a + t*1.3)*0.55 + sin(3.0*a - t*1.7)*0.3 + sin(5.0*a + t*2.4)*(0.12 + uLevel*0.35);
+  return 1.0 + n * amount;
+}
+void main() {
+  vec2 p = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
+  float a = atan(p.y, p.x);
+  float r = length(p);
+  float radius = 0.34 * (1.0 + uLevel * 0.28);
+  float amount = (uWobble * 0.55 + uLevel * 0.85) * 0.22;
+  float body = radius * edge(a, uTime, amount);
+  if (r > body * 1.55) { gl_FragColor = vec4(0.0); return; }
+  float glow = smoothstep(body*1.55, body*0.72, r) * uGlow * (0.55 + uLevel*0.7);
+  float inside = smoothstep(body, body-0.012, r);
+  vec2 swirl = vec2(cos(uTime*1.4-2.3), sin(uTime*1.4-2.3)) * radius * 0.32;
+  float h = clamp(length(p - swirl) / max(radius, 0.001), 0.0, 1.0);
+  vec3 color = mix(uLight, uMid, smoothstep(0.0, 0.45, h));
+  color = mix(color, uDeep, smoothstep(0.35, 1.0, h));
+  color = mix(color, vec3(1.0), (1.0-h)*(0.35+uLevel*0.4));
+  vec3 outColor = mix(uMid * glow, color, inside);
+  gl_FragColor = vec4(outColor, max(glow*0.85, inside));
+}`;
+    function compile(gl, type, source) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, source); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    function draw(id, level, colors, wobble, glow, time) {
+      const canvas = document.getElementById(id);
+      const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: true });
+      const vs = compile(gl, gl.VERTEX_SHADER, VERT);
+      const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+      const program = gl.createProgram();
+      gl.attachShader(program, vs); gl.attachShader(program, fs);
+      gl.bindAttribLocation(program, 0, "a");
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(program);
+      const u = (n) => gl.getUniformLocation(program, n);
+      gl.uniform2f(u("uRes"), canvas.width, canvas.height);
+      gl.uniform1f(u("uTime"), time);
+      gl.uniform1f(u("uLevel"), level);
+      gl.uniform1f(u("uWobble"), wobble);
+      gl.uniform1f(u("uGlow"), glow);
+      gl.uniform3f(u("uLight"), colors[0][0]/255, colors[0][1]/255, colors[0][2]/255);
+      gl.uniform3f(u("uMid"), colors[1][0]/255, colors[1][1]/255, colors[1][2]/255);
+      gl.uniform3f(u("uDeep"), colors[2][0]/255, colors[2][1]/255, colors[2][2]/255);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      canvas.dataset.renderer = "webgl";
+    }
+    const listen = [[230,236,255],[129,146,248],[67,56,202]];
+    const speak = [[224,231,255],[129,140,248],[76,29,149]];
+    draw("quiet", 0, listen, 0.28, 0.4, 1.2);
+    draw("talk", 0.72, listen, 0.28, 0.4, 2.4);
+    draw("speak", 0.9, speak, 0.45, 0.6, 3.1);
+    document.body.dataset.ready = "yes";
+  </script>
+</body>
+</html>

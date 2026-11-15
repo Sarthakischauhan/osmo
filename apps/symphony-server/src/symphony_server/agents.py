@@ -223,6 +223,17 @@ class AgentRuns:
         try:
             async for _, event in self.backend.events(run_id):
                 await self.on_event(run_id, event)
+            if self.runs[run_id].status in ("running", "waiting_approval"):
+                raise RuntimeError("Agent event stream ended before the run finished")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Failed to follow agent run %s", run_id)
+            record = self.runs[run_id]
+            if record.status in ("running", "waiting_approval"):
+                message = "The agent stopped unexpectedly. Please try again."
+                await self.update(record, "failed", result=message)
+                await self.notify(record, Notice(run_id, "interrupt", f"[agent {run_id}] failed: {message}"))
         finally:
             await self.browsers.release(self.runs[run_id].threadId)
 

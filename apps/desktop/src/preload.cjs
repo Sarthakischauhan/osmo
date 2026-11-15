@@ -25,5 +25,6 @@ contextBridge.exposeInMainWorld('osmoDesktop', {
   orb: {
     showFull: () => ipcRenderer.invoke('window:show-full'),
     setBox: height => ipcRenderer.invoke('orb:box', height),
+    move: (dx, dy) => ipcRenderer.invoke('orb:move', { dx, dy }),
   },
 });

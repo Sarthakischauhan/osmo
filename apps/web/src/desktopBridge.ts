@@ -45,6 +45,8 @@ export interface OrbBridge {
   showFull(): Promise<void>;
   /** The hover box now needs `height` px (0: closed). */
   setBox(height: number): Promise<BoxPlacement>;
+  /** A drag step: move the orb by (`dx`, `dy`) screen px; the window keeps it on screen and says where the box now opens. */
+  move(dx: number, dy: number): Promise<BoxPlacement>;
 }
 
 export interface DesktopStatus { enabled: boolean; platform: string; stopShortcut: string }

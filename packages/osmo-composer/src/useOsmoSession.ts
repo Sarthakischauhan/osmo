@@ -44,6 +44,8 @@ export interface OsmoSession {
   previewing: { model: string; voice: string } | undefined;
   /** Assistant output level 0..1, read straight off the playback analyser; poll it from rAF. */
   outputLevel: () => number;
+  /** Mic level 0..1 while the user is talking; 0 until capture has started. Poll it from rAF. */
+  inputLevel: () => number;
 }
 
 interface Runtime {
@@ -192,6 +194,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
   }, []);
 
   const outputLevel = useCallback(() => runtime.current?.player.level() ?? 0, []);
+  const inputLevel = useCallback(() => runtime.current?.mic.level() ?? 0, []);
 
   useEffect(() => teardown, [teardown]);
 
@@ -223,6 +226,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     stopPreview,
     previewing,
     outputLevel,
+    inputLevel,
   };
 }
 

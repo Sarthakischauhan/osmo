@@ -43,9 +43,11 @@ test('each session call goes out on its contract channel', async () => {
   await api.session.openThread('t1');
   await api.orb.showFull();
   await api.orb.setBox(120);
+  await api.orb.move(5, -3);
   assert.deepEqual(invoked, [
     [CHANNELS.snapshot], [CHANNELS.start, { voice: 'eve' }], [CHANNELS.end], [CHANNELS.interrupt],
     [CHANNELS.send, { type: 'browser.close', id: 'b' }], [CHANNELS.openThread, 't1'], [CHANNELS.showFull], [CHANNELS.box, 120],
+    [CHANNELS.move, { dx: 5, dy: -3 }],
   ]);
 });
 

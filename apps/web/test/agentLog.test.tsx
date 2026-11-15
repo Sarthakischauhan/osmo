@@ -8,7 +8,7 @@ import { FloatingOrb } from "../src/FloatingOrb";
 import { OrbPreview } from "../src/OrbPreview";
 import { agentActivity } from "../src/compact";
 import { emptyFeed, reduceFeed } from "../src/feed";
-import { type Runs, reduceRuns } from "../src/lib/runs";
+import { type Runs, reduceRuns, mergeListed } from "../src/lib/runs";
 
 const update = (runId: string, status: AgentRunStatus, phase?: string, result?: string): ServerEvent => ({ type: "agent.update", runId, task: `task ${runId}`, status, phase, result });
 const events: ServerEvent[] = [
@@ -27,6 +27,12 @@ const activity = agentActivity(runs, turns, undefined, 10);
 const decide = async () => undefined;
 
 describe("the agent log", () => {
+  it("preserves and displays streamed reasoning after a run-list refresh", () => {
+    const streaming = reduceRuns({}, { type: "agent.update", runId: "r", task: "Research", status: "running", reasoning: "Examining sources" }, 0);
+    const refreshed = mergeListed(streaming, { runs: [{ runId: "r", threadId: "t", task: "Research", status: "running", createdAt: 1, updatedAt: 1 }], approvals: [] });
+    const html = renderToStaticMarkup(<CompactAgentActivity activity={agentActivity(refreshed, [], "t", 0)} runs={refreshed} onDecide={decide} />);
+    expect(html).toContain("Examining sources");
+  });
   const html = renderToStaticMarkup(<CompactAgentActivity activity={activity} runs={runs} onDecide={decide} />);
 
   it("has one entry per run with its status and detail", () => {
@@ -94,6 +100,22 @@ describe("the orb's preview box", () => {
     expect(noAgents).not.toContain("osmo-compact-agents");
   });
 
+  it("clears an active thought when the session returns to listening after a failed turn", () => {
+    const started: ServerEvent = { type: "state", state: "thinking" };
+    const listening: ServerEvent = { type: "state", state: "listening" };
+    const feed = [started, listening].reduce(reduceFeed, emptyFeed);
+    expect(feed.turns.some((turn) => turn.role === "assistant" && turn.thinking === true)).toBe(false);
+    const preview = renderToStaticMarkup(<OrbPreview turns={feed.turns} runs={{}} activity={agentActivity({}, feed.turns, undefined, 0)} onDecide={decide} />);
+    expect(preview).not.toContain("<strong>Thinking</strong>");
+  });
+
+  it("does not label completed reasoning as active thinking", () => {
+    const completed = [{ role: "assistant" as const, key: "a1", text: "Answer", reasoning: "Earlier thought", thinking: false, activities: [], widgets: [], runs: [] }];
+    const preview = renderToStaticMarkup(<OrbPreview turns={completed} runs={{}} activity={agentActivity({}, completed, undefined, 0)} onDecide={decide} />);
+    expect(preview).not.toContain("<strong>Thinking</strong>");
+    expect(preview).not.toContain("Earlier thought");
+  });
+
   it("renders reasoning / thinking blocks and keeps all turns scrollable in the preview box", () => {
     const manyEvents: ServerEvent[] = [
       { type: "transcript.delta", role: "user", text: "One", itemId: "u1", final: true },
@@ -103,8 +125,9 @@ describe("the orb's preview box", () => {
     ];
     const manyTurns = manyEvents.reduce(reduceFeed, emptyFeed).turns;
     const preview = renderToStaticMarkup(<OrbPreview turns={manyTurns} runs={{}} activity={agentActivity({}, manyTurns, undefined, 0)} onDecide={decide} />);
-    for (const text of ["One", "Two", "Three", "Four", "Thinking step by step"]) expect(preview).toContain(text);
-    expect(preview).toContain("md-thinking");
+    for (const text of ["One", "Two", "Three", "Four"]) expect(preview).toContain(text);
+    expect(preview).not.toContain("Thinking step by step");
+    expect(preview).not.toContain("<strong>Thinking</strong>");
   });
 });
 

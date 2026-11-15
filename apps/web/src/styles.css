@@ -147,7 +147,33 @@ button { font: inherit; color: inherit; }
 
 /* Radial picker around the dock orb: the dial overlays the feed above it. While it is closed only
    the orb takes pointer events, so the feed under the (invisible) dial stays clickable. */
-.dock { position: relative; z-index: 2; overflow-x: clip; }
+.dock { position: relative; z-index: 2; overflow: visible; }
+/* Orb activity: a thought cloud that floats above the orb and the dial's provider ring (never over
+   them). Anchored to the composer, whose top is the orb's top; the wrapper's transparent bottom
+   padding holds the trail of bubbles and lets clicks through to the dial. It stays open while the
+   dial is, so the pointer can travel from the orb up into the cloud. */
+.dock .orb-composer { position: relative; }
+.orb-activity { --cloud-radius: 18px; --cloud-pad: 8px; --cloud-gap: 78px; display: none; pointer-events: none; position: absolute; z-index: 20; bottom: 100%; left: 50%; translate: -50% 0; width: min(380px, 90vw); padding-bottom: var(--cloud-gap); transform-origin: 50% 100%; animation: cloud-in .32s cubic-bezier(.2, .9, .3, 1.2) both; }
+.orb-activity > section { max-height: 40vh; overflow: auto; padding: var(--cloud-pad); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--cloud-radius); box-shadow: 0 10px 32px #0004; scrollbar-width: none; pointer-events: auto; animation: cloud-float 4.5s ease-in-out .32s infinite; }
+.orb-activity > section::-webkit-scrollbar { display: none; }
+/* Inner cards share the cloud's curve (concentric: the cloud's radius minus its padding). */
+.orb-activity .osmo-compact-agent, .orb-activity .osmo-compact-thinking { border-radius: calc(var(--cloud-radius) - var(--cloud-pad)); }
+.orb-activity .osmo-compact-thinking { margin: 0 0 8px; padding: 8px 10px; background: var(--surface-1); }
+.orb-activity .osmo-compact-thinking:last-child { margin-bottom: 0; }
+.orb-activity .osmo-compact-counts { margin: 2px 4px 0; }
+/* The thought trail: two shrinking bubbles rising from the orb, between the dial's top items. */
+.orb-activity::before, .orb-activity::after { content: ""; position: absolute; left: 50%; border-radius: 50%; background: var(--background); border: 1px solid var(--border); box-shadow: 0 4px 12px #0003; animation: bubble-in .28s ease-out both, cloud-float 4.5s ease-in-out .6s infinite; }
+.orb-activity::before { width: 11px; height: 11px; bottom: 40px; margin-left: -4px; animation-delay: .1s, .6s; }
+.orb-activity::after { width: 7px; height: 7px; bottom: 12px; margin-left: -4px; animation-delay: .18s, .7s; }
+/* Only while the agent is working. Idle, listening and speaking stay the orb alone,
+   the same way the other providers do; hover must not pop the cloud on its own. */
+.orb-composer[data-state="thinking"] .orb-activity,
+.orb-composer[data-state="working"] .orb-activity { display: block; }
+@keyframes cloud-in { from { opacity: 0; transform: translateY(10px) scale(.9); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes bubble-in { from { opacity: 0; scale: .2; } to { opacity: 1; scale: 1; } }
+@keyframes cloud-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+.osmo-compact-thinking { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 8px 0; }
+.osmo-compact-thinking p { margin-top: 4px; }
 /* A vignette instead of a solid band: the feed fades out as it nears the orb, with no hard edge. */
 .dock::before {
   content: "";
@@ -406,6 +432,7 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-floating-box[data-placed] { visibility: visible; }
 .osmo-floating-box > * { flex: none; }
 .osmo-floating-orb { flex: none; position: relative; margin-left: var(--orb-left, 0px); display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+.osmo-floating-orb[data-dragging] { cursor: grabbing; }
 .osmo-floating-orb .orb-canvas { transform: translate(-50%, -50%) scale(1.2); }
 .osmo-compact-transcript.canvas.chat-root { display: flex; flex-direction: column; gap: 10px; overflow: visible; scroll-padding-bottom: 0; }
 .osmo-compact-agents { display: flex; flex-direction: column; gap: 8px; width: 100%; }

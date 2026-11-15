@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateStart } from '../src/session-contract.js';
+import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from '../src/session-contract.js';
 import { BOX_MAX_HEIGHT } from '../src/window-state.js';
 
 test('every channel is unique, and renderer channels are separate from the ones main sends on', () => {
@@ -8,7 +8,7 @@ test('every channel is unique, and renderer channels are separate from the ones 
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(Object.keys(CHANNELS).sort(), [
     'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
-    'box', 'end', 'event', 'interrupt', 'openThread', 'send', 'showFull', 'snapshot', 'start', 'status',
+    'box', 'end', 'event', 'interrupt', 'move', 'openThread', 'send', 'showFull', 'snapshot', 'start', 'status',
   ]);
 });
 
@@ -68,4 +68,11 @@ test('the audio renderer answers a capture request with nothing, or an error', (
   assert.deepEqual(validateCaptureResult({}), {});
   assert.deepEqual(validateCaptureResult({ error: 'Permission denied' }), { error: 'Permission denied' });
   for (const value of [undefined, null, 'ok', { error: '' }, { error: 5 }, { ok: true }]) assert.throws(() => validateCaptureResult(value));
+});
+
+test('a drag of the orb is a finite step in screen px', () => {
+  assert.deepEqual(validateOrbMove({ dx: 4, dy: -2.5 }), { dx: 4, dy: -2.5 });
+  for (const value of [undefined, null, { dx: 1 }, { dx: 1, dy: NaN }, { dx: '1', dy: 0 }, { dx: 1, dy: 1e9 }, { dx: 1, dy: 1, x: 2 }]) {
+    assert.throws(() => validateOrbMove(value));
+  }
 });

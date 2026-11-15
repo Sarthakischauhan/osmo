@@ -31,6 +31,9 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, 
 import { useSession } from "./session";
 import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { FeedTurn } from "./FeedTurn";
+import { agentActivity } from "./compact";
+import { liveThought, orbBubbleVisible } from "./orbActivity";
+import { CompactAgentActivity } from "./CompactAgentActivity";
 import { type Feed, conversationTitle, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
@@ -324,6 +327,13 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   // This thread's runs are cards under the answers that started them; the list is for the others'.
   const shownRuns = visibleRuns(runs, now).filter((run) => run.threadId !== undefined && run.threadId !== threadId);
   const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
+  const orbActivity = agentActivity(runs, feed.turns, threadId, now);
+  // Reasoning remains in the transcript after a turn ends. The bubble above the orb is the
+  // live "working" indicator, same for every provider: only while this turn is thinking or a
+  // tool/agent run is still going. Idle, listening and speaking stay the orb alone.
+  const currentThought = liveThought(feed.turns);
+  const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
+  const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
 
   return (
     <>
@@ -381,6 +391,12 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             <OrbComposer
               session={session}
               awaitingChoice={pending !== undefined}
+              activity={showOrbBubble ? (
+                <section aria-label="Orb activity">
+                  {showThought && <div className="osmo-compact-thinking"><strong>Thinking</strong><p>{currentThought.reasoning || "Thinking…"}</p></div>}
+                  <CompactAgentActivity activity={orbActivity} runs={runs} onDecide={decide} />
+                </section>
+              ) : undefined}
               pickerError={catalogError}
               picker={
                 pick && registry.length > 0

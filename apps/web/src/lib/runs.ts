@@ -64,6 +64,7 @@ function listedView(previous: RunView | undefined, run: AgentRun, approvalId: st
     task: run.task,
     status: run.status,
     phase: previous?.phase,
+    reasoning: previous?.reasoning,
     steps: previous?.steps ?? 0,
     result: run.result ?? previous?.result,
     startedAt: run.createdAt * 1000,

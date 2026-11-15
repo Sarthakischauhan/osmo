@@ -225,10 +225,14 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
     case "widget.update":
       return updateWidget(feed, event.id, event.patch);
     case "state":
-      // BARGE_IN only tells the client to flush queued audio; it is neither a step nor the end of one.
-      if (event.detail === BARGE_IN) return feed;
       if (event.state === "thinking") {
         return withAssistant(feed, (turn) => ({ ...turn, thinking: true }));
+      }
+      // Thinking is a live session state, not a property of just the last message. Clear any
+      // stale marker across the feed on every transition out (including barge-in), while only
+      // finishing tool activity for ordinary turn-ending states.
+      if (event.detail === BARGE_IN) {
+        return { ...feed, turns: feed.turns.map((turn) => turn.role === "assistant" && turn.thinking ? { ...turn, thinking: false, thought: true } : turn) };
       }
       if (event.state === "working" && event.detail) {
         const label = event.detail;
@@ -239,10 +243,13 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
         }));
       }
       {
-        const last = feed.turns[feed.turns.length - 1];
-        return last?.role === "assistant" && (last.activities.some((a) => !a.done) || last.thinking)
-          ? withAssistant(feed, finishActivities)
-          : feed;
+        const cleared = feed.turns.map((turn) => turn.role === "assistant" && turn.thinking ? { ...turn, thinking: false, thought: true } : turn);
+        // Every non-thinking state ends the live assistant thinking indicator, even if the
+        // response has not produced text yet (for example, tool failure followed by listening).
+        const last = cleared[cleared.length - 1];
+        const updated = last?.role === "assistant" && last.activities.some((a) => !a.done) ? finishActivities(last) : last;
+        if (cleared.every((turn, index) => turn === feed.turns[index]) && updated === last) return feed;
+        return { ...feed, turns: updated && last?.role === "assistant" ? [...cleared.slice(0, -1), updated] : cleared };
       }
     case "desktop.request":
     case "models":

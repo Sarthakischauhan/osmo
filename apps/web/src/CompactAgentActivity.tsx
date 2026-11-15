@@ -44,6 +44,7 @@ export function CompactAgentActivity({ activity, runs, onDecide }: { activity: A
             <span className="osmo-tertiary">{STATUS[card.status]}</span>
           </p>
           {card.detail !== undefined && <p className="osmo-muted osmo-compact-agent-detail">{card.detail}</p>}
+          {card.status === "running" && card.reasoning && <div className="osmo-compact-thinking"><strong>Agent reasoning</strong><p>{card.reasoning}</p></div>}
           {approval !== undefined && <ApprovalPrompt turn={approval} step={runs[card.runId]?.steps} onDecide={(approved) => void onDecide(approval.approvalId, card.runId, approved)} />}
         </article>
         );
