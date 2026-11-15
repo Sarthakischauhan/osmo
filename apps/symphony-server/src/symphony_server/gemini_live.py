@@ -18,7 +18,8 @@ from typing import Any
 
 from core_ai.voice.gemini.realtime import GeminiVoiceSession
 
-# Models whose Live setup rejects thinkingLevel (it uses thinkingBudget, or none).
+# Gemini Live documents this endpoint as not supporting thinkingLevel:
+# https://aistudio.google.com/docs/models/gemini-3.8-live
 OMIT_THINKING_LEVEL = frozenset({"gemini-3.8-live"})
 
 _LEVELS = {
@@ -36,6 +37,34 @@ def thinking_level(effort: str) -> str:
     return _LEVELS.get(effort.strip().lower(), effort.strip().upper())
 
 
+def _normalize_payload(payload: dict[str, Any], model_id: str) -> dict[str, Any]:
+    """Return a copy with any unsupported or lowercase setup level corrected."""
+    setup = payload.get("setup")
+    if not isinstance(setup, dict):
+        return payload
+    generation = setup.get("generationConfig")
+    if not isinstance(generation, dict):
+        return payload
+    thinking = generation.get("thinkingConfig")
+    if not isinstance(thinking, dict) or "thinkingLevel" not in thinking:
+        return payload
+    thinking = thinking.copy()
+    generation = generation.copy()
+    if model_id.removeprefix("models/") in OMIT_THINKING_LEVEL:
+        thinking.pop("thinkingLevel")
+        if not thinking:
+            generation.pop("thinkingConfig")
+        else:
+            generation["thinkingConfig"] = thinking
+    else:
+        level = thinking.get("thinkingLevel")
+        if not isinstance(level, str):
+            return payload
+        thinking["thinkingLevel"] = thinking_level(level)
+        generation["thinkingConfig"] = thinking
+    return {**payload, "setup": {**setup, "generationConfig": generation}}
+
+
 def normalize_setup(frame: str, model_id: str) -> str:
     """Uppercase ``thinkingLevel`` in a setup frame, or drop it when the model rejects it."""
     try:
@@ -44,25 +73,8 @@ def normalize_setup(frame: str, model_id: str) -> str:
         return frame
     if not isinstance(payload, dict):
         return frame
-    setup = payload.get("setup")
-    if not isinstance(setup, dict):
-        return frame
-    generation = setup.get("generationConfig")
-    if not isinstance(generation, dict):
-        return frame
-    thinking = generation.get("thinkingConfig")
-    if not isinstance(thinking, dict) or "thinkingLevel" not in thinking:
-        return frame
-    bare = model_id.removeprefix("models/")
-    if bare in OMIT_THINKING_LEVEL:
-        thinking.pop("thinkingLevel", None)
-        if not thinking:
-            generation.pop("thinkingConfig", None)
-    else:
-        level = thinking.get("thinkingLevel")
-        if isinstance(level, str):
-            thinking["thinkingLevel"] = thinking_level(level)
-    return json.dumps(payload)
+    fixed = _normalize_payload(payload, model_id)
+    return frame if fixed is payload else json.dumps(fixed)
 
 
 def install_gemini_live(session: GeminiVoiceSession) -> None:
@@ -70,10 +82,6 @@ def install_gemini_live(session: GeminiVoiceSession) -> None:
     original = session._send
 
     async def send(_session: Any, payload: dict[str, Any]) -> None:
-        if "setup" in payload:
-            fixed = json.loads(normalize_setup(json.dumps(payload), session.model_id))
-            await original(fixed)
-            return
-        await original(payload)
+        await original(_normalize_payload(payload, session.model_id))
 
     session._send = MethodType(send, session)  # type: ignore[method-assign]

@@ -5,6 +5,7 @@ dist/
 *.png
 *.pdf
 coverage/
+apps/web/artifacts/
 .venv/
 __pycache__/
 *.egg-info/

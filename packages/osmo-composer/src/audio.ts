@@ -63,7 +63,7 @@ export class MicCapture {
 }
 
 /** RMS of an analyser's time domain, scaled so speech lands mid-range. */
-export function loudness(analyser: AnalyserNode, samples: Float32Array): number {
+export function loudness(analyser: AnalyserNode, samples: Float32Array<ArrayBuffer>): number {
   analyser.getFloatTimeDomainData(samples);
   let sum = 0;
   for (const sample of samples) sum += sample * sample;

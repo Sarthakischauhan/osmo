@@ -232,6 +232,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
       // stale marker across the feed on every transition out (including barge-in), while only
       // finishing tool activity for ordinary turn-ending states.
       if (event.detail === BARGE_IN) {
+        if (!feed.turns.some((turn) => turn.role === "assistant" && turn.thinking)) return feed;
         return { ...feed, turns: feed.turns.map((turn) => turn.role === "assistant" && turn.thinking ? { ...turn, thinking: false, thought: true } : turn) };
       }
       if (event.state === "working" && event.detail) {

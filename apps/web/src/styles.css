@@ -153,7 +153,10 @@ button { font: inherit; color: inherit; }
    padding holds the trail of bubbles and lets clicks through to the dial. It stays open while the
    dial is, so the pointer can travel from the orb up into the cloud. */
 .dock .orb-composer { position: relative; }
-.orb-activity { --cloud-radius: 18px; --cloud-pad: 8px; --cloud-gap: 78px; display: none; pointer-events: none; position: absolute; z-index: 20; bottom: 100%; left: 50%; translate: -50% 0; width: min(380px, 90vw); padding-bottom: var(--cloud-gap); transform-origin: 50% 100%; animation: cloud-in .32s cubic-bezier(.2, .9, .3, 1.2) both; }
+/* Mounted only while orbBubbleVisible is true (thinking/working, or a run still going after
+   voice leaves those states). Presence in the DOM is the visibility signal — do not re-gate on
+   data-state here, or a listening/idle run cloud stays display:none. */
+.orb-activity { --cloud-radius: 18px; --cloud-pad: 8px; --cloud-gap: 78px; display: block; pointer-events: none; position: absolute; z-index: 20; bottom: 100%; left: 50%; translate: -50% 0; width: min(380px, 90vw); padding-bottom: var(--cloud-gap); transform-origin: 50% 100%; animation: cloud-in .32s cubic-bezier(.2, .9, .3, 1.2) both; }
 .orb-activity > section { max-height: 40vh; overflow: auto; padding: var(--cloud-pad); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--cloud-radius); box-shadow: 0 10px 32px #0004; scrollbar-width: none; pointer-events: auto; animation: cloud-float 4.5s ease-in-out .32s infinite; }
 .orb-activity > section::-webkit-scrollbar { display: none; }
 /* Inner cards share the cloud's curve (concentric: the cloud's radius minus its padding). */
@@ -165,10 +168,6 @@ button { font: inherit; color: inherit; }
 .orb-activity::before, .orb-activity::after { content: ""; position: absolute; left: 50%; border-radius: 50%; background: var(--background); border: 1px solid var(--border); box-shadow: 0 4px 12px #0003; animation: bubble-in .28s ease-out both, cloud-float 4.5s ease-in-out .6s infinite; }
 .orb-activity::before { width: 11px; height: 11px; bottom: 40px; margin-left: -4px; animation-delay: .1s, .6s; }
 .orb-activity::after { width: 7px; height: 7px; bottom: 12px; margin-left: -4px; animation-delay: .18s, .7s; }
-/* Only while the agent is working. Idle, listening and speaking stay the orb alone,
-   the same way the other providers do; hover must not pop the cloud on its own. */
-.orb-composer[data-state="thinking"] .orb-activity,
-.orb-composer[data-state="working"] .orb-activity { display: block; }
 @keyframes cloud-in { from { opacity: 0; transform: translateY(10px) scale(.9); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
 @keyframes bubble-in { from { opacity: 0; scale: .2; } to { opacity: 1; scale: 1; } }
 @keyframes cloud-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }

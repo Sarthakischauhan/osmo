@@ -67,27 +67,45 @@ function compile(gl: WebGLRenderingContext, type: number, source: string): WebGL
 export interface OrbGl {
   draw(size: number, frame: OrbFrameState, mode: OrbMode): void;
   lost: () => boolean;
+  /** Drop GL objects and release the context; safe to call more than once. */
+  dispose: () => void;
 }
 
 /** A WebGL context drawing the voice orb, or null when the canvas cannot do WebGL. */
 export function createOrbGl(canvas: HTMLCanvasElement): OrbGl | null {
   const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false, antialias: true });
   if (!gl) return null;
-  let program: WebGLProgram;
+  let vs: WebGLShader | null = null;
+  let fs: WebGLShader | null = null;
+  let program: WebGLProgram | null = null;
   try {
-    const vs = compile(gl, gl.VERTEX_SHADER, VERT);
-    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
-    const linked = gl.createProgram();
-    if (!linked) return null;
-    program = linked;
+    vs = compile(gl, gl.VERTEX_SHADER, VERT);
+    fs = compile(gl, gl.FRAGMENT_SHADER, FRAG);
+    program = gl.createProgram();
+    if (!program) {
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return null;
+    }
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     gl.bindAttribLocation(program, 0, "a");
     gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return null;
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      gl.deleteProgram(program);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return null;
+    }
   } catch {
+    if (program) gl.deleteProgram(program);
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
     return null;
   }
+  // Shaders are no longer needed once the program has linked.
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
   const buffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   // One triangle covering the clip square.
@@ -106,9 +124,11 @@ export function createOrbGl(canvas: HTMLCanvasElement): OrbGl | null {
     mid: gl.getUniformLocation(program, "uMid"),
     deep: gl.getUniformLocation(program, "uDeep"),
   };
+  let alive = true;
   return {
     lost: () => gl.isContextLost(),
     draw(size, frame, _mode) {
+      if (!alive || gl.isContextLost()) return;
       const { preset, level, time } = frame;
       const [light, mid, deep] = preset.colors;
       gl.viewport(0, 0, size, size);
@@ -124,6 +144,16 @@ export function createOrbGl(canvas: HTMLCanvasElement): OrbGl | null {
       gl.uniform3f(loc.mid, mid[0] / 255, mid[1] / 255, mid[2] / 255);
       gl.uniform3f(loc.deep, deep[0] / 255, deep[1] / 255, deep[2] / 255);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+    dispose() {
+      if (!alive) return;
+      alive = false;
+      if (!gl.isContextLost()) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.useProgram(null);
+        if (buffer) gl.deleteBuffer(buffer);
+        gl.deleteProgram(program);
+      }
     },
   };
 }

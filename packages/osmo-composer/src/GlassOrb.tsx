@@ -49,7 +49,10 @@ export function GlassOrb({ mode, outputLevel, inputLevel }: GlassOrbProps) {
       handle = requestAnimationFrame(tick);
     };
     handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
+    return () => {
+      cancelAnimationFrame(handle);
+      gl?.dispose();
+    };
   }, [outputLevel, inputLevel]);
 
   return <canvas ref={canvas} className="orb-canvas" aria-hidden style={{ width: ORB_CANVAS, height: ORB_CANVAS }} />;
