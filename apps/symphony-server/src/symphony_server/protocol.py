@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from symphony_server.storage import AgentRunStatus, ThreadRecord
+from symphony_server.storage import AgentRunStatus, ThreadRecord, UsageRecord
 from symphony_server.voices import Effort, Selection, VoiceModel
 
 OsmoState = Literal["idle", "listening", "thinking", "speaking", "working"]
@@ -241,6 +241,13 @@ class ApprovalResolved(_Event):
     approved: bool
 
 
+class UsageEvent(_Event):
+    """A voice response or agent turn on this thread used tokens (usage.py); the usage dialog ticks."""
+
+    type: Literal["usage"] = "usage"
+    usage: UsageRecord
+
+
 ServerEvent = Union[
     StateEvent,
     TranscriptDelta,
@@ -254,4 +261,5 @@ ServerEvent = Union[
     ApprovalRequest,
     ApprovalResolved,
     DesktopRequest,
+    UsageEvent,
 ]

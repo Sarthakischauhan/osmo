@@ -7,6 +7,7 @@ import {
   OrbComposer,
   type ServerEvent,
   type Thread,
+  type UsageRecord,
   type VoiceModel,
   type VoiceSelection,
   orbMode,
@@ -32,6 +33,7 @@ import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
 import { AgentModelDialog } from "@/components/AgentModelDialog";
+import { UsageDialog } from "@/components/UsageDialog";
 import { FeedTurn } from "./FeedTurn";
 import { agentActivity } from "./compact";
 import { liveThought, orbBubbleVisible } from "./orbActivity";
@@ -82,6 +84,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
   const savePick = useRef<(next: VoiceSelection) => void>();
+  const [liveUsage, setLiveUsage] = useState<UsageRecord>();
+  const [usageOpen, setUsageOpen] = useState(false);
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -90,6 +94,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       setThreads((previous) => [event.thread, ...previous.filter((t) => t.id !== event.thread.id)]);
     }
     cues.current?.onServerEvent(event);
+    if (event.type === "usage") setLiveUsage(event.usage);
     // What the server applied (session start, picker, or `set_voice`), or on error what is still in effect.
     if (event.type === "voice.configured") savePick.current?.(event.selection);
   }, []);
@@ -354,6 +359,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         countMessages={countMessages}
         onOpenSettings={() => setAgentModelOpen(true)}
         onOpenWorkbench={() => setWorkbenchOpen(true)}
+        onOpenUsage={() => setUsageOpen(true)}
       />
       <SidebarInset className="app" data-home={home}>
         {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
@@ -451,6 +457,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onConnectKey={(provider) => { setReturnToAgentSettings(true); setAgentModelOpen(false); setConnecting(provider); }}
         desktop={desktop}
       />
+      <UsageDialog open={usageOpen} onOpenChange={setUsageOpen} threadId={threadId} live={liveUsage} />
       <Toaster position="top-center" theme={theme} />
     </>
   );

@@ -517,3 +517,26 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-compact-agent-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .osmo-compact-agent-detail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 16px; }
 .osmo-compact-agent .osmo-approval { padding: 8px 0 0; background: none; }
+
+/* Usage dialog (components/UsageDialog.tsx). */
+.osmo-usage { display: flex; flex-direction: column; gap: 20px; width: 720px; padding: 28px; border-radius: var(--radius, 3px); background: var(--background); }
+.osmo-usage-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.osmo-segmented { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-button); background: var(--surface-1); }
+.osmo-segmented button { height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-button); background: none; color: var(--muted-foreground); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
+.osmo-segmented button[aria-pressed="true"] { background: var(--surface-3); color: var(--foreground); }
+.osmo-segmented button:disabled { opacity: .4; cursor: not-allowed; }
+.osmo-usage-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.osmo-usage-stats > div { display: grid; gap: 2px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-button); }
+.osmo-usage-stats span, .osmo-usage-stats small { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.osmo-usage-stats strong { font-size: 20px; line-height: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.osmo-usage-section { display: grid; gap: 8px; }
+.osmo-usage-section h3 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
+.osmo-usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 72px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-button); }
+.osmo-usage-bars span { flex: 1; min-width: 2px; border-radius: 2px; background: var(--foreground); opacity: .7; }
+.osmo-usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.osmo-usage-table th { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); font-weight: 500; text-align: right; }
+.osmo-usage-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+.osmo-usage-table .osmo-usage-left { text-align: left; }
+.osmo-usage-model { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
+.osmo-usage-empty, .osmo-usage-note { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+@media (max-width: 600px) { .osmo-usage { padding: 20px; } .osmo-usage-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

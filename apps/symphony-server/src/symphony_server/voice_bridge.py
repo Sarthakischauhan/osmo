@@ -65,6 +65,7 @@ from symphony_server.protocol import (
     StateEvent,
     ThreadEvent,
     TranscriptDelta,
+    UsageEvent,
     VoiceConfigured,
     VoicePreviewRequest,
     WidgetAction,
@@ -74,6 +75,7 @@ from symphony_server.protocol import (
 from symphony_server.session_previews import SessionPreviews
 from symphony_server.storage import DEFAULT_THREAD_TITLE, MessageRole, Storage, ThreadRecord
 from symphony_server.turn_events import action_text, activity_label
+from symphony_server.usage import voice_usage
 from symphony_server.voices import (
     OSMO_VOICE,
     PreviewCache,
@@ -326,6 +328,15 @@ class VoiceBridge:
         if self.thread is not None:
             self.storage.add_message(self.thread.id, role, text)
 
+    async def record_usage(self, done: ResponseDone) -> None:
+        if self.thread is None:
+            return
+        model = self.model()
+        usage = voice_usage(self.thread.id, f"{model.provider}:{model.id}", done)
+        if usage is not None:
+            self.storage.add_usage(usage)
+            await self.emit(UsageEvent(usage=usage))
+
     def next_utterance(self) -> str:
         self.utterances += 1
         return f"u{self.utterances}"
@@ -548,6 +559,7 @@ class VoiceBridge:
                     self.response_active = False
             if response.done is None or self.voice is not voice:
                 return
+            await self.record_usage(response.done)
             if response.text:
                 text = "".join(response.text)
                 self.note_answer(response.after, text)

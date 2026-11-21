@@ -105,6 +105,25 @@ export const clientEventSchema = z.discriminatedUnion("type", [
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
+/**
+ * One model response's tokens and price (server usage.py). `cachedTokens` and `costUsd` are absent
+ * when the provider did not report them or the model has no catalog price: shown as n/a, never guessed.
+ */
+export const usageRecordSchema = z.object({
+  threadId: z.string(),
+  runId: z.string().nullish(),
+  source: z.enum(["voice", "agent"]),
+  model: z.string(),
+  inputTokens: z.number().int().nonnegative(),
+  cachedTokens: z.number().int().nonnegative().nullish(),
+  outputTokens: z.number().int().nonnegative(),
+  reasoningTokens: z.number().int().nonnegative().default(0),
+  costUsd: z.number().nonnegative().nullish(),
+  estimated: z.boolean().default(false),
+  createdAt: z.number(),
+});
+export type UsageRecord = z.infer<typeof usageRecordSchema>;
+
 export const serverEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
@@ -159,6 +178,8 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     arguments: z.string(),
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string(), runId: z.string(), approved: z.boolean() }),
+  // A voice response or agent turn on this thread used tokens; the usage dialog ticks.
+  z.object({ type: z.literal("usage"), usage: usageRecordSchema }),
   // Answer to a `voice.preview` request: base64 PCM16 (24 kHz mono, ~2 s) or an error.
   z.object({
     type: z.literal("voice.preview"),

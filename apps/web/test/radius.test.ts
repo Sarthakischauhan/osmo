@@ -33,6 +33,7 @@ describe("border radii", () => {
     ".osmo-card-actions button",
     ".canvas.chat-root .chat-question button",
     ".canvas.chat-root .chat-subagent-inspect",
+    ".osmo-segmented button",
   ];
 
   it.each(buttons)("%s is 8px", (selector) => {

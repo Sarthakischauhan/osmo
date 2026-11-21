@@ -44,12 +44,14 @@ from symphony_server.protocol import (
     ApprovalRequest,
     ApprovalResolved,
     ServerEvent,
+    UsageEvent,
     widget_event_adapter,
 )
 from symphony_server.providers import provider_label
 from symphony_server.storage import DEFAULT_THREAD_TITLE, AgentRunRecord, AgentRunStatus, Storage
 from symphony_server.turn_events import RunFailedPayload, ToolStartedPayload, activity_label
 from symphony_server.upstream.durable import RUN_RESUMED, DurableRunBackend
+from symphony_server.usage import AgentUsagePayload, agent_usage
 from symphony_server.voices import provider_of
 
 log = logging.getLogger("symphony.agents")
@@ -282,6 +284,10 @@ class AgentRuns:
             delta = str(event.payload.get("delta") or "")
             if delta:
                 await self.show(record.threadId, AgentUpdate(runId=record.runId, task=record.task, status=record.status, reasoning=delta))
+        elif kind == "usage":
+            usage = agent_usage(record.threadId, run_id, AgentUsagePayload.model_validate(event.payload))
+            self.storage.add_usage(usage)
+            await self.show(record.threadId, UsageEvent(usage=usage))
         elif kind == OSMO_WIDGET:
             await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:

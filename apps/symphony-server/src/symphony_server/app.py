@@ -41,6 +41,7 @@ from symphony_server.browser import BROWSER_TOOL_NAMES, THREAD_ID, BrowserRunLin
 from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agent_model import create_agent_model_router
+from symphony_server.usage import create_usage_router
 from symphony_server.agents import AgentRuns, create_run_router
 from symphony_server.approvals import ApprovalAddon, ApprovalBroker, create_approval_router
 from symphony_server.canvas import CreateImageTool, RenderWidgetTool, UpdateWidgetTool, WidgetBoard, WriteCodeTool
@@ -246,6 +247,7 @@ def create_app(
     app.include_router(create_approval_router(broker))
     app.include_router(create_run_router(agents))
     app.include_router(create_agent_model_router(agents))
+    app.include_router(create_usage_router(storage))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:

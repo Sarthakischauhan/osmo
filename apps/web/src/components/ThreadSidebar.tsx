@@ -1,5 +1,5 @@
 import type { Thread } from "@osmo/osmo-composer";
-import { Settings, History, MoreHorizontal, PanelLeft, Plus, ListTodo } from "lucide-react";
+import { Gauge, Settings, History, MoreHorizontal, PanelLeft, Plus, ListTodo } from "lucide-react";
 import { type ReactNode, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -49,10 +49,12 @@ export interface ThreadSidebarProps {
   /** Open the settings screen. */
   onOpenSettings?: () => void;
   onOpenWorkbench?: () => void;
+  /** Open the usage and cost dialog. */
+  onOpenUsage?: () => void;
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenWorkbench }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenWorkbench, onOpenUsage }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -130,15 +132,22 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
           </>
         )}
       </SidebarContent>
-      {onOpenSettings && (
+      {(onOpenSettings || onOpenUsage) && (
         <SidebarFooter className="osmo-settings-footer">
-          {collapsed ? (
+          {onOpenUsage && (collapsed ? (
+            <IconButton label="Usage" onClick={onOpenUsage}><Gauge size={16} /></IconButton>
+          ) : (
+            <button type="button" className="osmo-new-thread osmo-settings-button" onClick={onOpenUsage}>
+              <Gauge size={16} aria-hidden /><span>Usage</span>
+            </button>
+          ))}
+          {onOpenSettings && (collapsed ? (
             <IconButton label="Settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
           ) : (
             <button type="button" className="osmo-new-thread osmo-settings-button" onClick={onOpenSettings}>
               <Settings size={16} aria-hidden /><span>Settings</span>
             </button>
-          )}
+          ))}
         </SidebarFooter>
       )}
       {footer && <SidebarFooter className="osmo-desktop-footer">{footer}</SidebarFooter>}
