@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, get_args
 
+from core_ai.providers.defaults import DEFAULT_MODELS
 from pydantic import SecretStr
 
 from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
@@ -18,7 +19,7 @@ DEFAULT_WORKSPACES_DIR = "~/.config/osmo/workspaces"
 # Turn budget of one background agent run: coding tasks (explore, edit, test, commit, open a PR) need dozens.
 DEFAULT_AGENT_MAX_TURNS = 60
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
-DEFAULT_AGENT_MODEL = "grok:grok-4.20-0309-reasoning"
+DEFAULT_AGENT_MODEL = DEFAULT_MODELS["grok"]
 # Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
 # Clicking and typing in the agent browser can submit, buy or send, so they wait; opening, reading and
 # scrolling pages do not. Search does not wait unless it is added here. Opening a pull request pushes to

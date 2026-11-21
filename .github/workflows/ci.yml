@@ -29,7 +29,7 @@ jobs:
         working-directory: .
         run: |
           git clone -q https://github.com/Sarthakischauhan/symphony /tmp/symphony
-          git -C /tmp/symphony checkout -q a335957c53009d6c4f82e8176a9abf975b736979
+          git -C /tmp/symphony checkout -q 9fb6c8bf2faac74b41bf1b52eb68e6e52946cc31
           diff -r /tmp/symphony/core_server vendor/core_server
       - run: .venv/bin/mypy
       - run: .venv/bin/python -m pytest -q
