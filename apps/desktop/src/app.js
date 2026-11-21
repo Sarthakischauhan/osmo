@@ -1,10 +1,10 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
+import { app, BrowserWindow, components, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAudioPort } from './audio-port.js';
-import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
+import { allowMediaKeys, allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
 import { pythonExecutable, startServer } from './server.js';
 import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
@@ -221,11 +221,13 @@ export function runApp() {
       webPreferences: { ...webPreferences, preload: path.join(here, 'audio-preload.cjs'), autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
     });
     const contents = audioWindow.webContents;
-    // Every window shares the default session: its handlers allow the audio renderer's microphone and nothing else.
-    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
-      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin));
-    contents.session.setPermissionRequestHandler((wc, permission, callback, details) =>
-      callback(allowMicrophone(wc, contents, permission, '', details, origin)));
+    // Every window shares the default session: its handlers allow the audio renderer's microphone, Widevine for the
+    // workspace's music player, and nothing else.
+    const allow = (wc, permission, requestingOrigin, details) =>
+      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin)
+      || allowMediaKeys(wc, workspace?.webContents, permission, requestingOrigin, details, origin);
+    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => allow(wc, permission, requestingOrigin, details));
+    contents.session.setPermissionRequestHandler((wc, permission, callback, details) => callback(allow(wc, permission, '', details)));
     secure(audioWindow, { revokeOnNavigation: false });
     // A crashed audio page ends the call rather than leaving a session that cannot hear or speak.
     contents.on('render-process-gone', () => { audio.lost(); session.end(); audioWindow.reload(); });
@@ -270,6 +272,10 @@ export function runApp() {
   else {
     app.on('second-instance', () => switcher?.toFull());
     app.whenReady().then(async () => {
+      // castLabs ECS installs Widevine as a component; Spotify in the music player needs it. Local files play without it,
+      // so a failed install is logged, not fatal.
+      try { await components.whenReady(); }
+      catch (error) { console.warn('Widevine is unavailable; Spotify playback will not work:', String(error)); }
       if (!process.env.OSMO_DESKTOP_URL) {
         try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin, token: process.env.OSMO_DESKTOP_TOKEN || randomBytes(32).toString('hex') }); }
         catch (error) {

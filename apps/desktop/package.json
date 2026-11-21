@@ -14,15 +14,21 @@
     "pack": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder --dir",
     "dist": "bun run prepare:python && bun run --filter @osmo/web build && electron-builder",
     "prepare:python": "node scripts/prepare-python.js && node scripts/sign-python.js",
-    "signing:create": "node scripts/create-signing-identity.js"
+    "signing:create": "node scripts/create-signing-identity.js",
+    "postinstall": "node -e \"require(require.resolve('electron/install.js'))\""
   },
   "devDependencies": {
-    "electron": "^45.0.0",
+    "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
     "electron-builder": "^26.0.12"
   },
   "build": {
     "appId": "dev.sarchauhan.osmo",
     "productName": "Osmo",
+    "electronVersion": "45.2.1+wvcus",
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/v"
+    },
+    "afterPack": "scripts/vmp-sign.cjs",
     "directories": {
       "output": "release"
     },

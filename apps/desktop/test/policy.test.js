@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from '../src/policy.js';
+import { SPOTIFY_PLAYER_ORIGIN, allowMediaKeys, allowMicrophone, localAppUrl, trustedFrame, validateAction } from '../src/policy.js';
 test('native bridge accepts only loopback HTTP origins', () => {
   assert.equal(localAppUrl(), 'http://127.0.0.1:8787');
   for (const url of ['https://example.com', 'file:///tmp/app.html', 'http://localhost.evil', 'http://user:pass@localhost', 'http://localhost/path']) assert.throws(() => localAppUrl(url));
@@ -20,6 +20,16 @@ test('microphone is allowed only for the local main frame, including Electron se
   assert.equal(allowMicrophone(contents, contents, 'media', 'https://evil.example', { isMainFrame: true, mediaType: 'audio', securityOrigin: 'https://evil.example' }, origin), false);
   assert.equal(allowMicrophone({}, contents, 'media', '', { isMainFrame: true, mediaType: 'audio', securityOrigin: origin }, origin), false);
   assert.equal(allowMicrophone(contents, contents, 'media', origin, { isMainFrame: false, mediaType: 'audio', securityOrigin: origin }, origin), false);
+});
+test('Widevine is allowed only for the workspace window: the Osmo page and the Spotify player frame', () => {
+  const workspace = {};
+  const origin = localAppUrl();
+  assert.equal(allowMediaKeys(workspace, workspace, 'mediaKeySystem', origin, { requestingUrl: `${origin}/` }, origin), true);
+  assert.equal(allowMediaKeys(workspace, workspace, 'mediaKeySystem', '', { requestingUrl: `${SPOTIFY_PLAYER_ORIGIN}/embedded/index.html` }, origin), true);
+  assert.equal(allowMediaKeys(workspace, workspace, 'mediaKeySystem', 'https://evil.example', { requestingUrl: 'https://evil.example/' }, origin), false);
+  assert.equal(allowMediaKeys({}, workspace, 'mediaKeySystem', origin, { requestingUrl: `${origin}/` }, origin), false);
+  assert.equal(allowMediaKeys(workspace, undefined, 'mediaKeySystem', origin, { requestingUrl: `${origin}/` }, origin), false);
+  assert.equal(allowMediaKeys(workspace, workspace, 'media', origin, { requestingUrl: `${origin}/` }, origin), false);
 });
 test('input validates bounds and rejects unknown commands, text and key injection', () => {
   assert.deepEqual(validateAction({ action: 'click', x: 0.5, y: 0.2 }), { action: 'click', x: 0.5, y: 0.2 });

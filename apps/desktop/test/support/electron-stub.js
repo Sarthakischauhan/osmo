@@ -11,6 +11,7 @@ export const fake = {
   trays: [],
   notifications: [],
   loginItems: [],
+  componentsReady: 0,
 };
 
 class Emitter {
@@ -71,6 +72,7 @@ export const app = {
   quit() { fake.quits++; },
   setLoginItemSettings(settings) { fake.loginItems.push(settings); },
 };
+export const components = { whenReady: async () => { fake.componentsReady++; return []; } };
 export const globalShortcut = {
   register(accelerator, callback) { fake.shortcuts.set(accelerator, callback); return true; },
   unregisterAll() { fake.shortcuts.clear(); },

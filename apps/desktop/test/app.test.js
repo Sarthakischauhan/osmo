@@ -217,3 +217,7 @@ test('a tray item keeps automations visible with the window closed, and Osmo nev
   assert.ok(labels.includes('Open Osmo') && labels.includes('Quit Osmo'));
   assert.deepEqual(fake.loginItems, []);
 });
+
+test('Widevine (castLabs ECS components) is waited for once at startup', () => {
+  assert.equal(fake.componentsReady, 1);
+});
