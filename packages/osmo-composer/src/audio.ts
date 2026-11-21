@@ -1,4 +1,5 @@
 import { AUDIO_SAMPLE_RATE } from "./protocol";
+import { rms } from "./echoGuard";
 import { SampleBatcher, floatToPcm16, pcm16ToFloat } from "./pcm";
 
 const WORKLET = `
@@ -92,6 +93,12 @@ export class PcmPlayer {
   /** Output loudness right now, 0..1 (RMS of what is playing, scaled so speech lands mid-range). */
   level(): number {
     return loudness(this.analyser, this.samples);
+  }
+
+  /** The plain RMS (PCM full scale) of what is playing right now: what the echo guard weighs the microphone against. */
+  rms(): number {
+    this.analyser.getFloatTimeDomainData(this.samples);
+    return rms(this.samples);
   }
 
   get playing(): boolean {

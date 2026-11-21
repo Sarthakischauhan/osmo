@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
+import { EchoGuard } from "./echoGuard";
 import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
@@ -135,9 +136,17 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
       client.send({ type: "session.start", voice, model, effort, threadId });
-      // A preview plays on the speakers: keep it out of the mic so it is not heard as the user.
+      // A preview plays on the speakers: keep it out of the mic so it is not heard as the user. Osmo's own voice is
+      // held back by the echo guard, which also cuts Osmo off here the moment the user talks over it.
+      const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
       await mic.start((frame) => {
-        if (!previewingRef.current) client.sendAudio(frame);
+        if (previewingRef.current) return;
+        const step = guard.push(frame, player.playing, player.rms(), performance.now());
+        if (step.bargeIn) {
+          player.flush();
+          client.send({ type: "interrupt" });
+        }
+        for (const held of step.send) client.sendAudio(held);
       });
       setConnection("connected");
       setStartedAt(Date.now());

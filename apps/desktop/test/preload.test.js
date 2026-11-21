@@ -67,7 +67,7 @@ test('events and status arrive on the contract channels, and each subscription c
 test('the audio renderer gets its own object, and nothing of the session or the windows', () => {
   const { api, exposed } = load('audio-preload.cjs', 'osmoAudio');
   assert.deepEqual(Object.keys(exposed), ['osmoAudio']);
-  assert.deepEqual(Object.keys(api).sort(), ['frame', 'onFlush', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
+  assert.deepEqual(Object.keys(api).sort(), ['bargeIn', 'frame', 'onFlush', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
 });
 
 test('what the audio renderer sends goes out on the contract channels', async () => {
@@ -77,7 +77,8 @@ test('what the audio renderer sends goes out on the contract channels', async ()
   await api.started({});
   await api.started({ error: 'Permission denied' });
   await api.frame(frame);
-  assert.deepEqual(invoked, [[CHANNELS.audioReady], [CHANNELS.audioStarted, {}], [CHANNELS.audioStarted, { error: 'Permission denied' }], [CHANNELS.audioFrame, frame]]);
+  await api.bargeIn();
+  assert.deepEqual(invoked, [[CHANNELS.audioReady], [CHANNELS.audioStarted, {}], [CHANNELS.audioStarted, { error: 'Permission denied' }], [CHANNELS.audioFrame, frame], [CHANNELS.audioBargeIn]]);
 });
 
 test('what main asks of the audio renderer arrives on the contract channels, and each subscription can be dropped', () => {

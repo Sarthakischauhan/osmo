@@ -93,6 +93,7 @@ test('each window may use only its own channels', async () => {
   await assert.rejects(async () => call(orb(), CHANNELS.openThread, 't1'), /Untrusted/);
   await assert.rejects(async () => call(orb(), CHANNELS.audioFrame, new ArrayBuffer(8)), /Untrusted/);
   await assert.rejects(async () => call(workspace(), CHANNELS.audioStarted, {}), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.audioBargeIn), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.start, {}), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.send, { type: 'browser.close', id: 'b' }), /Untrusted/);
   await assert.rejects(async () => fake.handlers.get(CHANNELS.audioReady)({ sender: orb().webContents, senderFrame: {} }), /Untrusted/);
@@ -138,6 +139,10 @@ test('a call from the orb continues the workspace\'s open thread, with the mic a
   assert.deepEqual(asked(audioWindow(), CHANNELS.audioPlay), [speech]);
   socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
   assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
+  // The audio renderer's echo guard heard the user over Osmo: main interrupts the answer at once.
+  await call(audioWindow(), CHANNELS.audioBargeIn);
+  assert.deepEqual(socket.json().at(-1), { type: 'interrupt' });
+  assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 2);
 
   // Switching windows changes who is showing, not the call.
   const flushes = asked(audioWindow(), CHANNELS.audioFlush).length;

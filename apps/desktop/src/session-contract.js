@@ -24,6 +24,7 @@ export const CHANNELS = Object.freeze({
   audioReady: 'audio:ready',
   audioStarted: 'audio:started',
   audioFrame: 'audio:frame',
+  audioBargeIn: 'audio:barge-in',
   // main -> audio renderer (send)
   audioStart: 'audio:start',
   audioStop: 'audio:stop',

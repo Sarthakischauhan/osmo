@@ -7,7 +7,7 @@ test('every channel is unique, and renderer channels are separate from the ones 
   const names = Object.values(CHANNELS);
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(Object.keys(CHANNELS).sort(), [
-    'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
+    'audioBargeIn', 'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
     'box', 'end', 'event', 'interrupt', 'move', 'openThread', 'send', 'showFull', 'snapshot', 'start', 'status',
   ]);
 });
