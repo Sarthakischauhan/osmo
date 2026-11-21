@@ -650,6 +650,8 @@ class VoiceBridge:
         if self.voice is None or widget is None:
             return
         text = action_text(action, widget)
+        if text is None:
+            return
         self.barge_ins += 1
         await self.cancel_response(self.voice)
         self.record("user", text)

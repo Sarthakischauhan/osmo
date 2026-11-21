@@ -69,6 +69,8 @@ export const htmlPropsSchema = z
   .object({
     html: z.string().min(1).max(100_000),
     title: z.string().min(1).max(80).optional(),
+    /** The ids the frame may send through `osmo.action` / `data-osmo-action`; anything else is dropped. */
+    actions: z.array(widgetActionSchema).max(8).optional(),
   })
   .strict();
 
@@ -96,6 +98,7 @@ export type OptionsProps = z.infer<typeof optionsPropsSchema>;
 export type ChartProps = z.infer<typeof chartPropsSchema>;
 export type HtmlProps = z.infer<typeof htmlPropsSchema>;
 export type BrowserProps = z.infer<typeof browserPropsSchema>;
+export type WidgetAction = z.infer<typeof widgetActionSchema>;
 
 export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser"];
 
@@ -116,15 +119,18 @@ export function describeWidget(widget: Widget): string {
     }
     case "browser":
       return "agent browser";
-    case "html":
-      return widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
+    case "html": {
+      const named = widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
+      return widget.props.actions?.length ? `${named} with ${widget.props.actions.length} actions` : named;
+    }
   }
 }
 
-/** True when a widget is waiting on the user to choose: any options list, or a card with buttons. */
+/** True when a widget is waiting on the user to choose: any options list, or a card or html widget with actions. */
 export function isActionableWidget(type: string, props: unknown): boolean {
   const parsed = widgetSchema.safeParse({ type, props });
   if (!parsed.success) return false;
   if (parsed.data.type === "options") return true;
-  return parsed.data.type === "card" && (parsed.data.props.actions?.length ?? 0) > 0;
+  if (parsed.data.type === "card" || parsed.data.type === "html") return (parsed.data.props.actions?.length ?? 0) > 0;
+  return false;
 }

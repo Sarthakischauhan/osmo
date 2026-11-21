@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeWidget, widgetSchema } from "../src/schema";
+import { describeWidget, isActionableWidget, widgetSchema } from "../src/schema";
 
 describe("widgetSchema", () => {
   it("accepts a valid options widget and describes it", () => {
@@ -41,6 +41,15 @@ describe("widgetSchema", () => {
     expect(describeWidget(parsed)).toBe('interactive html widget "Tip calculator"');
     expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "" } }).success).toBe(false);
     expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "t".repeat(81) } }).success).toBe(false);
+  });
+
+  it("accepts declared html actions, describes them, and counts them as waiting on the user", () => {
+    const props = { html: "<p>x</p>", title: "Review", actions: [{ id: "ok", label: "Looks good" }] };
+    expect(describeWidget(widgetSchema.parse({ type: "html", props }))).toBe('interactive html widget "Review" with 1 actions');
+    expect(isActionableWidget("html", props)).toBe(true);
+    expect(isActionableWidget("html", { html: "<p>x</p>" })).toBe(false);
+    const nine = Array.from({ length: 9 }, (_, i) => ({ id: `a${i}`, label: "x" }));
+    expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", actions: nine } }).success).toBe(false);
   });
 
   it("accepts an agent browser with or without a frame, and nothing but a picture as the frame", () => {

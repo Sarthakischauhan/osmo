@@ -69,6 +69,8 @@ class ChartProps(_Strict):
 class HtmlProps(_Strict):
     html: str = Field(min_length=1, max_length=100_000)
     title: str | None = Field(default=None, min_length=1, max_length=80)
+    # The ids the frame may send back (osmo.action / data-osmo-action); a tap on any other id is dropped.
+    actions: list[WidgetButton] | None = Field(default=None, max_length=8)
 
 
 class BrowserProps(_Strict):
@@ -128,9 +130,8 @@ def describe_widget(widget: Widget) -> str:
         return f"{widget.props.kind} chart, {names}, {len(widget.props.series[0].points)} points"
     if isinstance(widget, BrowserWidget):
         return "agent browser"
-    if widget.props.title:
-        return f'interactive html widget "{widget.props.title}"'
-    return "interactive html widget"
+    named = f'interactive html widget "{widget.props.title}"' if widget.props.title else "interactive html widget"
+    return f"{named} with {len(widget.props.actions)} actions" if widget.props.actions else named
 
 
 RENDER_WIDGET_PARAMETERS: dict[str, Any] = {
@@ -143,12 +144,16 @@ RENDER_WIDGET_PARAMETERS: dict[str, Any] = {
                 "card: {title, body (markdown), image?, art?: sun|moon|cloud|rain|snow|storm|wind|stars, actions?: [{id,label}]}; "
                 "options: {prompt, choices: [{id,label,detail?}]}; "
                 "chart: {kind: 'line'|'bar', series: [{name, points: [{x, y}]}]}; "
-                "html: {html, title?} (a complete self-contained document shown under a header bar with "
-                "title, reload, zoom and fullscreen; it runs in a sandboxed iframe with no network. Follow Osmo Canvas: "
-                "compact instrument-panel layout, monochrome #0a0a0a/#ededed with restrained green #3ecf8e, "
-                "amber #f5a524 and red #f87171 only for semantic status, system sans-serif, 4px spacing rhythm, "
-                "2-4px radii, responsive stacked layout, accessible labelled controls and visible keyboard focus; "
-                "self-contained inline CSS/JS only, no remote resources.)"
+                "html: {html, title?, actions?: [{id,label}]} (a self-contained document in a sandboxed iframe with no network, "
+                "shown under a header bar with title, reload, zoom and fullscreen; inline CSS/JS only, no remote resources, "
+                "images only as data: URLs). The Osmo UI kit is already loaded (Geist look, dark/light follows the app): "
+                "write short semantic HTML with its classes instead of inline CSS: "
+                "card, stat (with .label and .value children), grid, row, table, badge (green|amber|red|blue), kbd, "
+                "button (primary), input, tabs (children with aria-selected), list, empty, progress (a span child with a width), muted, mono. "
+                "Use green, amber and red only for semantic status, and keep controls labelled and keyboard reachable. "
+                "To let the user answer, declare actions and mark elements with data-osmo-action=\"<id>\" "
+                "(optional data-osmo-value), or call osmo.action(id, value) from script; a form with data-osmo-action "
+                "sends its fields as JSON. Undeclared ids are ignored.)"
             ),
         },
     },
