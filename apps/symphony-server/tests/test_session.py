@@ -128,6 +128,7 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
             "run_agent", "agent_status", "cancel_agent",
             "vault_search", "vault_read", "vault_write",
             "calendar_events", "calendar_add_event", "automation_create",
+            "music_play", "music_control", "music_status",
         }
         assert all(tool["type"] == "function" for tool in session["tools"])
 

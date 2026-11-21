@@ -12,6 +12,7 @@ from symphony_server.browser_rules import DomainRules
 from symphony_server.chrome import find_chrome
 from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
 from symphony_server.local_calendar import local_zone_name
+from symphony_server.music_library import MusicRoot, parse_music_dirs
 from symphony_server.vault import Vault, parse_vaults
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
@@ -24,6 +25,7 @@ DEFAULT_WORKSPACES_DIR = "~/.config/osmo/workspaces"
 DEFAULT_AGENT_MAX_TURNS = 60
 # The vault Osmo uses when OSMO_VAULTS is unset, and where its search index lives (rebuilt from the notes).
 DEFAULT_VAULT_DIR = "~/Osmo/Notes"
+DEFAULT_MUSIC_DIR = "~/Music"
 DEFAULT_VAULT_INDEX_FILE = "~/.config/osmo/vault-index.db"
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
 DEFAULT_AGENT_MODEL = DEFAULT_MODELS["grok"]
@@ -77,6 +79,9 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 # Calendar
 - calendar_events lists the user's local calendar (show=true puts a Today agenda on screen); calendar_add_event adds an event; automation_create schedules work that runs from the tray (an agent task, a notification or a note append) at a time or at an event's start or end. The user approves each automation on screen.
 
+# Music
+- music_play plays what the user asks for in the Osmo app (Spotify when connected, otherwise their own files); say what is playing in a few words and stop. music_control pauses, resumes, skips or sets the volume; music_status says what is on. The music dips by itself while you speak, so never pause it to talk.
+
 # Tools
 - set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): choose a voice id and label from the catalog, then confirm in one short line.
 - Use write_code for code snippets, and render_widget / update_widget for structured cards, options, charts and interactive mini apps. You do not search the web, check weather, or look up prices yourself; run_agent does.
@@ -84,9 +89,9 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 
 # Tool groups the server can enable (OSMO_TOOLS); see app.osmo_tools.
-ToolCategory = Literal["search", "image", "osmo", "desktop", "browser", "code", "vault", "calendar"]
+ToolCategory = Literal["search", "image", "osmo", "desktop", "browser", "code", "vault", "calendar", "music"]
 # `code` only takes effect where the macOS sandbox is available (see app.osmo_tools).
-DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo", "code", "vault", "calendar")
+DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo", "code", "vault", "calendar", "music")
 # The OSMO_TOOLS category of each of Osmo's tools, by tool name.
 TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "computer": "desktop",
@@ -118,6 +123,9 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "vault_read": "vault",
     "vault_write": "vault",
     "calendar_events": "calendar",
+    "music_play": "music",
+    "music_control": "music",
+    "music_status": "music",
     "calendar_add_event": "calendar",
     "automation_create": "calendar",
 }
@@ -199,6 +207,11 @@ class Settings:
     vault_index_file: Path | None = None
     # The user's IANA zone for calendar tools (OSMO_TIMEZONE; default the machine's).
     timezone: str = "UTC"
+    # Folders of the user's own music (OSMO_MUSIC_DIRS), and their Spotify app (OSMO_SPOTIFY_CLIENT_ID; a public
+    # client: PKCE, no secret) with the redirect registered for it (OSMO_SPOTIFY_REDIRECT_URI; default this server's).
+    music_dirs: tuple[MusicRoot, ...] = ()
+    spotify_client_id: str | None = None
+    spotify_redirect_uri: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -232,6 +245,9 @@ class Settings:
             vaults=parse_vaults(os.getenv("OSMO_VAULTS"), Path(DEFAULT_VAULT_DIR)),
             vault_index_file=Path(os.getenv("OSMO_VAULT_INDEX_FILE") or DEFAULT_VAULT_INDEX_FILE).expanduser(),
             timezone=os.getenv("OSMO_TIMEZONE") or local_zone_name(),
+            music_dirs=parse_music_dirs(os.getenv("OSMO_MUSIC_DIRS"), Path(DEFAULT_MUSIC_DIR)),
+            spotify_client_id=os.getenv("OSMO_SPOTIFY_CLIENT_ID") or None,
+            spotify_redirect_uri=os.getenv("OSMO_SPOTIFY_REDIRECT_URI") or None,
         )
 
 

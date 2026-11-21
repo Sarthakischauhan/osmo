@@ -55,6 +55,8 @@ from symphony_server.subscriptions import (
     create_subscription_router,
     subscription_id,
 )
+from symphony_server.music import MUSIC_TOOL_NAMES, MusicNow, create_music_router, music_tools
+from symphony_server.music_library import LocalLibrary
 from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
 from symphony_server.settings import TOOL_CATEGORIES, Settings
@@ -62,6 +64,7 @@ from symphony_server.tools import StockTool, WeatherTool
 from symphony_server.upstream.durable import DurableRunBackend, SQLiteDatabase, SQLitePersistence, SQLiteRunStore
 from symphony_server.upstream.sandbox import WORKSPACE_TOOL_NAMES, Workspaces, sandbox_available, workspace_link, workspace_tools
 from symphony_server import tracing
+from symphony_server.spotify import SpotifyAccount
 from symphony_server.storage import SQLiteStorage
 from symphony_server.threads import create_thread_router
 from symphony_server.voice_bridge import VoiceBridge
@@ -94,9 +97,11 @@ log = logging.getLogger("symphony")
 
 
 # The voice model's own tools. Search, weather and prices go to the background agent.
-VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "write_code", "set_voice", *VAULT_TOOL_NAMES, *CALENDAR_TOOL_NAMES})
+VOICE_TOOLS = frozenset(
+    {"computer", "render_widget", "update_widget", "write_code", "set_voice", *VAULT_TOOL_NAMES, *CALENDAR_TOOL_NAMES, *MUSIC_TOOL_NAMES}
+)
 # The background agent searches the web, browses it, works on code in its sandbox and reads and writes the notes
-# and the calendar. The voice model owns the screen, widgets and pictures.
+# and the calendar. The voice model owns the screen, widgets, pictures and music.
 AGENT_TOOLS = frozenset({"web_search", *BROWSER_TOOL_NAMES, *WORKSPACE_TOOL_NAMES, *VAULT_TOOL_NAMES, *CALENDAR_TOOL_NAMES})
 # Finished runs and idle agent conversations are kept this long in runs.db.
 RUN_RETENTION_S = 30 * 24 * 3600.0
@@ -104,7 +109,7 @@ RUN_RETENTION_S = 30 * 24 * 3600.0
 
 def osmo_tools(
     settings: Settings, client: httpx.AsyncClient, access: ModelAccess, board: WidgetBoard, browsers: BrowserSessions, vaults: VaultIndex,
-    calendar: CalendarStore, scheduler: Scheduler, workspaces: Workspaces | None = None,
+    calendar: CalendarStore, scheduler: Scheduler, music: list[Tool], workspaces: Workspaces | None = None,
 ) -> list[Tool]:
     """The tools of every category enabled in settings (OSMO_TOOLS). Coding tools need `workspaces`
     (only made where the macOS sandbox exists)."""
@@ -122,8 +127,18 @@ def osmo_tools(
         *(workspace_tools(workspaces) if workspaces is not None else []),
         *vault_tools(vaults),
         *calendar_tools(calendar, scheduler, board, settings.timezone),
+        *music,
     ]
     return [tool for tool in tools if TOOL_CATEGORIES[tool.name] in settings.tool_categories]
+
+
+async def scan_music(library: LocalLibrary) -> None:
+    """Read the music folders once at start (in a worker thread); searches wait for it."""
+    try:
+        count = await asyncio.to_thread(library.scan)
+        log.info("music library: %d tracks", count)
+    finally:
+        library.ready.set()
 
 
 async def keep_vaults(vaults: VaultIndex) -> None:
@@ -214,7 +229,11 @@ def create_app(
     calendar = CalendarStore(settings.database_file)
     # Its `perform` needs the agent runs made below and is set there; it only runs once the app does.
     scheduler = Scheduler(calendar)
-    tools = osmo_tools(settings, http_client, access, board, browsers, vaults, calendar, scheduler, workspaces)
+    library = LocalLibrary(settings.music_dirs)
+    spotify = SpotifyAccount(settings.spotify_client_id, credentials, http_client)
+    music_now = MusicNow()
+    music = music_tools(library, spotify, music_now)
+    tools = osmo_tools(settings, http_client, access, board, browsers, vaults, calendar, scheduler, music, workspaces)
     # Agent runs (submissions, events, conversations) next to osmo.db, so they survive a restart.
     runs_db = SQLiteDatabase(settings.database_file.with_name("runs.db") if settings.database_file is not None else ":memory:")
     persistence = SQLitePersistence(runs_db)
@@ -269,8 +288,9 @@ def create_app(
         vault_watch = asyncio.create_task(keep_vaults(vaults))
         # Automations: the scheduler runs as long as the server does (the desktop keeps it up from the tray).
         schedule = asyncio.create_task(scheduler.run_forever())
+        music_scan = asyncio.create_task(scan_music(library))
         yield
-        for watch in (idle_watch, vault_watch, schedule):
+        for watch in (idle_watch, vault_watch, schedule, music_scan):
             if watch is not None:
                 watch.cancel()
                 await asyncio.gather(watch, return_exceptions=True)
@@ -308,6 +328,7 @@ def create_app(
     app.include_router(create_usage_router(storage))
     app.include_router(create_vault_router(vaults))
     app.include_router(create_calendar_router(calendar, scheduler))
+    app.include_router(create_music_router(library, spotify, settings.spotify_redirect_uri))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:
@@ -345,6 +366,7 @@ def create_app(
             default_voice=settings.voice,
             broker=broker,
             approval_tools=frozenset(settings.approval_tools),
+            music=music_now,
         )
         await bridge.run()
 

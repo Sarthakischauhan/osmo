@@ -16,6 +16,9 @@ from symphony_server.browser import BROWSER_TOOL_NAMES, BrowserSessions
 from symphony_server.canvas import OSMO_WIDGET, CreateImageTool, WidgetBoard
 from symphony_server.file_store import FileSecretStore
 from symphony_server.memory import MemoryPersistence
+from symphony_server.music import MUSIC_TOOL_NAMES, MusicNow, music_tools
+from symphony_server.music_library import LocalLibrary
+from symphony_server.spotify import SpotifyAccount
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import CredentialStore
 from symphony_server.settings import Settings, tool_categories
@@ -43,12 +46,16 @@ def tool_names(categories: str | None) -> set[str]:
     settings = Settings(tool_categories=tool_categories(categories))
     board = WidgetBoard()
     calendar = CalendarStore(None)
-    return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, board, BrowserSessions(None, board), VaultIndex(()), calendar, Scheduler(calendar))}
+    client = httpx.AsyncClient()
+    music = music_tools(LocalLibrary(()), SpotifyAccount(None, access.credentials, client), MusicNow())
+    tools = osmo_tools(settings, client, access, board, BrowserSessions(None, board), VaultIndex(()), calendar, Scheduler(calendar), music)
+    return {tool.name for tool in tools}
 
 
 def test_osmo_tools_follows_the_enabled_categories() -> None:
     osmo = {"render_widget", "update_widget", "write_code", "set_voice", "get_weather", "get_stock_history"}
-    assert tool_names(None) == osmo | {"web_search", "create_image", "vault_search", "vault_read", "vault_write", "calendar_events", "calendar_add_event", "automation_create"}
+    assert tool_names(None) == osmo | {"web_search", "create_image", "vault_search", "vault_read", "vault_write", "calendar_events", "calendar_add_event", "automation_create"} | MUSIC_TOOL_NAMES
+    assert tool_names("music") == MUSIC_TOOL_NAMES == {"music_play", "music_control", "music_status"}
     assert tool_names("calendar") == {"calendar_events", "calendar_add_event", "automation_create"}
     assert tool_names("vault") == {"vault_search", "vault_read", "vault_write"}
     assert tool_names("desktop") == {"computer"}

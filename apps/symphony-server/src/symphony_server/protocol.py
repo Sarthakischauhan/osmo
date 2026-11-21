@@ -122,6 +122,44 @@ class DesktopRequest(_Event):
     action: dict[str, Any]
 
 
+class Track(_Event):
+    """Something the app can play: a local file (`url`) or a Spotify track (`uri`)."""
+
+    id: str
+    source: Literal["local", "spotify"]
+    title: str
+    artist: str
+    album: str | None = None
+    durationMs: int | None = None
+    art: str | None = None
+    url: str | None = None
+    uri: str | None = None
+
+    def label(self) -> str:
+        return f"{self.title} by {self.artist}" if self.artist else self.title
+
+
+
+class MusicCommand(_Event):
+    """`music.command`: what the app's player should do. `play` plays `tracks[0]` and queues the rest."""
+
+    type: Literal["music.command"] = "music.command"
+    action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+    tracks: list[Track] = []
+    volume: int | None = Field(default=None, ge=0, le=100)
+
+
+class MusicState(_Event):
+    """`music.state` from the app: what its player is doing."""
+
+    type: Literal["music.state"]
+    playing: bool
+    track: Track | None = None
+    positionMs: int = Field(default=0, ge=0)
+    volume: int = Field(default=80, ge=0, le=100)
+    error: str | None = None
+
+
 ClientEvent = Annotated[
     Union[
         SessionStart,
@@ -133,6 +171,7 @@ ClientEvent = Annotated[
         BrowserKey,
         BrowserClose,
         BrowserTakeover,
+        MusicState,
         SessionConfigure,
         VoicePreviewRequest,
         DesktopConfigure,
@@ -271,4 +310,5 @@ ServerEvent = Union[
     ApprovalResolved,
     DesktopRequest,
     UsageEvent,
+    MusicCommand,
 ]

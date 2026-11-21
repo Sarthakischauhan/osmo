@@ -180,11 +180,11 @@ class TokenResponse(BaseModel):
     refresh_token: SecretStr | None = None
     expires_in: float = 3600.0
 
-    def token_set(self, previous_refresh: SecretStr | None = None) -> TokenSet:
+    def token_set(self, previous_refresh: SecretStr | None = None, issued_at: float | None = None) -> TokenSet:
         return TokenSet(
             access_token=self.access_token,
             refresh_token=self.refresh_token or previous_refresh,
-            expires_at=time.time() + self.expires_in,
+            expires_at=(time.time() if issued_at is None else issued_at) + self.expires_in,
         )
 
 

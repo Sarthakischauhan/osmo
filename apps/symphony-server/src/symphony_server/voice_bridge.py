@@ -48,6 +48,7 @@ from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
 from symphony_server.cdp import BrowserError
 from symphony_server.grok_compat import ReasoningDelta
 from symphony_server.model_access import ModelAccess
+from symphony_server.music import OSMO_MUSIC, MusicNow
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
     BrowserClick,
@@ -61,6 +62,8 @@ from symphony_server.protocol import (
     ApprovalRequest,
     ApprovalResolved,
     ModelsEvent,
+    MusicCommand,
+    MusicState,
     OsmoState,
     ServerEvent,
     SessionConfigure,
@@ -141,6 +144,8 @@ class VoiceToolSink(EventSink):
                 self.bridge.store_held()
         elif event_type == OSMO_VOICE:
             await self.bridge.configure(SetVoiceArgs.model_validate(payload), "tool")
+        elif event_type == OSMO_MUSIC:
+            await self.bridge.emit(MusicCommand.model_validate(payload))
 
 
 @dataclass
@@ -176,8 +181,11 @@ class VoiceBridge:
         default_voice: str,
         broker: ApprovalBroker,
         approval_tools: frozenset[str],
+        music: MusicNow,
     ) -> None:
         self.browser, self.instructions = browser, instructions
+        # What the app's music player last said it plays (for music_status).
+        self.music = music
         self.desktop = DesktopSession(self.emit)
         self.agents, self.storage, self.access, self.board = agents, storage, access, board
         self.previews = SessionPreviews(access, previews)
@@ -277,6 +285,8 @@ class VoiceBridge:
             self.spawn(self.drive_browser(event))
         elif isinstance(event, BrowserClose):
             await self.close_browser(event)
+        elif isinstance(event, MusicState):
+            self.music.state = event
         elif isinstance(event, BrowserTakeover):
             if self.thread is not None and self.browser_widget(event.id) is not None:
                 await self.agents.browsers.take_over(self.thread.id, event.user)

@@ -23,6 +23,8 @@ dependencies = [
     "python-dateutil>=2.9",
     "icalendar>=6.1",
     "tzdata>=2024.1",
+    # Tags and cover art of the user's music files.
+    "mutagen>=1.47",
 ]
 
 [project.scripts]
@@ -54,7 +56,7 @@ untyped_calls_exclude = ["core_ai.registry"]
 
 # infisicalsdk ships no type information (no py.typed); the store types the slice it uses as Protocols.
 [[tool.mypy.overrides]]
-module = ["infisical_sdk", "infisical_sdk.*"]
+module = ["infisical_sdk", "infisical_sdk.*", "mutagen", "mutagen.*"]
 ignore_missing_imports = true
 
 
