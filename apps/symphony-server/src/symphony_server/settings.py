@@ -8,6 +8,8 @@ from typing import Literal, get_args
 from core_ai.providers.defaults import DEFAULT_MODELS
 from pydantic import SecretStr
 
+from symphony_server.browser_rules import DomainRules
+from symphony_server.chrome import find_chrome
 from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
 from symphony_server.local_calendar import local_zone_name
 from symphony_server.vault import Vault, parse_vaults
@@ -31,7 +33,10 @@ DEFAULT_AGENT_MODEL = DEFAULT_MODELS["grok"]
 # GitHub under the user's name, so it waits; sandboxed shell commands and file edits do not. vault_write changes the
 # user's notes, so it waits too, for the agent and for the voice model alike (voice_bridge gates the voice tools on
 # this list). automation_create schedules unattended agent work, so it waits as well; adding a calendar event does not.
-DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type", "open_pull_request", "vault_write", "automation_create")
+# browser_press waits like a click (Enter submits); back, forward, select and wait do not.
+DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type", "browser_press", "open_pull_request", "vault_write", "automation_create")
+# Osmo's own persistent browser profile, when OSMO_BROWSER_PROFILE=1 (a path there picks another folder).
+DEFAULT_BROWSER_PROFILE = "~/.config/osmo/browser-profile"
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -104,6 +109,11 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "write_file": "code",
     "edit_file": "code",
     "open_pull_request": "code",
+    "browser_back": "browser",
+    "browser_forward": "browser",
+    "browser_press": "browser",
+    "browser_select": "browser",
+    "browser_wait": "browser",
     "vault_search": "vault",
     "vault_read": "vault",
     "vault_write": "vault",
@@ -160,8 +170,14 @@ class Settings:
     tool_categories: tuple[ToolCategory, ...] = DEFAULT_TOOL_CATEGORIES
     # core_ai model id that create_image draws with.
     desktop_vision_model: str | None = None
-    # A Chrome or Chromium executable the agent browser launches (OSMO_BROWSER_PATH); the browser tools fail without it.
+    # A Chrome or Chromium executable the agent browser launches (OSMO_BROWSER_PATH, else the first one `find_chrome`
+    # finds); the browser tools fail without it.
     browser_path: str | None = None
+    # Osmo's persistent profile (OSMO_BROWSER_PROFILE; None is a throwaway profile per browser), a visible window
+    # (OSMO_BROWSER_VISIBLE=1) and the per-site rules (OSMO_BROWSER_RULES).
+    browser_profile: Path | None = None
+    browser_visible: bool = False
+    browser_rules: DomainRules = field(default_factory=DomainRules)
     image_model: str = DEFAULT_IMAGE_MODEL
     # Optional Exa key for web_search; without one Exa answers at a low shared rate limit.
     exa_api_key: str | None = None
@@ -199,7 +215,10 @@ class Settings:
             infisical=infisical_from_env() if infisical_selected() else None,
             tool_categories=tool_categories(os.getenv("OSMO_TOOLS")),
             desktop_vision_model=os.getenv("OSMO_DESKTOP_VISION_MODEL") or None,
-            browser_path=os.getenv("OSMO_BROWSER_PATH") or None,
+            browser_path=os.getenv("OSMO_BROWSER_PATH") or find_chrome(),
+            browser_profile=browser_profile(os.getenv("OSMO_BROWSER_PROFILE")),
+            browser_visible=os.getenv("OSMO_BROWSER_VISIBLE", "0") == "1",
+            browser_rules=DomainRules.parse(os.getenv("OSMO_BROWSER_RULES")),
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
             database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
@@ -214,6 +233,13 @@ class Settings:
             vault_index_file=Path(os.getenv("OSMO_VAULT_INDEX_FILE") or DEFAULT_VAULT_INDEX_FILE).expanduser(),
             timezone=os.getenv("OSMO_TIMEZONE") or local_zone_name(),
         )
+
+
+def browser_profile(value: str | None) -> Path | None:
+    """OSMO_BROWSER_PROFILE: unset, empty or 0 is off; 1 is Osmo's own profile folder; anything else is a folder to use."""
+    if not value or value == "0":
+        return None
+    return Path(DEFAULT_BROWSER_PROFILE if value == "1" else value).expanduser()
 
 
 def approval_tools(value: str | None) -> tuple[str, ...]:

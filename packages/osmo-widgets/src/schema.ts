@@ -74,12 +74,17 @@ export const htmlPropsSchema = z
   })
   .strict();
 
-/** The agent browser: the newest screencast frame (a data: URL, as card images) and the page it shows. */
+/**
+ * The agent browser: the newest screencast frame (a data: URL, as card images) and the page it shows, the user's
+ * site rule for that page (OSMO_BROWSER_RULES) and who drives it (`user` after Take over).
+ */
 export const browserPropsSchema = z
   .object({
     status: z.enum(["live", "ended"]),
     url: z.string().optional(),
     frame: z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).optional(),
+    rule: z.enum(["allow", "ask", "deny"]).optional(),
+    control: z.enum(["agent", "user"]).optional(),
   })
   .strict();
 

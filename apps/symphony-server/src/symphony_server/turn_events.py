@@ -64,6 +64,16 @@ def activity_label(name: str, args: Mapping[str, Any]) -> str:
         return f"Typing · {args.get('target', '')}"
     if name == "browser_scroll":
         return f"Scrolling {args.get('direction', '')}"
+    if name == "browser_back":
+        return "Going back"
+    if name == "browser_forward":
+        return "Going forward"
+    if name == "browser_press":
+        return f"Pressing {args.get('key', '')} · {args.get('target', '')}"
+    if name == "browser_select":
+        return f"Choosing {args.get('option', '')}"
+    if name == "browser_wait":
+        return f"Waiting for “{args.get('text', '')}”"
     if name == "vault_search":
         return f"Searching your notes · {args.get('query', '')}"
     if name == "vault_read":

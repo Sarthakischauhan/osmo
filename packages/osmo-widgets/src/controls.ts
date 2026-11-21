@@ -9,10 +9,11 @@ export type BrowserInput =
   | { type: "browser.scroll"; x: number; y: number; deltaX: number; deltaY: number }
   | { type: "browser.key"; key: string; code: string; keyCode: number };
 
-/** How the app passes the user's input on an agent browser (by widget id) to the server, and closes it. */
+/** How the app passes the user's input on an agent browser (by widget id) to the server, closes it, and takes it over or hands it back. */
 export interface BrowserControls {
   input: (widgetId: string, input: BrowserInput) => void;
   close: (widgetId: string) => void;
+  takeOver: (widgetId: string, user: boolean) => void;
 }
 
 export const BrowserControlsContext = createContext<BrowserControls | undefined>(undefined);

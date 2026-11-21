@@ -121,6 +121,10 @@ button { font: inherit; color: inherit; }
 .osmo-frame-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .osmo-frame-tools { display: flex; align-items: center; gap: 2px; }
 .osmo-frame-readout { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
+.osmo-browser-takeover { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-button); background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; transition: background .2s ease; }
+.osmo-browser-takeover:hover { background: var(--surface-3); }
+.osmo-browser-takeover[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.osmo-frame-readout[data-rule="deny"] { color: #e5484d; }
 .osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-button); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
 .osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
 .osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }

@@ -38,10 +38,23 @@ function pointOn(image: HTMLImageElement | null, clientX: number, clientY: numbe
  *
  * Fullscreen of a live browser is also the user's hands on it: clicks, scrolls and keys on the page go to
  * `onInput` (the app sends them to the server, which plays them into the page; no approval, they are the user's own).
+ * Take over (`onTakeOver(true)`) also stops the agent's browser tools until Hand back, and opens fullscreen to drive;
+ * use it to log in or pay. The readout names an allowed or blocked site (`rule`), and "You" while the user drives.
  */
-export function BrowserWidget({ status, url, frame, onInput, onClose }: BrowserProps & { onInput?: (input: BrowserInput) => void; onClose?: () => void }) {
+export function BrowserWidget({
+  status,
+  url,
+  frame,
+  rule,
+  control,
+  onInput,
+  onClose,
+  onTakeOver,
+}: BrowserProps & { onInput?: (input: BrowserInput) => void; onClose?: () => void; onTakeOver?: (user: boolean) => void }) {
   const [fullscreen, setFullscreen] = useFullscreen();
   const title = url ? `Agent browser · ${url}` : "Agent browser";
+  const userDrives = control === "user";
+  const readout = status !== "live" ? "Ended" : userDrives ? "You" : rule === "allow" ? "Trusted" : rule === "deny" ? "Blocked" : "Live";
   const driving = fullscreen && status === "live" && onInput !== undefined;
   const page = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
@@ -75,9 +88,23 @@ export function BrowserWidget({ status, url, frame, onInput, onClose }: BrowserP
     <header className="osmo-frame-bar">
       <span className="osmo-frame-title">{title}</span>
       <div className="osmo-frame-tools" role="toolbar" aria-label={`${title} controls`}>
-        <span className="osmo-frame-readout" role="status">
-          {status === "live" ? "Live" : "Ended"}
+        <span className="osmo-frame-readout" role="status" data-rule={rule}>
+          {readout}
         </span>
+        {status === "live" && onTakeOver && (
+          <button
+            type="button"
+            className="osmo-browser-takeover"
+            aria-pressed={userDrives}
+            title={userDrives ? "Let the agent use the browser again" : "Stop the agent and use the browser yourself (log in, pay)"}
+            onClick={() => {
+              onTakeOver(!userDrives);
+              if (!userDrives) setFullscreen(true);
+            }}
+          >
+            {userDrives ? "Hand back" : "Take over"}
+          </button>
+        )}
         {status === "live" && onClose && (
           <button type="button" className="osmo-icon-button" aria-label="Close browser" title="Close browser" onClick={onClose}>
             <PowerIcon />

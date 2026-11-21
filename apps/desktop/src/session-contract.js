@@ -103,6 +103,10 @@ export function validateClientEvent(value) {
       onlyKeys(value, ['type', 'id'], 'browser close');
       if (!isText(value.id)) throw new Error('Invalid browser close');
       break;
+    case 'browser.takeover':
+      onlyKeys(value, ['type', 'id', 'user'], 'browser takeover');
+      if (!isText(value.id) || typeof value.user !== 'boolean') throw new Error('Invalid browser takeover');
+      break;
     default:
       throw new Error('Unsupported session event');
   }

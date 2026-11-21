@@ -37,6 +37,7 @@ describe("border radii", () => {
     ".osmo-notes-row",
     ".osmo-notes-link",
     ".osmo-week-nav",
+    ".osmo-browser-takeover",
   ];
 
   it.each(buttons)("%s is 8px", (selector) => {

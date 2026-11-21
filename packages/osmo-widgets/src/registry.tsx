@@ -80,7 +80,7 @@ function Browser({ widget, ...raw }: WidgetComponentProps) {
   if (!parsed.success) return null;
   const id = widget.widgetId;
   if (controls === undefined || id === undefined || widget.disabled) return <BrowserWidget {...parsed.data} />;
-  return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} />;
+  return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} onTakeOver={(user) => controls.takeOver(id, user)} />;
 }
 
 function Agenda({ widget: _widget, ...raw }: WidgetComponentProps) {

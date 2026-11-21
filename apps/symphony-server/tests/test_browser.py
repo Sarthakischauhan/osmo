@@ -29,6 +29,7 @@ from test_session import call, next_event, say, tool_output
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
+from symphony_server.browser_rules import DomainRules
 from symphony_server.browser import RUN_BROWSER, BrowserSessions, browser_tools
 from symphony_server.canvas import WidgetBoard
 from symphony_server.cdp import BrowserError
@@ -43,6 +44,8 @@ VIEWPORT = {"deviceWidth": 800, "deviceHeight": 600}
 PAGE = "http://shop.test/"
 STUB = """#!/bin/sh
 echo $$ > "$FAKE_CHROME_PID"
+# The arguments it was started with (the profile, headless or not).
+echo "$*" > "$FAKE_CHROME_ARGS"
 # A helper process, as chrome has (renderers, GPU): it must not outlive the browser.
 sleep 60 >/dev/null 2>&1 &
 echo $! > "$FAKE_CHROME_CHILD"
@@ -110,6 +113,8 @@ class FakeChrome:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         # Methods the endpoint takes but never answers, to catch a run mid-call.
         self.stall: set[str] = set()
+        # Answers a test sets for some methods: a result, or a function of the params that makes one.
+        self.answers: dict[str, dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]]] = {}
         self.connections: set[ServerConnection] = set()
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
@@ -132,6 +137,8 @@ class FakeChrome:
         monkeypatch.setenv("FAKE_CHROME_PROFILE", str(self.profile_file))
         monkeypatch.setenv("FAKE_CHROME_CHILD", str(self.child_file))
         monkeypatch.setenv("FAKE_CHROME_MODE", "ok")
+        self.args_file = tmp_path / "chrome.args"
+        monkeypatch.setenv("FAKE_CHROME_ARGS", str(self.args_file))
         self.server = server
 
     def methods(self) -> list[str]:
@@ -173,7 +180,8 @@ class FakeChrome:
                 self.calls.append((method, params))
                 if method in self.stall:
                     continue
-                result, after = self.answer(method, params)
+                found = self.answers.get(method)
+                result, after = ((found(params) if callable(found) else found), []) if found is not None else self.answer(method, params)
                 await connection.send(json.dumps({"id": message["id"], "result": result}))
                 for event in after:
                     await connection.send(json.dumps(event))
@@ -206,6 +214,8 @@ class FakeChrome:
             ]
         if method == "Runtime.evaluate" and "location.href" in params["expression"]:
             return {"result": {"type": "object", "value": {"url": PAGE, "title": "Shop", "text": "Boots\n$80"}}}, []
+        if method == "Page.navigateToHistoryEntry":
+            return {}, [event("Page.loadEventFired", {"timestamp": 2})]
         if method == "Accessibility.getFullAXTree":
             return {"nodes": AX_NODES}, []
         if method == "DOM.getBoxModel":
@@ -298,7 +308,7 @@ async def test_tools_drive_the_page_and_the_widget_streams_every_frame(chrome: F
     updates = [(event.id, event.patch) for _, event in shown.events if isinstance(event, WidgetUpdate)]
     assert {widget_id for widget_id, _ in updates} == {render.widget.id}
     assert [patch["frame"] for _, patch in updates if "frame" in patch] == [f"data:image/jpeg;base64,{frame}" for frame in FRAMES]
-    assert {"url": PAGE} in [patch for _, patch in updates]
+    assert {"url": PAGE, "rule": "ask"} in [patch for _, patch in updates]
     # Chrome sent frames at its own pace: the next one only after the previous was shown and acked.
     assert [params["sessionId"] for params in chrome.params("Page.screencastFrameAck")] == [1, 2, 3]
     assert chrome.params("Page.startScreencast") == [{}]
@@ -569,12 +579,19 @@ def open_step(url: str = PAGE) -> Step:
     return Step(tool="browser_open", arguments=json.dumps({"url": url}))
 
 
-def browser_client(grok: FakeGrok, agent: BaseProvider, chrome: FakeChrome, approval_tools: tuple[str, ...] = DEFAULT_APPROVAL_TOOLS) -> TestClient:
+def browser_client(
+    grok: FakeGrok,
+    agent: BaseProvider,
+    chrome: FakeChrome,
+    approval_tools: tuple[str, ...] = DEFAULT_APPROVAL_TOOLS,
+    rules: DomainRules = DomainRules(),
+) -> TestClient:
     registry = ModelRegistry()
     settings = Settings(
         xai_base_url=grok.base_url,
         approval_tools=approval_tools,
         browser_path=str(chrome.executable),
+        browser_rules=rules,
         tool_categories=("search", "image", "osmo", "browser"),
     )
     client = make_client(settings, secret_store=xai_key_store(), registry=registry)

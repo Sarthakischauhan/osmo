@@ -12,7 +12,7 @@ from core_ai.types import Message
 from core_harness import EventSink
 
 from symphony_server.app import osmo_tools
-from symphony_server.browser import BrowserSessions
+from symphony_server.browser import BROWSER_TOOL_NAMES, BrowserSessions
 from symphony_server.canvas import OSMO_WIDGET, CreateImageTool, WidgetBoard
 from symphony_server.file_store import FileSecretStore
 from symphony_server.memory import MemoryPersistence
@@ -52,7 +52,8 @@ def test_osmo_tools_follows_the_enabled_categories() -> None:
     assert tool_names("calendar") == {"calendar_events", "calendar_add_event", "automation_create"}
     assert tool_names("vault") == {"vault_search", "vault_read", "vault_write"}
     assert tool_names("desktop") == {"computer"}
-    assert tool_names("browser") == {"browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll"}
+    assert tool_names("browser") == BROWSER_TOOL_NAMES
+    assert {"browser_back", "browser_forward", "browser_press", "browser_select", "browser_wait", "browser_click"} <= BROWSER_TOOL_NAMES
     assert tool_names("osmo") == osmo
     assert tool_names("search, image") == {"web_search", "create_image"}
 

@@ -89,6 +89,14 @@ class BrowserKey(_Event):
     keyCode: int = Field(ge=0)
 
 
+class BrowserTakeover(_Event):
+    """The user takes the thread's browser over (`user`) from the agent, or hands it back."""
+
+    type: Literal["browser.takeover"]
+    id: str = Field(min_length=1)
+    user: bool
+
+
 class BrowserClose(_Event):
     """The user closed the thread's browser."""
 
@@ -124,6 +132,7 @@ ClientEvent = Annotated[
         BrowserScroll,
         BrowserKey,
         BrowserClose,
+        BrowserTakeover,
         SessionConfigure,
         VoicePreviewRequest,
         DesktopConfigure,

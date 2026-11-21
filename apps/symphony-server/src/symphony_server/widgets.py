@@ -74,11 +74,14 @@ class HtmlProps(_Strict):
 
 
 class BrowserProps(_Strict):
-    """The agent browser: `frame` is the latest screencast frame, `url` the page it shows."""
+    """The agent browser: `frame` is the latest screencast frame, `url` the page it shows, `rule` the user's
+    site rule for that page (allow, ask or deny) and `control` who drives it (the user after Take over)."""
 
     status: Literal["live", "ended"]
     url: str | None = None
     frame: DataImageUrl | None = None
+    rule: Literal["allow", "ask", "deny"] | None = None
+    control: Literal["agent", "user"] | None = None
 
 
 class AgendaItem(_Strict):

@@ -296,8 +296,11 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     if (previousConnection.current !== "disconnected" && session.connection === "disconnected") void window.osmoDesktop?.setEnabled(false);
     previousConnection.current = session.connection;
   }, [session.connection]);
-  const { sendWidgetAction, sendBrowserInput, closeBrowser } = session;
-  const browserControls = useMemo(() => ({ input: sendBrowserInput, close: closeBrowser }), [sendBrowserInput, closeBrowser]);
+  const { sendWidgetAction, sendBrowserInput, closeBrowser, takeOverBrowser } = session;
+  const browserControls = useMemo(
+    () => ({ input: sendBrowserInput, close: closeBrowser, takeOver: takeOverBrowser }),
+    [sendBrowserInput, closeBrowser, takeOverBrowser],
+  );
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
     async (response: WidgetResponse) => {

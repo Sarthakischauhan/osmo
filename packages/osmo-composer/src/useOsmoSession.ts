@@ -31,6 +31,8 @@ export interface OsmoSession {
   sendBrowserInput: (id: string, input: BrowserInput) => void;
   /** Close the agent browser widget `id`'s browser. */
   closeBrowser: (id: string) => void;
+  /** Take the agent browser widget `id`'s browser over from the agent (`user`), or hand it back. */
+  takeOverBrowser: (id: string, user: boolean) => void;
   /** Symphony's voice model registry (`models` event); empty until connected. */
   voiceModels: VoiceModel[];
   /** The session's model/voice/effort as Symphony last confirmed it (picker commit or `set_voice`). */
@@ -174,6 +176,10 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     runtime.current?.client.send({ type: "browser.close", id });
   }, []);
 
+  const takeOverBrowser = useCallback((id: string, user: boolean) => {
+    runtime.current?.client.send({ type: "browser.takeover", id, user });
+  }, []);
+
   const configure = useCallback((next: VoiceSelection) => {
     runtime.current?.client.send({ type: "session.configure", ...next });
   }, []);
@@ -219,6 +225,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     sendWidgetAction,
     sendBrowserInput,
     closeBrowser,
+    takeOverBrowser,
     voiceModels,
     selection,
     configure,

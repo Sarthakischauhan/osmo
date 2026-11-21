@@ -52,6 +52,7 @@ from symphony_server.providers import provider_label
 from symphony_server.protocol import (
     BrowserClick,
     BrowserClose,
+    BrowserTakeover,
     BrowserKey,
     BrowserScroll,
     DesktopConfigure,
@@ -276,6 +277,9 @@ class VoiceBridge:
             self.spawn(self.drive_browser(event))
         elif isinstance(event, BrowserClose):
             await self.close_browser(event)
+        elif isinstance(event, BrowserTakeover):
+            if self.thread is not None and self.browser_widget(event.id) is not None:
+                await self.agents.browsers.take_over(self.thread.id, event.user)
         elif isinstance(event, Interrupt):
             await self.interrupt()
         elif isinstance(event, WidgetAction):

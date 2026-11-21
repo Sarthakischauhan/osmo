@@ -102,6 +102,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   browserScrollSchema.extend({ id: widgetIdSchema }),
   browserKeySchema.extend({ id: widgetIdSchema }),
   z.object({ type: z.literal("browser.close"), id: widgetIdSchema }),
+  z.object({ type: z.literal("browser.takeover"), id: widgetIdSchema, user: z.boolean() }),
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
