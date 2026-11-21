@@ -66,6 +66,16 @@ from symphony_server.storage import SQLiteStorage
 from symphony_server.threads import create_thread_router
 from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.web_search import WebSearchTool
+from symphony_server.local_calendar import (
+    CALENDAR_TOOL_NAMES,
+    Automation,
+    CalendarStore,
+    RunStatus,
+    zone,
+    Scheduler,
+    calendar_tools,
+    create_calendar_router,
+)
 from symphony_server.vault import VAULT_TOOL_NAMES, VaultIndex, create_vault_router, vault_tools
 from symphony_server.voices import (
     PREVIEW_CLIENTS_MAX,
@@ -84,17 +94,17 @@ log = logging.getLogger("symphony")
 
 
 # The voice model's own tools. Search, weather and prices go to the background agent.
-VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "write_code", "set_voice", *VAULT_TOOL_NAMES})
-# The background agent searches the web, browses it, works on code in its sandbox and reads and writes the notes.
-# The voice model owns the screen, widgets and pictures.
-AGENT_TOOLS = frozenset({"web_search", *BROWSER_TOOL_NAMES, *WORKSPACE_TOOL_NAMES, *VAULT_TOOL_NAMES})
+VOICE_TOOLS = frozenset({"computer", "render_widget", "update_widget", "write_code", "set_voice", *VAULT_TOOL_NAMES, *CALENDAR_TOOL_NAMES})
+# The background agent searches the web, browses it, works on code in its sandbox and reads and writes the notes
+# and the calendar. The voice model owns the screen, widgets and pictures.
+AGENT_TOOLS = frozenset({"web_search", *BROWSER_TOOL_NAMES, *WORKSPACE_TOOL_NAMES, *VAULT_TOOL_NAMES, *CALENDAR_TOOL_NAMES})
 # Finished runs and idle agent conversations are kept this long in runs.db.
 RUN_RETENTION_S = 30 * 24 * 3600.0
 
 
 def osmo_tools(
     settings: Settings, client: httpx.AsyncClient, access: ModelAccess, board: WidgetBoard, browsers: BrowserSessions, vaults: VaultIndex,
-    workspaces: Workspaces | None = None,
+    calendar: CalendarStore, scheduler: Scheduler, workspaces: Workspaces | None = None,
 ) -> list[Tool]:
     """The tools of every category enabled in settings (OSMO_TOOLS). Coding tools need `workspaces`
     (only made where the macOS sandbox exists)."""
@@ -111,6 +121,7 @@ def osmo_tools(
         *browser_tools(browsers),
         *(workspace_tools(workspaces) if workspaces is not None else []),
         *vault_tools(vaults),
+        *calendar_tools(calendar, scheduler, board, settings.timezone),
     ]
     return [tool for tool in tools if TOOL_CATEGORIES[tool.name] in settings.tool_categories]
 
@@ -197,7 +208,10 @@ def create_app(
         else:
             log.info("coding tools are off: the macOS sandbox (sandbox-exec) is not available here")
     vaults = VaultIndex(settings.vaults, settings.vault_index_file)
-    tools = osmo_tools(settings, http_client, access, board, browsers, vaults, workspaces)
+    calendar = CalendarStore(settings.database_file)
+    # Its `perform` needs the agent runs made below and is set there; it only runs once the app does.
+    scheduler = Scheduler(calendar)
+    tools = osmo_tools(settings, http_client, access, board, browsers, vaults, calendar, scheduler, workspaces)
     # Agent runs (submissions, events, conversations) next to osmo.db, so they survive a restart.
     runs_db = SQLiteDatabase(settings.database_file.with_name("runs.db") if settings.database_file is not None else ":memory:")
     persistence = SQLitePersistence(runs_db)
@@ -207,6 +221,23 @@ def create_app(
     run_store = SQLiteRunStore(runs_db)
     backend = DurableRunBackend(RunExecutor(core_config), run_store)
     agents = AgentRuns(backend, storage, broker, access, settings.agent_model, browsers, desktops=desktops, auto_model=settings.agent_model_auto)
+
+    async def perform(automation: Automation) -> tuple[RunStatus, str, str | None, str | None]:
+        """What a due automation does: an agent run on a new thread, a note append, or a notification (the tray shows it)."""
+        if automation.action == "agent_task":
+            thread = storage.create_thread(automation.title)
+            started = await agents.start(thread.id, automation.prompt)
+            if isinstance(started, str):
+                return "error", started, None, thread.id
+            return "started", f"agent run {started.runId}", started.runId, thread.id
+        if automation.action == "note_append":
+            assert automation.notePath is not None
+            stamp = scheduler.clock().astimezone(zone(settings.timezone)).strftime("%Y-%m-%d %H:%M")
+            note = await asyncio.to_thread(vaults.write, automation.notePath, f"\n## {stamp}\n\n{automation.prompt}\n", "append")
+            return "ok", f"appended to {note.path}", None, None
+        return "ok", automation.prompt, None, None
+
+    scheduler.perform = perform
 
     def subscription_connected(provider: str) -> None:
         storage.save_connection(subscription_id(provider), "oauth")
@@ -233,8 +264,10 @@ def create_app(
         await agents.recover()
         # The vaults: make the folders, bring the index up to date in a worker thread, then follow file changes.
         vault_watch = asyncio.create_task(keep_vaults(vaults))
+        # Automations: the scheduler runs as long as the server does (the desktop keeps it up from the tray).
+        schedule = asyncio.create_task(scheduler.run_forever())
         yield
-        for watch in (idle_watch, vault_watch):
+        for watch in (idle_watch, vault_watch, schedule):
             if watch is not None:
                 watch.cancel()
                 await asyncio.gather(watch, return_exceptions=True)
@@ -244,6 +277,7 @@ def create_app(
         storage.close()
         runs_db.close()
         vaults.close()
+        calendar.close()
         await http_client.aclose()
         oauth_client.close()
         tracing.flush()
@@ -270,6 +304,7 @@ def create_app(
     app.include_router(create_agent_model_router(agents))
     app.include_router(create_usage_router(storage))
     app.include_router(create_vault_router(vaults))
+    app.include_router(create_calendar_router(calendar, scheduler))
 
     @app.get("/voice-models")
     async def voice_models() -> ModelsEvent:

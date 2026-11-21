@@ -19,6 +19,7 @@ from symphony_server.memory import MemoryPersistence
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import CredentialStore
 from symphony_server.settings import Settings, tool_categories
+from symphony_server.local_calendar import CalendarStore, Scheduler
 from symphony_server.vault import VaultIndex
 from symphony_server.web_search import EXA_MCP_URL, WebSearchTool
 
@@ -41,12 +42,14 @@ def tool_names(categories: str | None) -> set[str]:
     access = ModelAccess(ModelRegistry(), CredentialStore(FileSecretStore(None)), "http://unused/v1")
     settings = Settings(tool_categories=tool_categories(categories))
     board = WidgetBoard()
-    return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, board, BrowserSessions(None, board), VaultIndex(()))}
+    calendar = CalendarStore(None)
+    return {tool.name for tool in osmo_tools(settings, httpx.AsyncClient(), access, board, BrowserSessions(None, board), VaultIndex(()), calendar, Scheduler(calendar))}
 
 
 def test_osmo_tools_follows_the_enabled_categories() -> None:
     osmo = {"render_widget", "update_widget", "write_code", "set_voice", "get_weather", "get_stock_history"}
-    assert tool_names(None) == osmo | {"web_search", "create_image", "vault_search", "vault_read", "vault_write"}
+    assert tool_names(None) == osmo | {"web_search", "create_image", "vault_search", "vault_read", "vault_write", "calendar_events", "calendar_add_event", "automation_create"}
+    assert tool_names("calendar") == {"calendar_events", "calendar_add_event", "automation_create"}
     assert tool_names("vault") == {"vault_search", "vault_read", "vault_write"}
     assert tool_names("desktop") == {"computer"}
     assert tool_names("browser") == {"browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll"}

@@ -578,3 +578,76 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-notes-editor { flex: 1; min-height: 0; overflow: hidden; }
 .osmo-notes-backlinks { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
 .osmo-notes-link { height: 24px; padding: 0 8px; border: 0; border-radius: var(--radius-button); background: var(--surface-2); color: var(--foreground); font-size: 12px; cursor: pointer; }
+
+/* The agenda widget (calendar_events show=true), after GUI's calendar-widget mockup. */
+.osmo-agenda { width: 100%; max-width: 440px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.osmo-agenda h2 { margin: 0 0 2px; font-size: 14px; line-height: 20px; font-weight: 600; }
+.osmo-agenda-sub { margin: 0 0 12px; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-agenda ul { margin: 0; padding: 0; list-style: none; }
+.osmo-agenda li { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; height: 36px; font-size: 13px; }
+.osmo-agenda li + li { border-top: 1px solid var(--border); }
+.osmo-agenda-time { font: 12px/16px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.osmo-agenda-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osmo-agenda li[data-state="past"] .osmo-agenda-title { color: var(--muted-foreground); }
+.osmo-agenda li[data-state="now"] .osmo-agenda-title { font-weight: 500; }
+.osmo-agenda-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-agenda-tag i { width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+.osmo-agenda-empty { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+.osmo-agenda-next { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.osmo-agenda-label { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+.osmo-agenda-detail { font: 12px var(--font-mono); color: var(--muted-foreground); }
+
+/* Calendar (GUI's calendar-week mockup): 8 AM–10 PM at 36px an hour, the detail card on the right. */
+.osmo-calendar { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.osmo-week-tools { gap: 8px; }
+.osmo-week-range { min-width: 148px; text-align: center; font-size: 13px; font-weight: 500; }
+.osmo-week-nav { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-button); background: none; color: var(--foreground); cursor: pointer; }
+.osmo-week-nav:hover { background: var(--surface-1); }
+.osmo-calendar-pane { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 0 24px 8px; overflow-y: auto; }
+.osmo-week { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.osmo-week-head { display: grid; grid-template-columns: 48px repeat(7, 1fr); padding-bottom: 8px; }
+.osmo-dow { text-align: center; }
+.osmo-dow-name { display: block; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--muted-foreground); }
+.osmo-dow-num { display: block; margin-top: 2px; font: 500 14px/20px var(--font-mono); font-variant-numeric: tabular-nums; }
+.osmo-dow[data-today="true"] .osmo-dow-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 2px auto 0; border-radius: 50%; background: var(--foreground); color: var(--background); }
+.osmo-week-body { position: relative; flex: none; display: grid; grid-template-columns: 48px repeat(7, 1fr); border-top: 1px solid var(--border); }
+.osmo-week-hours { position: relative; }
+.osmo-week-hours span { position: absolute; right: 8px; transform: translateY(-50%); font: 11px/16px var(--font-mono); color: var(--muted-foreground); }
+.osmo-week-lines { position: absolute; inset: 0 0 0 48px; pointer-events: none; }
+.osmo-week-lines i { position: absolute; left: 0; right: 0; border-top: 1px solid var(--surface-2); }
+.osmo-week-col { position: relative; border-left: 1px solid var(--surface-2); }
+.osmo-week-col[data-today="true"] { background: var(--surface-1); }
+.osmo-event { position: absolute; left: 4px; right: 4px; padding: 4px 6px 4px 8px; overflow: hidden; border: 0; border-radius: 6px; background: var(--surface-2); color: var(--foreground); text-align: left; font-size: 12px; line-height: 16px; font-weight: 500; cursor: pointer; }
+.osmo-event[data-past="true"] { background: var(--surface-1); color: var(--muted-foreground); font-weight: 400; }
+.osmo-event[data-selected="true"] { background: var(--foreground); color: var(--background); }
+.osmo-event-when { display: block; font: 11px/14px var(--font-mono); color: var(--muted-foreground); font-weight: 400; }
+.osmo-event[data-selected="true"] .osmo-event-when { color: color-mix(in srgb, var(--background) 70%, transparent); }
+.osmo-event-mark { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+.osmo-event[data-selected="true"] .osmo-event-mark { background: var(--background); }
+.osmo-auto-tick { position: absolute; left: 4px; right: 4px; height: 14px; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted-foreground); font-size: 11px; line-height: 14px; cursor: pointer; z-index: 1; }
+.osmo-auto-tick i { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--foreground); opacity: .7; }
+.osmo-week-now { position: absolute; left: 0; right: 0; border-top: 1px solid var(--foreground); z-index: 3; }
+.osmo-week-now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--foreground); }
+.osmo-calendar-detail { width: 280px; flex: none; align-self: flex-start; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.osmo-calendar-detail h2 { margin: 0 0 2px; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
+.osmo-detail-meta { margin: 0 0 16px; font-size: 13px; color: var(--muted-foreground); }
+.osmo-detail-meta .mono { font-size: 12px; }
+.osmo-detail-notes { margin: 0 0 16px; font-size: 13px; }
+.osmo-detail-section { margin: 0 0 16px; }
+.osmo-detail-label { margin: 0 0 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted-foreground); }
+.osmo-kv { display: grid; grid-template-columns: 72px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; line-height: 20px; }
+.osmo-kv dt { padding-top: 1px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-kv dd { margin: 0; }
+.osmo-detail-prompt { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); font: 13px/18px var(--font-mono); white-space: pre-wrap; }
+.osmo-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-weight: 500; }
+.osmo-badge[data-tone="green"] { color: #3ecf8e; }
+.osmo-badge[data-tone="amber"] { color: #f5a524; }
+.osmo-badge[data-tone="red"] { color: #f87171; }
+.light .osmo-badge[data-tone="green"] { color: #18794e; }
+.light .osmo-badge[data-tone="amber"] { color: #a35200; }
+.light .osmo-badge[data-tone="red"] { color: #da2f35; }
+.osmo-calendar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.osmo-tray-note { margin: 0; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-calendar-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.osmo-calendar-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-calendar-form input, .osmo-calendar-form select, .osmo-calendar-form textarea { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 13px var(--font-sans); }

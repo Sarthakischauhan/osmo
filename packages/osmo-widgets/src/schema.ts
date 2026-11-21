@@ -83,12 +83,34 @@ export const browserPropsSchema = z
   })
   .strict();
 
+/** A day of the local calendar (calendar_events with show=true): time, title and state per row, and the next automation. */
+export const agendaPropsSchema = z
+  .object({
+    title: z.string().min(1).max(80),
+    subtitle: z.string().max(80).optional(),
+    items: z
+      .array(
+        z
+          .object({
+            time: z.string().min(1).max(20),
+            title: z.string().min(1).max(200),
+            state: z.enum(["past", "now", "upcoming"]).default("upcoming"),
+            tag: z.string().max(24).optional(),
+          })
+          .strict(),
+      )
+      .max(40),
+    footer: z.object({ label: z.string().min(1).max(40), value: z.string().min(1).max(120), detail: z.string().max(60).optional() }).strict().optional(),
+  })
+  .strict();
+
 export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("card"), props: cardPropsSchema }),
   z.object({ type: z.literal("options"), props: optionsPropsSchema }),
   z.object({ type: z.literal("chart"), props: chartPropsSchema }),
   z.object({ type: z.literal("html"), props: htmlPropsSchema }),
   z.object({ type: z.literal("browser"), props: browserPropsSchema }),
+  z.object({ type: z.literal("agenda"), props: agendaPropsSchema }),
 ]);
 
 export type Widget = z.infer<typeof widgetSchema>;
@@ -98,9 +120,10 @@ export type OptionsProps = z.infer<typeof optionsPropsSchema>;
 export type ChartProps = z.infer<typeof chartPropsSchema>;
 export type HtmlProps = z.infer<typeof htmlPropsSchema>;
 export type BrowserProps = z.infer<typeof browserPropsSchema>;
+export type AgendaProps = z.infer<typeof agendaPropsSchema>;
 export type WidgetAction = z.infer<typeof widgetActionSchema>;
 
-export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser"];
+export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser", "agenda"];
 
 /** One-line description of a validated widget, returned to the model as `shown`. */
 export function describeWidget(widget: Widget): string {
@@ -119,6 +142,8 @@ export function describeWidget(widget: Widget): string {
     }
     case "browser":
       return "agent browser";
+    case "agenda":
+      return `agenda "${widget.props.title}" with ${widget.props.items.length} items`;
     case "html": {
       const named = widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
       return widget.props.actions?.length ? `${named} with ${widget.props.actions.length} actions` : named;

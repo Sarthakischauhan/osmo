@@ -81,6 +81,29 @@ class BrowserProps(_Strict):
     frame: DataImageUrl | None = None
 
 
+class AgendaItem(_Strict):
+    time: str = Field(min_length=1, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    state: Literal["past", "now", "upcoming"] = "upcoming"
+    # A short tag on the right (e.g. "done", "now", "automation").
+    tag: str | None = Field(default=None, max_length=24)
+
+
+class AgendaFooter(_Strict):
+    label: str = Field(min_length=1, max_length=40)
+    value: str = Field(min_length=1, max_length=120)
+    detail: str | None = Field(default=None, max_length=60)
+
+
+class AgendaProps(_Strict):
+    """A day (or a few) of the local calendar, drawn by calendar_events with show=true (calendar.py)."""
+
+    title: str = Field(min_length=1, max_length=80)
+    subtitle: str | None = Field(default=None, max_length=80)
+    items: list[AgendaItem] = Field(max_length=40)
+    footer: AgendaFooter | None = None
+
+
 class CardWidget(_Strict):
     type: Literal["card"]
     props: CardProps
@@ -101,13 +124,18 @@ class HtmlWidget(_Strict):
     props: HtmlProps
 
 
+class AgendaWidget(_Strict):
+    type: Literal["agenda"]
+    props: AgendaProps
+
+
 class BrowserWidget(_Strict):
     type: Literal["browser"]
     props: BrowserProps
 
 
 Widget = Annotated[
-    Union[CardWidget, OptionsWidget, ChartWidget, HtmlWidget, BrowserWidget],
+    Union[CardWidget, OptionsWidget, ChartWidget, HtmlWidget, BrowserWidget, AgendaWidget],
     Field(discriminator="type"),
 ]
 widget_adapter: TypeAdapter[Widget] = TypeAdapter(Widget)
@@ -130,6 +158,9 @@ def describe_widget(widget: Widget) -> str:
         return f"{widget.props.kind} chart, {names}, {len(widget.props.series[0].points)} points"
     if isinstance(widget, BrowserWidget):
         return "agent browser"
+    if isinstance(widget, AgendaWidget):
+        return f'agenda "{widget.props.title}" with {len(widget.props.items)} items'
+
     named = f'interactive html widget "{widget.props.title}"' if widget.props.title else "interactive html widget"
     return f"{named} with {len(widget.props.actions)} actions" if widget.props.actions else named
 

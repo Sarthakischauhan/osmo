@@ -19,6 +19,10 @@ dependencies = [
     "langfuse==5.0.4",
     # Note vaults: the file watcher that keeps the search index fresh.
     "watchfiles>=1.0",
+    # The local calendar: RRULE expansion and .ics import/export; tzdata gives zoneinfo its zones where the OS has none.
+    "python-dateutil>=2.9",
+    "icalendar>=6.1",
+    "tzdata>=2024.1",
 ]
 
 [project.scripts]
@@ -30,6 +34,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "mypy>=1.13",
+    "types-python-dateutil>=2.9",
 ]
 
 [build-system]

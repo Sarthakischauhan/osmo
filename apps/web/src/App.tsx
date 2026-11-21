@@ -36,7 +36,8 @@ import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { UsageDialog } from "@/components/UsageDialog";
 import { NotesView } from "@/components/NotesView";
 import type { SidebarPlace } from "@/components/ThreadSidebar";
-import { NotebookPen } from "lucide-react";
+import { CalendarDays, NotebookPen } from "lucide-react";
+import { CalendarView } from "@/components/CalendarView";
 import { FeedTurn } from "./FeedTurn";
 import { agentActivity } from "./compact";
 import { liveThought, orbBubbleVisible } from "./orbActivity";
@@ -65,8 +66,8 @@ export function App() {
 }
 
 /** The main pane's screens; `#notes` (etc.) in the URL opens one directly. */
-export type AppView = "chat" | "notes";
-const VIEWS: readonly AppView[] = ["chat", "notes"];
+export type AppView = "chat" | "notes" | "calendar";
+const VIEWS: readonly AppView[] = ["chat", "notes", "calendar"];
 
 function initialView(): AppView {
   const hash = window.location.hash.slice(1);
@@ -100,6 +101,12 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [usageOpen, setUsageOpen] = useState(false);
   // The main pane: the conversation, or one of Osmo's other screens (the orb stays in the dock on all of them).
   const [view, setView] = useState<AppView>(initialView);
+  // The desktop tray's "Open calendar" changes the hash of the open page.
+  useEffect(() => {
+    const follow = () => setView(initialView());
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -368,8 +375,11 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     active: view === id,
     onOpen: () => setView(id),
   });
-  const places = [place("notes", "Notes", <NotebookPen size={16} aria-hidden />)];
-  const screen = view === "notes" ? <NotesView /> : undefined;
+  const places = [
+    place("notes", "Notes", <NotebookPen size={16} aria-hidden />),
+    place("calendar", "Calendar", <CalendarDays size={16} aria-hidden />),
+  ];
+  const screen = view === "notes" ? <NotesView /> : view === "calendar" ? <CalendarView /> : undefined;
 
   return (
     <>

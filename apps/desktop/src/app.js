@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './po
 import { pythonExecutable, startServer } from './server.js';
 import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
+import { createAutomationTray } from './tray.js';
 import { SWITCH_ACCELERATOR, createWindowSwitch } from './window-mode.js';
 import { boxLayout, defaultOrbBounds, moveOrb } from './window-state.js';
 
@@ -35,6 +36,7 @@ export function runApp() {
   let busy = false;
   let worker;
   let backend;
+  let tray;
 
   const status = () => ({ enabled, platform: process.platform, stopShortcut: STOP_SHORTCUT });
   const live = contents => contents && !contents.isDestroyed();
@@ -290,9 +292,24 @@ export function runApp() {
         void dialog.showMessageBox(workspace, { type: 'warning', message: 'The orb shortcut is unavailable', detail: 'Minimize the window to show the orb, and double-click the orb to come back.' });
       }
       app.on('activate', () => switcher.toFull());
+      // Automations run in the server for as long as the app runs; the tray shows them with the window closed.
+      // Osmo does not add itself to the login items: it runs only after the user opens it.
+      tray = createAutomationTray({
+        request: async (route, init) => {
+          const response = await fetch(`${origin}${route}`, init);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        },
+        createTray: () => new Tray(appIcon.isEmpty() ? appIcon : appIcon.resize({ width: 16, height: 16 })),
+        buildMenu: template => Menu.buildFromTemplate(template),
+        notify: ({ title, body }) => { if (Notification.isSupported()) new Notification({ title, body, silent: true }).show(); },
+        open: () => switcher.toFull(),
+        openCalendar: () => { switcher.toFull(); void workspace?.loadURL(`${origin}/#calendar`); },
+        quit: () => app.quit(),
+      });
     });
     app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-    app.on('before-quit', () => { quitting = true; revoke(); session.end(); backend?.stop(); });
+    app.on('before-quit', () => { quitting = true; revoke(); session.end(); tray?.stop(); backend?.stop(); });
     app.on('will-quit', () => globalShortcut.unregisterAll());
   }
 }

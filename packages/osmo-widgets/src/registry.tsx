@@ -1,12 +1,13 @@
 import { MessageContent, QuestionWidget, defineWidget, type WidgetComponentProps } from "@sarchauhan/chat";
 import type { AgentWidgetPart } from "@sarchauhan/protocol";
 import { useContext } from "react";
+import { AgendaWidget } from "./agenda";
 import { AsciiArt } from "./asciiArt";
 import { BrowserWidget } from "./browser";
 import { BrowserControlsContext } from "./controls";
 import { ChartWidget } from "./chart";
 import { HtmlWidget } from "./html";
-import { type WidgetAction, browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, isActionableWidget, optionsPropsSchema, widgetSchema } from "./schema";
+import { type WidgetAction, agendaPropsSchema, browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, isActionableWidget, optionsPropsSchema, widgetSchema } from "./schema";
 
 /** Action ids reported back as `widget.action`. */
 export const CARD_PRESS = "press";
@@ -82,6 +83,11 @@ function Browser({ widget, ...raw }: WidgetComponentProps) {
   return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} />;
 }
 
+function Agenda({ widget: _widget, ...raw }: WidgetComponentProps) {
+  const parsed = agendaPropsSchema.safeParse(raw);
+  return parsed.success ? <AgendaWidget {...parsed.data} /> : null;
+}
+
 /**
  * Osmo's widget registry for chat-sdk's WidgetProvider. card and options are
  * chat-sdk components (BaseWidget, MessageContent, QuestionWidget); chart and
@@ -97,6 +103,7 @@ export const osmoWidgets = [
   defineWidget("chart", Chart, { shell: false }),
   defineWidget("html", Html, { shell: false }),
   defineWidget("browser", Browser, { shell: false }),
+  defineWidget("agenda", Agenda, { shell: false }),
 ];
 
 /** Validates a `widget.render` payload and turns it into a chat-sdk widget part; invalid widgets are dropped. */

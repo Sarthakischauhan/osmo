@@ -205,3 +205,10 @@ test('dragging the orb moves its window, keeps it on screen, and the hover box o
   await assert.rejects(async () => call(workspace(), CHANNELS.move, { dx: 1, dy: 1 }), /Untrusted/);
   await assert.rejects(async () => call(orb(), CHANNELS.move, { dx: 'far', dy: 1 }), /Invalid/);
 });
+
+test('a tray item keeps automations visible with the window closed, and Osmo never adds itself to the login items', () => {
+  assert.equal(fake.trays.length, 1);
+  const labels = fake.trays[0].menu.map(item => item.label);
+  assert.ok(labels.includes('Open Osmo') && labels.includes('Quit Osmo'));
+  assert.deepEqual(fake.loginItems, []);
+});

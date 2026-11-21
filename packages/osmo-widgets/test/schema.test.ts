@@ -63,3 +63,15 @@ describe("widgetSchema", () => {
     expect(describeWidget(widgetSchema.parse({ type: "browser", props: { status: "live" } }))).toBe("agent browser");
   });
 });
+
+describe("agenda widget", () => {
+  it("accepts the calendar tool's agenda and describes it", () => {
+    const parsed = widgetSchema.parse({
+      type: "agenda",
+      props: { title: "Today", subtitle: "Sat Nov 21", items: [{ time: "9:00", title: "Farmers market", state: "past", tag: "done" }], footer: { label: "Next automation", value: "Weekly notes", detail: "3:00 PM · in 3 min" } },
+    });
+    expect(describeWidget(parsed)).toBe('agenda "Today" with 1 items');
+    expect(isActionableWidget("agenda", parsed.props)).toBe(false);
+    expect(widgetSchema.safeParse({ type: "agenda", props: { title: "Today", items: [{ time: "9:00", title: "x", state: "soon" }] } }).success).toBe(false);
+  });
+});
