@@ -60,7 +60,9 @@ class OpenArgs(BaseModel):
 class ShellArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     command: str = Field(min_length=1, description="A bash command, run in the workspace root.")
-    timeout_s: float = Field(default=SHELL_TIMEOUT_S, gt=0, le=SHELL_TIMEOUT_MAX_S)
+    # Gemini's function declaration schema rejects exclusiveMinimum. A one-millisecond
+    # lower bound preserves a strictly positive timeout using its supported minimum field.
+    timeout_s: float = Field(default=SHELL_TIMEOUT_S, ge=0.001, le=SHELL_TIMEOUT_MAX_S)
 
 
 class ReadArgs(BaseModel):
