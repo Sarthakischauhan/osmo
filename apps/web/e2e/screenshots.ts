@@ -17,14 +17,22 @@ const send = (ws: WebSocketRoute, event: Json) => ws.send(JSON.stringify(event))
 const silence = (seconds: number) => Buffer.alloc(24000 * 2 * seconds);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const TIP_CALCULATOR = `<!doctype html><html><body style="margin:0;background:#111;color:#eee;font:14px system-ui;padding:16px">
-<h3 style="margin:0 0 12px">Tip calculator</h3>
-<label>Bill <input id="b" type="number" value="84" style="width:90px"></label>
-<label style="margin-left:12px">Tip % <input id="t" type="range" min="10" max="30" value="20"></label>
-<p id="o" style="font-size:22px;margin:14px 0 0"></p>
-<script>const f=()=>{const b=+document.getElementById('b').value,t=+document.getElementById('t').value;
-document.getElementById('o').textContent='Tip $'+(b*t/100).toFixed(2)+' · Total $'+(b*(1+t/100)).toFixed(2)+' ('+t+'%)'};
-document.querySelectorAll('input').forEach(i=>i.oninput=f);f();</script></body></html>`;
+const TIP_CALCULATOR = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tip calculator</title>
+<style>
+:root{color-scheme:dark;font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:#ededed;background:#0a0a0a}
+*{box-sizing:border-box}body{margin:0;padding:24px;max-width:720px;margin-inline:auto}.stack{display:grid;gap:20px}
+header{display:grid;gap:4px}h1{font-size:20px;line-height:28px;margin:0;font-weight:600}.muted{color:#a1a1a1;font-size:12px;margin:0}
+.panel{border:1px solid rgba(255,255,255,.1);background:#111;padding:20px;display:grid;gap:20px;border-radius:4px}
+.result{display:grid;gap:4px}.result strong{font-size:32px;line-height:40px;font-variant-numeric:tabular-nums;font-weight:600}.result span{color:#a1a1a1;font-size:12px}
+.controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}label{display:grid;gap:8px;font-size:12px;color:#a1a1a1}input,select{width:100%;min-height:40px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:3px;background:#171717;color:#ededed;font:inherit;font-variant-numeric:tabular-nums}
+input:focus-visible,select:focus-visible{outline:2px solid #ededed;outline-offset:2px}.range-row{display:flex;align-items:center;gap:12px}.range-row input{padding:0;accent-color:#ededed}.range-row output{min-width:42px;text-align:right;color:#ededed;font-variant-numeric:tabular-nums}
+.split{border-top:1px solid rgba(255,255,255,.1);padding-top:16px;display:flex;justify-content:space-between;gap:12px;color:#a1a1a1;font-size:12px}.split strong{color:#ededed;font-variant-numeric:tabular-nums}
+@media(max-width:480px){body{padding:16px}.panel{padding:16px}.controls{grid-template-columns:1fr}.result strong{font-size:28px}}
+</style><body><main class="stack"><header><h1>Tip calculator</h1><p class="muted">Split the bill and choose a tip.</p></header><section class="panel" aria-label="Calculator">
+<div class="result"><span>Total per person</span><strong id="per-person" aria-live="polite">$0.00</strong><span id="summary">Including tip</span></div>
+<div class="controls"><label for="bill">Bill amount<input id="bill" type="number" inputmode="decimal" min="0" step="0.01" value="84"></label><label for="people">People<select id="people"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+<label for="tip">Tip percentage<span class="range-row"><input id="tip" type="range" min="0" max="30" step="1" value="20"><output id="tip-value" for="tip">20%</output></span></label><div class="split"><span>Tip amount</span><strong id="tip-total">$0.00</strong></div></div></section></main>
+<script>const bill=document.querySelector('#bill'),people=document.querySelector('#people'),tip=document.querySelector('#tip');function update(){const amount=Number(bill.value),count=Number(people.value),rate=Number(tip.value);document.querySelector('#tip-value').value=rate+'%';document.querySelector('#tip-value').textContent=rate+'%';if(!Number.isFinite(amount)||amount<0){document.querySelector('#per-person').textContent='—';document.querySelector('#summary').textContent='Enter a valid bill amount';document.querySelector('#tip-total').textContent='—';return}const gratuity=amount*rate/100,total=amount+gratuity;document.querySelector('#per-person').textContent=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(total/count);document.querySelector('#summary').textContent=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(total)+' total · '+count+' '+(count===1?'person':'people');document.querySelector('#tip-total').textContent=new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(gratuity)}document.querySelectorAll('input,select').forEach(control=>control.addEventListener('input',update));update();</script></body></html>`;
 
 async function main() {
   const browser = await chromium.launch({

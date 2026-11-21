@@ -13,12 +13,17 @@ DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
 DEFAULT_DATABASE_FILE = "~/.config/osmo/osmo.db"
+# Where agent runs clone repositories and work on them in the macOS sandbox (one directory per run).
+DEFAULT_WORKSPACES_DIR = "~/.config/osmo/workspaces"
+# Turn budget of one background agent run: coding tasks (explore, edit, test, commit, open a PR) need dozens.
+DEFAULT_AGENT_MAX_TURNS = 60
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
 DEFAULT_AGENT_MODEL = "grok:grok-4.20-0309-reasoning"
 # Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
 # Clicking and typing in the agent browser can submit, buy or send, so they wait; opening, reading and
-# scrolling pages do not. Search does not wait unless it is added here.
-DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type")
+# scrolling pages do not. Search does not wait unless it is added here. Opening a pull request pushes to
+# GitHub under the user's name, so it waits; sandboxed shell commands and file edits do not.
+DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type", "open_pull_request")
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -31,11 +36,20 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - Never describe a widget out loud in detail; the tool result tells you what was shown.
 - Use options for any "pick one" moment; give each choice a short id. A tap arrives as a user message starting with [Tapped on screen].
 - For weather cards, use the built-in art prop (sun, moon, cloud, rain, snow, storm, wind or stars) instead of drawing ASCII in the body.
-- Use chart (line) for stock history; use card for weather or summaries; use html for calculators, mini apps or anything custom. html must be a complete, self-contained document with inline CSS and JS, dark background (#111), light text.
+- Use chart (line) for stock history; use card for weather or summaries; use html for calculators, mini apps or anything custom. HTML widgets must be complete, self-contained documents with inline CSS and JS, no network access, and follow the Osmo Canvas design pattern below.
+
+# Osmo Canvas design pattern (interactive HTML widgets)
+- Make a compact, calm instrument panel: one clear title, one short context line when needed, the primary value or action first, then supporting controls and details. Use a shared alignment edge and a simple responsive grid; do not leave large empty columns or make users hunt for the key result.
+- Use Osmo's monochrome palette: background #0a0a0a, surface #111111 / #171717, primary text #ededed, muted text #a1a1a1, subtle borders rgba(255,255,255,.10). Reserve Osmo green #3ecf8e for positive/success, amber #f5a524 for attention, and red #f87171 for destructive/error. On light surfaces use #fff / #f5f5f5 with #171717 text and accessible contrast. No arbitrary brand colors, gradients, glows, or decorative illustrations; color communicates meaning.
+- Use system sans-serif typography, consistent type roles (title, body, label, caption), tabular numerals for comparable values, and mono only for short technical identifiers. Keep spacing on a 4px rhythm, align peer controls, and use restrained 2–4px corner radii and thin borders.
+- Make the layout fluid for narrow iframe widths: stack columns, keep controls touch-friendly, wrap long labels, and avoid horizontal scrolling. Use semantic HTML, visible keyboard focus, explicit labels, sufficient contrast, and clear hover/disabled states.
+- Keep copy concise and scannable; show units and useful defaults. Update results immediately when controls change, preserve user input, and provide an honest empty/error state. Avoid fake metrics, unexplained abbreviations, and unnecessary decoration.
+- Keep widgets self-contained with inline CSS and JS (no remote assets, fonts, imports, or network calls); initialize controls on load, handle invalid/empty input, and never rely on parent-page CSS or untrusted HTML from external sources.
 - To change a widget already on screen, call update_widget with its id.
 
 # Background agent
 - For anything that needs the web (facts, news, weather, prices, research), call run_agent with a full, self-contained task and say one line that you started. Keep talking with the user meanwhile. The agent can search the web and, when its browser is enabled, browse pages (the browser appears live on screen); it cannot draw, show widgets, or use the computer.
+- The agent can also do coding work on a repository: clone it into a sandbox, change code, run tests, commit, and open a pull request (the user approves the pull request on screen). For that, give run_agent the repository (owner/name or a local path) and what to change. Runs keep going if Osmo restarts.
 - Messages starting with [agent <run id>] report on a run: when it is done, summarize the result in one or two sentences; when it needs approval, ask the user to tap Approve or Deny on screen; never approve for them.
 - Once a run is started, wait to be told: do not call agent_status or say it is still working unless the user asks how it is going. cancel_agent stops a run the user no longer wants.
 
@@ -51,8 +65,9 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 
 # Tool groups the server can enable (OSMO_TOOLS); see app.osmo_tools.
-ToolCategory = Literal["search", "image", "osmo", "desktop", "browser"]
-DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo")
+ToolCategory = Literal["search", "image", "osmo", "desktop", "browser", "code"]
+# `code` only takes effect where the macOS sandbox is available (see app.osmo_tools).
+DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo", "code")
 # The OSMO_TOOLS category of each of Osmo's tools, by tool name.
 TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "computer": "desktop",
@@ -69,6 +84,12 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "browser_click": "browser",
     "browser_type": "browser",
     "browser_scroll": "browser",
+    "workspace_open": "code",
+    "shell": "code",
+    "read_file": "code",
+    "write_file": "code",
+    "edit_file": "code",
+    "open_pull_request": "code",
 }
 
 
@@ -126,9 +147,17 @@ class Settings:
     exa_api_key: str | None = None
     # SQLite file for threads, messages, agent runs and provider connections; None keeps them in memory.
     database_file: Path | None = None
+    # Sandboxed per-run repository workspaces (OSMO_WORKSPACES_DIR); None puts them in a temporary directory.
+    workspaces_dir: Path | None = None
+    agent_max_turns: int = DEFAULT_AGENT_MAX_TURNS
     agent_model: str = DEFAULT_AGENT_MODEL
+    # When no explicit model is configured, prefer a connected subscription for agent runs.
+    agent_model_auto: bool = False
     approval_tools: tuple[str, ...] = DEFAULT_APPROVAL_TOOLS
     oauth_clients: dict[str, OAuthClient] = field(default_factory=dict)
+    # Listen on localhost:1455 for the ChatGPT sign-in redirect (OSMO_SUBSCRIPTION_LOOPBACK=0 turns it
+    # off, e.g. when the server is not on the user's machine; they paste the redirect URL instead).
+    subscription_loopback: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -149,9 +178,13 @@ class Settings:
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
             database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
-            agent_model=os.getenv("OSMO_AGENT_MODEL", DEFAULT_AGENT_MODEL),
+            workspaces_dir=Path(os.getenv("OSMO_WORKSPACES_DIR") or DEFAULT_WORKSPACES_DIR).expanduser(),
+            agent_max_turns=int(os.getenv("OSMO_AGENT_MAX_TURNS") or DEFAULT_AGENT_MAX_TURNS),
+            agent_model=os.getenv("OSMO_AGENT_MODEL") or DEFAULT_AGENT_MODEL,
+            agent_model_auto=not bool(os.getenv("OSMO_AGENT_MODEL")),
             approval_tools=approval_tools(os.getenv("OSMO_APPROVAL_TOOLS")),
             oauth_clients=oauth_clients_from_env(),
+            subscription_loopback=os.getenv("OSMO_SUBSCRIPTION_LOOPBACK", "1") != "0",
         )
 
 

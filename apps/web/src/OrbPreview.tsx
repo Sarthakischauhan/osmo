@@ -30,6 +30,9 @@ export function OrbPreview({ turns, runs, activity, onDecide }: OrbPreviewProps)
           </div>
         </WidgetProvider>
       )}
+      {turns.filter((turn): turn is Extract<Turn, { role: "assistant" }> => turn.role === "assistant" && turn.thinking === true).slice(-1).map((turn) => (
+        <div key={turn.key} className="osmo-compact-thinking"><strong>Thinking</strong><p>{turn.reasoning || "Thinking…"}</p></div>
+      ))}
       <CompactAgentActivity activity={activity} runs={runs} onDecide={onDecide} />
     </>
   );

@@ -35,9 +35,11 @@ button { font: inherit; color: inherit; }
 @keyframes heard { 30% { opacity: .9; } }
 .spoken { font-size: 10px; color: var(--muted-foreground); }
 
-.turn.assistant { display: grid; grid-template-columns: 28px 1fr; gap: 0; animation: rise .25s ease-out; }
+.turn.assistant { display: grid; grid-template-columns: 28px minmax(0, 1fr); min-width: 0; gap: 0; animation: rise .25s ease-out; }
 .avatar { width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c7d2fe 25%, #818cf8 70%, #4f46e5 100%); box-shadow: 6px 0 10px -2px rgba(129, 140, 248, .45); }
 .assistant-body { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.osmo-widget-container { width: 100%; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.osmo-widget-error { color: var(--muted-foreground); font-size: 12px; }
 
 /* chat-sdk (@sarchauhan/chat) renders text, tool rows and card/options widgets.
    Osmo keeps its borderless look by overriding chat-sdk's tokens and frames here only. */
@@ -124,7 +126,8 @@ button { font: inherit; color: inherit; }
 .osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
 .osmo-icon-button:disabled { opacity: .35; cursor: default; }
 .osmo-frame-viewport { position: relative; overflow: hidden; background: #111; }
-.osmo-html iframe { display: block; border: 0; background: #111; transform-origin: 0 0; }
+.osmo-frame-viewport iframe { display: block; max-width: none; border: 0; background: #fff; transform-origin: 0 0; }
+.osmo-html > .osmo-frame-viewport { background: #fff; }
 .osmo-frame-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 4vh 4vw; background: rgba(0, 0, 0, .5); animation: rise .2s ease-out; }
 .osmo-frame-modal { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 3px); background: var(--surface-1); box-shadow: none; }
 .osmo-frame-modal .osmo-frame-viewport { flex: 1; }
@@ -147,7 +150,32 @@ button { font: inherit; color: inherit; }
 
 /* Radial picker around the dock orb: the dial overlays the feed above it. While it is closed only
    the orb takes pointer events, so the feed under the (invisible) dial stays clickable. */
-.dock { position: relative; z-index: 2; overflow-x: clip; }
+.dock { position: relative; z-index: 2; overflow: visible; }
+/* Orb activity: a thought cloud that floats above the orb and the dial's provider ring (never over
+   them). Anchored to the composer, whose top is the orb's top; the wrapper's transparent bottom
+   padding holds the trail of bubbles and lets clicks through to the dial. It stays open while the
+   dial is, so the pointer can travel from the orb up into the cloud. */
+.dock .orb-composer { position: relative; }
+/* Mounted only while orbBubbleVisible is true (thinking/working, or a run still going after
+   voice leaves those states). Presence in the DOM is the visibility signal — do not re-gate on
+   data-state here, or a listening/idle run cloud stays display:none. */
+.orb-activity { --cloud-radius: 18px; --cloud-pad: 8px; --cloud-gap: 78px; display: block; pointer-events: none; position: absolute; z-index: 20; bottom: 100%; left: 50%; translate: -50% 0; width: min(380px, 90vw); padding-bottom: var(--cloud-gap); transform-origin: 50% 100%; animation: cloud-in .32s cubic-bezier(.2, .9, .3, 1.2) both; }
+.orb-activity > section { max-height: 40vh; overflow: auto; padding: var(--cloud-pad); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--cloud-radius); box-shadow: 0 10px 32px #0004; scrollbar-width: none; pointer-events: auto; animation: cloud-float 4.5s ease-in-out .32s infinite; }
+.orb-activity > section::-webkit-scrollbar { display: none; }
+/* Inner cards share the cloud's curve (concentric: the cloud's radius minus its padding). */
+.orb-activity .osmo-compact-agent, .orb-activity .osmo-compact-thinking { border-radius: calc(var(--cloud-radius) - var(--cloud-pad)); }
+.orb-activity .osmo-compact-thinking { margin: 0 0 8px; padding: 8px 10px; background: var(--surface-1); }
+.orb-activity .osmo-compact-thinking:last-child { margin-bottom: 0; }
+.orb-activity .osmo-compact-counts { margin: 2px 4px 0; }
+/* The thought trail: two shrinking bubbles rising from the orb, between the dial's top items. */
+.orb-activity::before, .orb-activity::after { content: ""; position: absolute; left: 50%; border-radius: 50%; background: var(--background); border: 1px solid var(--border); box-shadow: 0 4px 12px #0003; animation: bubble-in .28s ease-out both, cloud-float 4.5s ease-in-out .6s infinite; }
+.orb-activity::before { width: 11px; height: 11px; bottom: 40px; margin-left: -4px; animation-delay: .1s, .6s; }
+.orb-activity::after { width: 7px; height: 7px; bottom: 12px; margin-left: -4px; animation-delay: .18s, .7s; }
+@keyframes cloud-in { from { opacity: 0; transform: translateY(10px) scale(.9); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes bubble-in { from { opacity: 0; scale: .2; } to { opacity: 1; scale: 1; } }
+@keyframes cloud-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+.osmo-compact-thinking { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 8px 0; }
+.osmo-compact-thinking p { margin-top: 4px; }
 /* A vignette instead of a solid band: the feed fades out as it nears the orb, with no hard edge. */
 .dock::before {
   content: "";
@@ -276,18 +304,120 @@ button.osmo-list-row { cursor: pointer; }
   * { transition: none !important; }
 }
 
-/* Home: time-of-day ASCII (GUI spec, frames in lib/asciiFrames.ts). The only home content. */
-.osmo-ascii-home { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; margin-top: 0; }
-/* The canvas is a block scroller for the feed; on home it becomes a column so the frame can fill and centre above the orb. */
-.canvas.chat-root:has(> .osmo-ascii-home) { display: flex; flex-direction: column; }
-.osmo-ascii { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 12.5px; line-height: 1.15; white-space: pre; letter-spacing: normal; color: var(--muted-foreground); opacity: .7; transition: opacity 200ms; background: none; }
-.light .osmo-ascii { opacity: .85; }
-@media (prefers-color-scheme: light) { :root:not(.dark) .osmo-ascii { opacity: .85; } }
-.osmo-ascii[data-fading="true"] { opacity: 0; }
-/* Dial open on home: dim the art rather than drawing a scrim. */
-.app:has(.rp[data-open="true"]) .osmo-ascii { opacity: .15; }
+/* Home: the orb holds the centre of the screen over a live voice field (VoiceField), with the
+   nothing else on screen; the first turn collapses the spacer row and the same dock glides down. */
+.app { grid-template-rows: 60px minmax(0, 1fr) auto 0fr; transition: grid-template-rows 320ms cubic-bezier(.22, 1, .36, 1); }
+/* Keep the voice control docked at the bottom on the empty conversation too. */
+.chat-voice-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  color: var(--foreground);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 96px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 96px);
+  animation: chat-welcome-in 900ms ease-out both;
+}
+/* The field paints under the canvas, so the canvas is see-through here. */
+.app[data-home="true"] .canvas.chat-root { background: transparent; }
+.app[data-home="true"] .dock::before { display: none; }
+.app[data-home="true"] .dock { flex-direction: column; align-items: center; }
+.app[data-home="true"] .osmo-scroll-indicator { display: none; }
+.canvas.chat-root:has(> .chat-welcome) { display: flex; flex-direction: column; }
+.chat-welcome { flex: 1; }
+@keyframes chat-welcome-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* Dial open on home: dim the field and copy rather than drawing a scrim. */
+.app:has(.rp[data-open="true"]) .chat-voice-field { opacity: .25; animation: none; transition: opacity 200ms; }
+@media (prefers-reduced-motion: reduce) {
+  .app { transition: none; }
+}
+
+/* Shared ASCII utility (appearance switch / widget art) — not the empty-session hero. */
+.osmo-ascii {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.15;
+  white-space: pre;
+  letter-spacing: normal;
+  color: var(--muted-foreground);
+  background: none;
+}
 
 /* Native capabilities share the existing persistent thread sidebar. */
+/* Background agent: the same quiet surfaces, 13px rows and compact radii as the sidebar. */
+.osmo-agent-settings { display: flex; flex-direction: column; gap: 24px; width: 560px; padding: 28px; border-radius: var(--radius, 3px); background: var(--background); }
+.osmo-agent-settings-header { gap: 8px; padding-right: 28px; text-align: left; }
+.osmo-agent-settings-header [data-slot="dialog-title"] { line-height: 24px; }
+.osmo-agent-settings-header [data-slot="dialog-description"] { max-width: 450px; line-height: 20px; }
+.osmo-agent-settings-icon { display: grid; place-items: center; width: 32px; height: 32px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: var(--radius, 3px); color: var(--muted-foreground); }
+.osmo-agent-section { display: flex; flex-direction: column; gap: 12px; }
+.osmo-agent-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.osmo-agent-section-heading h3 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
+.osmo-agent-section-heading p { margin: 2px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+.osmo-agent-mode { color: var(--fg-tertiary); font-size: 11px; line-height: 20px; }
+.osmo-agent-current { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: var(--accent); border-radius: var(--radius, 3px); font-size: 12px; }
+.osmo-agent-current span { color: var(--muted-foreground); }
+.osmo-agent-current strong { min-width: 0; overflow-wrap: anywhere; font-weight: 500; text-align: right; }
+.osmo-model-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 58px; padding: 9px 12px; text-align: left; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); cursor: pointer; }
+.osmo-model-trigger:hover, .osmo-model-trigger[data-state="open"] { background: var(--accent); border-color: var(--ring); }
+.osmo-model-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.osmo-model-trigger:disabled { opacity: .6; cursor: wait; }
+.osmo-model-trigger > span { display: grid; gap: 3px; min-width: 0; }
+.osmo-model-trigger-caption { color: var(--muted-foreground); font-size: 11px; }
+.osmo-model-trigger strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.osmo-model-trigger > svg { flex: none; color: var(--muted-foreground); }
+.osmo-model-popover { z-index: 70; width: var(--radix-popover-trigger-width); max-width: calc(100vw - 32px); padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); box-shadow: 0 14px 40px rgb(0 0 0 / .24); }
+.osmo-model-command { background: var(--popover); color: var(--popover-foreground); }
+.osmo-model-command [data-slot="command-input-wrapper"] { height: 44px; flex: none; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.osmo-model-command [data-slot="command-input"] { min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--foreground); outline: none; box-shadow: none; }
+.osmo-model-command [data-slot="command-input"]:focus, .osmo-model-command [data-slot="command-input"]:focus-visible { border: 0; outline: none; box-shadow: none; }
+.osmo-model-list { max-height: min(300px, 45vh); overscroll-behavior: contain; padding: 5px; }
+.osmo-model-command [data-slot="command-group-heading"] { padding: 10px 8px 6px; color: var(--muted-foreground); font-size: 11px; font-weight: 600; }
+.osmo-model-command [data-slot="command-group"] + [data-slot="command-group"] { border-top: 1px solid var(--border); }
+.osmo-model-command [data-slot="command-item"] { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px; border-radius: 5px; cursor: pointer; }
+.osmo-model-command [data-slot="command-item"][data-selected="true"] { background: var(--accent); color: var(--foreground); }
+.osmo-model-command [data-slot="command-item"] > svg { margin-left: auto; flex: none; }
+.osmo-model-copy { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.osmo-model-copy strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.osmo-model-copy small { color: var(--muted-foreground); font-size: 11px; }
+.osmo-model-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted-foreground); }
+.osmo-agent-disclosure, .osmo-agent-provider-list { border: 1px solid var(--border); border-radius: var(--radius, 3px); }
+.osmo-agent-disclosure summary, .osmo-agent-provider summary { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; list-style: none; cursor: pointer; font-size: 13px; }
+.osmo-agent-disclosure summary::-webkit-details-marker, .osmo-agent-provider summary::-webkit-details-marker { display: none; }
+.osmo-agent-disclosure summary:hover, .osmo-agent-provider summary:hover { background: var(--accent); }
+.osmo-agent-disclosure summary svg { margin-left: auto; color: var(--fg-tertiary); }
+/* Keep the focus indicator inside the search row instead of drawing across its icon and edges. */
+.osmo-agent-disclosure [data-slot="command-input-wrapper"] { height: 40px; }
+.osmo-agent-disclosure [data-slot="command-input-wrapper"]:focus-within { box-shadow: inset 0 0 0 1px var(--ring); }
+.osmo-agent-disclosure [data-slot="command-input"] { height: 100%; min-width: 0; padding: 0; outline: none; box-shadow: none; }
+.osmo-agent-disclosure [data-slot="command-list"] { overscroll-behavior: contain; }
+.osmo-agent-disclosure [data-slot="command-group"] { padding: 4px 8px; }
+.osmo-agent-disclosure [data-slot="command-group"] + [data-slot="command-group"] { border-top: 1px solid var(--border); }
+.osmo-agent-disclosure [data-slot="command-item"] { min-height: 36px; border-bottom: 1px solid var(--border); border-radius: 0; cursor: pointer; }
+.osmo-agent-disclosure [data-slot="command-item"]:last-child { border-bottom: 0; }
+.osmo-agent-disclosure[open] summary svg, .osmo-agent-provider[open] summary svg { transform: rotate(180deg); }
+.osmo-agent-provider + .osmo-agent-provider { border-top: 1px solid var(--border); }
+.osmo-agent-provider-name { flex: 1; font-weight: 500; }
+.osmo-agent-provider-status { color: var(--fg-tertiary); font-size: 12px; }
+.osmo-agent-provider summary svg { flex-shrink: 0; color: var(--muted-foreground); }
+.osmo-agent-provider-body { display: grid; gap: 16px; padding: 12px; border-top: 1px solid var(--border); }
+.osmo-agent-key-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted-foreground); font-size: 12px; }
+.osmo-agent-note, .osmo-agent-footnote, .osmo-agent-error { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+.osmo-agent-error { color: var(--destructive); }
+.osmo-agent-footnote { color: var(--fg-tertiary); }
+@media (max-width: 600px) { .osmo-agent-settings { padding: 20px; gap: 20px; } .osmo-agent-provider-status { font-size: 11px; } }
+.osmo-settings-divider { height: 1px; background: var(--border); }
+.osmo-settings-desktop { display: flex; }
+.osmo-settings-footer { padding: 8px; border-top: 1px solid var(--border); }
+[data-state="collapsed"] .osmo-settings-footer { align-items: center; }
+.osmo-settings-button { width: calc(100% - 16px); }
+.osmo-agent-model { margin: 0 8px; }
+.osmo-agent-model > span:first-of-type { flex: 0 0 auto; }
+.osmo-agent-model .osmo-agent-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg-tertiary); font-size: 12px; font-weight: 400; }
 .osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 [data-state="collapsed"] .osmo-desktop-footer { display: none; }
 .desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-button); background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
@@ -303,7 +433,49 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-appearance button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); border-color: var(--border); }
 .osmo-appearance .osmo-ascii { font-size: 2.5px; line-height: 1.15; opacity: 1; }
 .osmo-card-art { float: right; font-size: 9px; margin: 0 0 12px 20px; }
-@media (max-width: 600px) { .osmo-ascii-home .osmo-ascii { font-size: clamp(6px, 1.8vw, 9px); } }
+
+/* Symphony task workbench */
+.agent-workbench { overflow-y: auto; min-height: 0; flex: 1; }
+.agent-workbench-inner { width: min(640px, calc(100% - 48px)); margin: 0 auto; padding: 64px 0 100px; }
+.agent-workbench-header { margin-bottom: 28px; }
+.agent-workbench-header h1 { font-size: 22px; line-height: 30px; letter-spacing: -.025em; font-weight: 600; }
+.agent-workbench-header p { color: var(--muted-foreground); font-size: 13px; line-height: 20px; margin-top: 5px; }
+.agent-workbench-form { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); padding: 16px; transition: border-color .15s; }
+.agent-workbench-form:focus-within { border-color: var(--muted-foreground); }
+.agent-workbench-form textarea { display: block; width: 100%; resize: vertical; min-height: 72px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: 14px; line-height: 22px; }
+.agent-workbench-form textarea::placeholder { color: var(--fg-tertiary); }
+.agent-workbench-form-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; color: var(--fg-tertiary); font-size: 11px; }
+.agent-workbench-form-footer button[type="submit"] { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--foreground); color: var(--background); cursor: pointer; }
+.agent-workbench-form-footer button[type="submit"]:disabled { opacity: .3; cursor: default; }
+.agent-workbench-form-footer button[type="button"] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; color: inherit; cursor: pointer; text-align: left; }
+.agent-workbench-form-footer button[type="button"]:hover { color: var(--foreground); }
+.agent-workbench-list-title { display: flex; align-items: center; gap: 8px; margin: 42px 0 10px; }
+.agent-workbench-list-title h2 { font-size: 12px; font-weight: 600; }
+.agent-workbench-list-title span, .agent-workbench-run time { color: var(--fg-tertiary); font-size: 11px; }
+.agent-workbench-empty { margin-top: 42px; color: var(--muted-foreground); font-size: 13px; line-height: 20px; }
+.agent-workbench-empty strong { color: var(--foreground); font-weight: 500; }
+.agent-workbench-empty p { margin-top: 5px; }
+.agent-workbench-list { border-top: 1px solid var(--border); }
+.agent-workbench-run { display: flex; gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--border); }
+.agent-run-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 50%; color: var(--muted-foreground); }
+.agent-run-icon[data-status="running"] svg { animation: osmo-spin 1.5s linear infinite; }
+.agent-run-content { min-width: 0; flex: 1; }
+.agent-workbench-run-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 20px; }
+.agent-workbench-status { color: var(--muted-foreground); font-size: 11px; }
+.agent-workbench-status[data-status="failed"], .agent-workbench-error { color: #e66e6e; }
+.agent-workbench-run h3 { font-size: 13px; font-weight: 500; line-height: 21px; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-run-result { margin-top: 10px; color: var(--muted-foreground); font-size: 12px; }
+.agent-run-result summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.agent-run-result[open] summary svg { transform: rotate(180deg); }
+.agent-run-result p { padding-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 20px; }
+.agent-workbench-actions { display: flex; gap: 16px; margin-top: 10px; }
+.agent-workbench-actions button, .agent-workbench-approval button { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--fg-tertiary); font-size: 11px; cursor: pointer; }
+.agent-workbench-actions button:hover, .agent-workbench-approval button:hover { color: var(--foreground); }
+.agent-workbench-approval { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.agent-workbench-approval p { margin: 6px 0; }
+.agent-workbench-approval button { margin-right: 14px; }
+.agent-workbench-error { margin-top: 12px; font-size: 12px; }
+@media (max-width: 600px) { .agent-workbench-inner { width: calc(100% - 32px); padding-top: 36px; } }
 
 /* Scroll containers scroll without a visible bar: wheel, touch, keys and programmatic scrolling still work. */
 .osmo-scroll { scrollbar-width: none; }
@@ -313,7 +485,7 @@ button.osmo-list-row { cursor: pointer; }
 
 .osmo-scroll-host { position: relative; min-height: 0; display: flex; flex-direction: column; flex: 1; }
 .osmo-scroll-host > .canvas.chat-root { flex: 1; min-height: 0; }
-.osmo-scroll-indicator { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 3px 2px; border-radius: var(--radius-button); background: var(--surface-1); opacity: .75; transition: opacity .15s ease-out, background .15s ease-out; }
+.osmo-scroll-indicator { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 4; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 2px; border-radius: var(--radius-button); background: var(--surface-1); opacity: .75; transition: opacity .15s ease-out, background .15s ease-out; }
 .osmo-scroll-indicator:hover { opacity: 1; background: var(--surface-2); }
 .osmo-scroll-dir { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-button); background: transparent; color: var(--muted-foreground); cursor: pointer; }
 .osmo-scroll-dir:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
@@ -321,8 +493,8 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-scroll-track { position: relative; width: 16px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-button); background: transparent; cursor: pointer; }
 .osmo-scroll-track::before { content: ""; position: absolute; left: 50%; top: 4px; bottom: 4px; width: 2px; transform: translateX(-50%); border-radius: 999px; background: var(--surface-3); }
 .osmo-scroll-mid { position: absolute; left: 50%; top: 50%; width: 6px; height: 2px; transform: translate(-50%, -50%); border-radius: 999px; background: var(--muted-foreground); opacity: .65; }
-.osmo-scroll-thumb { position: absolute; left: 50%; width: 6px; height: 6px; transform: translate(-50%, -50%); border-radius: 999px; background: var(--foreground); transition: top 80ms ease-out, transform .15s ease-out; }
-.osmo-scroll-thumb[data-centered] { transform: translate(-50%, -50%) scale(1.25); }
+.osmo-scroll-thumb { position: absolute; left: 50%; width: 8px; height: 2px; transform: translate(-50%, -50%); border-radius: 999px; background: var(--foreground); transition: top 80ms ease-out, width .15s ease-out; }
+.osmo-scroll-thumb[data-centered] { width: 10px; }
 [data-collapsible="icon"] .osmo-scroll-indicator { display: none; }
 
 /* ---- Floating orb and agent log (#18) ---- */
@@ -336,6 +508,7 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-floating-box[data-placed] { visibility: visible; }
 .osmo-floating-box > * { flex: none; }
 .osmo-floating-orb { flex: none; position: relative; margin-left: var(--orb-left, 0px); display: grid; place-items: center; width: 112px; height: 112px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+.osmo-floating-orb[data-dragging] { cursor: grabbing; }
 .osmo-floating-orb .orb-canvas { transform: translate(-50%, -50%) scale(1.2); }
 .osmo-compact-transcript.canvas.chat-root { display: flex; flex-direction: column; gap: 10px; overflow: visible; scroll-padding-bottom: 0; }
 .osmo-compact-agents { display: flex; flex-direction: column; gap: 8px; width: 100%; }

@@ -92,7 +92,11 @@ class Storage(Protocol):
 
     def connections(self) -> list[ProviderConnection]: ...
 
-    def interrupt_unfinished(self, reason: str) -> int: ...
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int: ...
+
+    def setting(self, key: str) -> str | None: ...
+
+    def save_setting(self, key: str, value: str | None) -> None: ...
 
 
 SCHEMA = """
@@ -125,6 +129,10 @@ CREATE TABLE IF NOT EXISTS provider_connections (
     provider TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
     connected_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -265,14 +273,16 @@ class SQLiteStorage:
             rows = db.execute("SELECT * FROM runs WHERE thread_id = ? ORDER BY created_at, run_id", (thread_id,)).fetchall()
         return [run_row(row) for row in rows]
 
-    def interrupt_unfinished(self, reason: str) -> int:
-        """Mark runs that cannot still be executing as failed. Live execution is in-process, so a
-        restart cannot resume one; the stored record must not keep saying that it is running."""
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int:
+        """Mark runs that are not executing any more as failed, except `keep` (the runs the durable
+        backend resumed); the stored record must not keep saying that the others are running."""
         now = time.time()
+        held = tuple(keep)
+        excluded = f" AND run_id NOT IN ({', '.join('?' for _ in held)})" if held else ""
         with self.transaction() as db:
             changed = db.execute(
-                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')",
-                (reason, now),
+                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')" + excluded,
+                (reason, now, *held),
             )
         return changed.rowcount
 
@@ -294,3 +304,20 @@ class SQLiteStorage:
         with self.transaction() as db:
             rows = db.execute("SELECT * FROM provider_connections ORDER BY provider").fetchall()
         return [ProviderConnection(provider=row["provider"], kind=row["kind"], connectedAt=row["connected_at"]) for row in rows]
+
+    # ------------------------------------------------------------ settings
+
+    def setting(self, key: str) -> str | None:
+        with self.transaction() as db:
+            row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def save_setting(self, key: str, value: str | None) -> None:
+        """Store `value` under `key`; None removes it."""
+        with self.transaction() as db:
+            if value is None:
+                db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                db.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value)
+                )

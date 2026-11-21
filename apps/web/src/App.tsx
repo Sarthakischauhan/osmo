@@ -1,4 +1,4 @@
-import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
+import { useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
 import { BrowserControlsContext, osmoWidgets } from "@osmo/osmo-widgets";
 import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
@@ -18,9 +18,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
+import { AgentWorkbench } from "@/components/AgentWorkbench";
 import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
 import { AsciiHome } from "@/components/home/AsciiHome";
+import { VoiceField } from "@/components/home/VoiceField";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
@@ -29,7 +31,11 @@ import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
 import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
+import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { FeedTurn } from "./FeedTurn";
+import { agentActivity } from "./compact";
+import { liveThought, orbBubbleVisible } from "./orbActivity";
+import { CompactAgentActivity } from "./CompactAgentActivity";
 import { type Feed, conversationTitle, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
@@ -67,6 +73,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadId, setThreadId] = useState<string>();
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [runs, setRuns] = useState<Runs>({});
   const approvals = useRef<ApprovalRequest[]>([]);
   const now = useNow();
@@ -107,6 +114,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   }, []);
   const openThread = useCallback(
     async (id: string | undefined) => {
+      setWorkbenchOpen(false);
       end();
       void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
@@ -215,6 +223,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
   const providers = catalog?.providers ?? NO_PROVIDERS;
   const [connecting, setConnecting] = useState<ProviderInfo>();
+  const [agentModelOpen, setAgentModelOpen] = useState(false);
+  const [returnToAgentSettings, setReturnToAgentSettings] = useState(false);
   // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
     if (catalog !== undefined) setRegistry(catalog.models);
@@ -321,6 +331,15 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   // This thread's runs are cards under the answers that started them; the list is for the others'.
   const shownRuns = visibleRuns(runs, now).filter((run) => run.threadId !== undefined && run.threadId !== threadId);
   const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
+  const orbActivity = agentActivity(runs, feed.turns, threadId, now);
+  // Reasoning remains in the transcript after a turn ends. The bubble above the orb is the
+  // live "working" indicator, same for every provider: only while this turn is thinking or a
+  // tool/agent run is still going. Idle, listening and speaking stay the orb alone.
+  const currentThought = liveThought(feed.turns);
+  const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
+  const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
+  // The welcome screen holds the orb at the centre over the voice field; the first turn docks it.
+  const home = !workbenchOpen && feed.turns.length === 0;
 
   return (
     <>
@@ -333,17 +352,18 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onFork={forkThread}
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
-        footer={desktop.available ? <DesktopSupport desktop={desktop} /> : undefined}
+        onOpenSettings={() => setAgentModelOpen(true)}
+        onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
-      <SidebarInset className="app">
+      <SidebarInset className="app" data-home={home}>
+        {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
         <header className="topbar">
           <div className="brand">
             {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
             <img className="brand-mark" src="/favicon.svg" alt="" width={18} height={18} />
-            <strong>{conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
+            <strong>{workbenchOpen ? "Tasks" : conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
-            {(sidebar.state === "collapsed" || sidebar.isMobile) && <DesktopSupport desktop={desktop} />}
             {session.startedAt !== undefined && <Clock since={session.startedAt} />}
             {connected && (
               <button type="button" className="end" onClick={session.end}>
@@ -353,6 +373,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
           </div>
         </header>
 
+        {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} /> : <>
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
             <div className="osmo-scroll-host">
@@ -379,6 +400,12 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             <OrbComposer
               session={session}
               awaitingChoice={pending !== undefined}
+              activity={showOrbBubble ? (
+                <section aria-label="Orb activity">
+                  {showThought && <div className="osmo-compact-thinking"><strong>Thinking</strong><p>{currentThought.reasoning}</p></div>}
+                  <CompactAgentActivity activity={orbActivity} runs={runs} onDecide={decide} />
+                </section>
+              ) : undefined}
               pickerError={catalogError}
               picker={
                 pick && registry.length > 0
@@ -398,16 +425,31 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
               }
             />
         </footer>
+        </>}
       </SidebarInset>
       <ConnectProviderDialog
         provider={connecting}
         onOpenChange={(open) => {
-          if (!open) setConnecting(undefined);
+          if (!open) {
+            setConnecting(undefined);
+            if (returnToAgentSettings) setAgentModelOpen(true);
+            setReturnToAgentSettings(false);
+          }
         }}
         onConnected={() => {
           setConnecting(undefined);
+          if (returnToAgentSettings) setAgentModelOpen(true);
+          setReturnToAgentSettings(false);
           refresh();
         }}
+      />
+      <AgentModelDialog
+        open={agentModelOpen}
+        onOpenChange={setAgentModelOpen}
+        providers={providers}
+        onCredentialsChanged={refresh}
+        onConnectKey={(provider) => { setReturnToAgentSettings(true); setAgentModelOpen(false); setConnecting(provider); }}
+        desktop={desktop}
       />
       <Toaster position="top-center" theme={theme} />
     </>

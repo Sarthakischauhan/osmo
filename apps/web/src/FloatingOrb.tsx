@@ -7,6 +7,7 @@ import { type AgentActivity, hasPreview } from "./compact";
 import type { Turn } from "./feed";
 import { OrbPreview } from "./OrbPreview";
 import { HoverPanel, type Scheduler } from "./hoverPanel";
+import { OrbDrag } from "./orbDrag";
 import { SingleClick } from "./singleClick";
 
 const windowTimers: Scheduler<number> = { after: (callback, ms) => window.setTimeout(callback, ms), cancel: (handle) => window.clearTimeout(handle) };
@@ -14,6 +15,8 @@ const windowTimers: Scheduler<number> = { after: (callback, ms) => window.setTim
 export interface FloatingOrbProps {
   mode: OrbMode;
   outputLevel: () => number;
+  /** Mic level 0..1, so the floating orb reacts while the user talks. */
+  inputLevel?: () => number;
   runs: Runs;
   /** The conversation so far; the box shows its latest spoken lines. */
   turns: readonly Turn[];
@@ -28,6 +31,8 @@ export interface FloatingOrbProps {
   placement: BoxPlacement & { placed: number };
   /** The box's content is now `height` tall (0 when there is no box); the window is resized to fit and `placement` updated. */
   onBoxHeight: (height: number) => void;
+  /** A drag of the orb moved the pointer (`dx`, `dy`) screen px: move the window with it. */
+  onMove?: (dx: number, dy: number) => void;
 }
 
 /**
@@ -36,7 +41,7 @@ export interface FloatingOrbProps {
  * with its approvals. It only shows what the session owner passes in;
  * it never opens a connection or a microphone.
  */
-export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight }: FloatingOrbProps) {
+export function FloatingOrb({ mode, outputLevel, inputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight, onMove }: FloatingOrbProps) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const hover = useRef<HoverPanel<number>>();
@@ -45,6 +50,11 @@ export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, o
   talk.current = onTalk;
   const tap = useRef<SingleClick<number>>();
   tap.current ??= new SingleClick<number>(windowTimers, () => talk.current());
+  const move = useRef(onMove);
+  move.current = onMove;
+  const drag = useRef<OrbDrag>();
+  drag.current ??= new OrbDrag((dx, dy) => move.current?.(dx, dy));
+  const [dragging, setDragging] = useState(false);
   const waiting = activity.needingApproval > 0;
   useEffect(() => hover.current?.approvalWaiting(waiting), [waiting]);
   useEffect(() => () => hover.current?.dispose(), []);
@@ -90,14 +100,33 @@ export function FloatingOrb({ mode, outputLevel, runs, turns, activity, theme, o
         className="osmo-floating-orb"
         data-mode={mode}
         aria-label={mode === "speaking" ? "Interrupt" : "Talk to Osmo"}
-        onClick={() => tap.current?.click()}
+        data-dragging={dragging || undefined}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || !onMove) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current?.down(event.screenX, event.screenY);
+        }}
+        onPointerMove={(event) => {
+          if (drag.current?.moveTo(event.screenX, event.screenY) && !dragging) setDragging(true);
+        }}
+        onPointerUp={() => {
+          drag.current?.up();
+          setDragging(false);
+        }}
+        onPointerCancel={() => {
+          drag.current?.up();
+          setDragging(false);
+        }}
+        onClick={() => {
+          if (drag.current?.takeClick() !== false) tap.current?.click();
+        }}
         onDoubleClick={() => {
           tap.current?.cancel();
           onExpand();
         }}
         {...track("orb")}
       >
-        <GlassOrb mode={mode} outputLevel={outputLevel} />
+        <GlassOrb mode={mode} outputLevel={outputLevel} inputLevel={inputLevel} />
       </button>
       {open && (
         <div ref={box} className="osmo-floating-box osmo-scroll" data-placed={placement.placed > 0 || undefined} {...track("panel")} onPointerDown={() => hover.current?.pin()}>

@@ -15,6 +15,7 @@ export const CHANNELS = Object.freeze({
   send: 'session:send',
   showFull: 'window:show-full',
   box: 'orb:box',
+  move: 'orb:move',
   openThread: 'workspace:thread',
   // main -> windows (send)
   event: 'session:event',
@@ -106,6 +107,15 @@ export function validateClientEvent(value) {
       throw new Error('Unsupported session event');
   }
   return value;
+}
+
+/** A drag of the orb: how far the pointer moved on screen since the last step, px. */
+export function validateOrbMove(value) {
+  onlyKeys(value, ['dx', 'dy'], 'orb move');
+  for (const key of ['dx', 'dy']) {
+    if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || Math.abs(value[key]) > 10000) throw new Error(`Invalid ${key}`);
+  }
+  return { dx: value.dx, dy: value.dy };
 }
 
 /** The orb window's hover box: how tall its content is (0 = closed), at most `BOX_MAX_HEIGHT`. */

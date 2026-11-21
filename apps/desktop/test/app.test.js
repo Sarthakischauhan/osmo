@@ -188,3 +188,20 @@ test('quitting lets the workspace close', () => {
   workspace().emit('close', { preventDefault: () => prevented++ });
   assert.equal(prevented, 0);
 });
+
+test('dragging the orb moves its window, keeps it on screen, and the hover box opens from where it now is', async () => {
+  const start = { ...orb().bounds };
+  assert.deepEqual(await call(orb(), CHANNELS.move, { dx: -100, dy: -50 }), { side: 'below', orbLeft: 0 });
+  assert.deepEqual(orb().bounds, { ...start, x: start.x - 100, y: start.y - 50 });
+  await call(orb(), CHANNELS.move, { dx: 9000, dy: 9000 });
+  const area = { x: 0, y: 0, width: 1600, height: 900 };
+  assert.equal(orb().bounds.x + orb().bounds.width, area.x + area.width);
+  assert.equal(orb().bounds.y + orb().bounds.height, area.y + area.height);
+  // The box is open while it moves: the window keeps its room, flipped above at the bottom of the screen.
+  assert.equal((await call(orb(), CHANNELS.box, 200)).side, 'above');
+  await call(orb(), CHANNELS.move, { dx: -9000, dy: -9000 });
+  assert.deepEqual(orb().bounds, { x: area.x, y: area.y, width: 360, height: 112 + 200 });
+  await call(orb(), CHANNELS.box, 0);
+  await assert.rejects(async () => call(workspace(), CHANNELS.move, { dx: 1, dy: 1 }), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.move, { dx: 'far', dy: 1 }), /Invalid/);
+});

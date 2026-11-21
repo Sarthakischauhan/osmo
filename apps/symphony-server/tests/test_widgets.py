@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from symphony_server.widgets import describe_widget, widget_adapter
+from symphony_server.widgets import RENDER_WIDGET_PARAMETERS, describe_widget, widget_adapter
+
+
+def test_html_widget_tool_schema_includes_osmo_canvas_design_guidance() -> None:
+    description = RENDER_WIDGET_PARAMETERS["properties"]["props"]["description"]
+    for token in ("#0a0a0a", "#ededed", "#3ecf8e", "accessible", "responsive", "self-contained"):
+        assert token in description
 
 
 def test_chart_description_names_series_and_points() -> None:

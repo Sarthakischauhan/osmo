@@ -1,8 +1,9 @@
 """The provider namespaces harness runs and images stream from (`grok`, `openai`, `vercel`, `gemini`).
 
 One `ProviderRouter` is registered per namespace on the shared ModelRegistry, once; ModelAccess
-swaps its core_ai text provider whenever the provider's credential changes, so a run always
-calls the provider with the key the server holds right now."""
+swaps its core_ai providers whenever the provider's credentials change, so a run always
+calls the provider with the credential the server holds right now. Text can run on a subscription
+(subscriptions.py); images always run on the API key."""
 
 from __future__ import annotations
 
@@ -20,7 +21,10 @@ class ProviderNotConnected(LookupError):
 class ProviderRouter(BaseProvider):
     def __init__(self, namespace: str) -> None:
         self.namespace = namespace
+        # Text runs: the subscription's provider when signed in, else the API key's.
         self.text: BaseProvider | None = None
+        # Images: the API key's provider only (no subscription documents image generation).
+        self.images: BaseProvider | None = None
 
     async def stream(
         self,
@@ -42,7 +46,9 @@ class ProviderRouter(BaseProvider):
             yield event
 
     async def generate_image(self, model_name: str, prompt: str, output_format: str = "png") -> tuple[bytes, str]:
-        return await self.connected().generate_image(model_name, prompt, output_format)
+        if self.images is None:
+            raise ProviderNotConnected(f"{self.namespace}: images need an API key; add one in the Providers panel")
+        return await self.images.generate_image(model_name, prompt, output_format)
 
     def connected(self) -> BaseProvider:
         if self.text is None:

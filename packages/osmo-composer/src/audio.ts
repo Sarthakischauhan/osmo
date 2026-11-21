@@ -16,8 +16,14 @@ registerProcessor("osmo-mic-tap", OsmoMicTap);
 export class MicCapture {
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  readonly analyser: AnalyserNode;
 
-  constructor(private readonly context: AudioContext) {}
+  constructor(private readonly context: AudioContext) {
+    this.analyser = context.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.45;
+  }
 
   async start(onFrame: (pcm: ArrayBuffer) => void): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({
@@ -26,22 +32,42 @@ export class MicCapture {
     const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
     await this.context.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
-    const source = this.context.createMediaStreamSource(this.stream);
+    this.source = this.context.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.context, "osmo-mic-tap");
     const batcher = new SampleBatcher();
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       for (const chunk of batcher.push(event.data)) onFrame(floatToPcm16(chunk));
     };
-    source.connect(this.node);
+    this.source.connect(this.node);
+    // The analyser is only read for the orb; it is not connected to the speakers.
+    this.source.connect(this.analyser);
+  }
+
+  private readonly samples = new Float32Array(256);
+
+  /** Mic loudness right now, 0..1. Zero until capture has started. */
+  level(): number {
+    if (!this.source) return 0;
+    return loudness(this.analyser, this.samples);
   }
 
   stop(): void {
     this.node?.port.close();
     this.node?.disconnect();
+    this.source?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     this.node = null;
+    this.source = null;
     this.stream = null;
   }
+}
+
+/** RMS of an analyser's time domain, scaled so speech lands mid-range. */
+export function loudness(analyser: AnalyserNode, samples: Float32Array<ArrayBuffer>): number {
+  analyser.getFloatTimeDomainData(samples);
+  let sum = 0;
+  for (const sample of samples) sum += sample * sample;
+  return Math.min(1, Math.sqrt(sum / samples.length) * 4);
 }
 
 /** Gapless PCM16 playback with an instant flush for barge-in. */
@@ -57,6 +83,7 @@ export class PcmPlayer {
   ) {
     this.analyser = context.createAnalyser();
     this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.45;
     this.analyser.connect(context.destination);
   }
 
@@ -64,10 +91,7 @@ export class PcmPlayer {
 
   /** Output loudness right now, 0..1 (RMS of what is playing, scaled so speech lands mid-range). */
   level(): number {
-    this.analyser.getFloatTimeDomainData(this.samples);
-    let sum = 0;
-    for (const sample of this.samples) sum += sample * sample;
-    return Math.min(1, Math.sqrt(sum / this.samples.length) * 4);
+    return loudness(this.analyser, this.samples);
   }
 
   get playing(): boolean {

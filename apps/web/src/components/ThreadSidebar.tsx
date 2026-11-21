@@ -1,5 +1,5 @@
 import type { Thread } from "@osmo/osmo-composer";
-import { History, MoreHorizontal, PanelLeft, Plus } from "lucide-react";
+import { Settings, History, MoreHorizontal, PanelLeft, Plus, ListTodo } from "lucide-react";
 import { type ReactNode, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -46,10 +46,13 @@ export interface ThreadSidebarProps {
   initialRenaming?: string;
   now?: number;
   footer?: ReactNode;
+  /** Open the settings screen. */
+  onOpenSettings?: () => void;
+  onOpenWorkbench?: () => void;
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenWorkbench }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -81,6 +84,7 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
             <IconButton label="New thread" hint="⌘K" onClick={onNew}>
               <Plus size={16} />
             </IconButton>
+            {onOpenWorkbench && <IconButton label="Tasks" onClick={onOpenWorkbench}><ListTodo size={16} /></IconButton>}
             <IconButton label="History" onClick={toggleSidebar}>
               <History size={16} />
             </IconButton>
@@ -92,6 +96,7 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
               <span>New thread</span>
               <kbd>⌘K</kbd>
             </button>
+            {onOpenWorkbench && <button type="button" className="osmo-new-thread" onClick={onOpenWorkbench}><ListTodo size={16} aria-hidden /><span>Tasks</span></button>}
             {groups.length === 0 ? (
               <div className="osmo-sidebar-empty">
                 <p className="osmo-sidebar-empty-title">No threads yet</p>
@@ -125,6 +130,17 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
           </>
         )}
       </SidebarContent>
+      {onOpenSettings && (
+        <SidebarFooter className="osmo-settings-footer">
+          {collapsed ? (
+            <IconButton label="Settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
+          ) : (
+            <button type="button" className="osmo-new-thread osmo-settings-button" onClick={onOpenSettings}>
+              <Settings size={16} aria-hidden /><span>Settings</span>
+            </button>
+          )}
+        </SidebarFooter>
+      )}
       {footer && <SidebarFooter className="osmo-desktop-footer">{footer}</SidebarFooter>}
       <SidebarRail />
       <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>

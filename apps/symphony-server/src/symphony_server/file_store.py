@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -27,6 +28,7 @@ class FileSecretStore:
 
     def __init__(self, path: Path | None, key: str | None = None) -> None:
         self.path = path
+        self.lock = threading.RLock()
         self.fernet = Fernet(key.encode() if key else self.keyfile_key())
         self.owners: dict[str, dict[str, ProviderAuth]] = self.load()
 
@@ -68,15 +70,19 @@ class FileSecretStore:
         staging.replace(self.path)
 
     def get(self, owner: str, provider: str) -> ProviderAuth | None:
-        return self.owners.get(owner, {}).get(provider)
+        with self.lock:
+            return self.owners.get(owner, {}).get(provider)
 
     def put(self, owner: str, auth: ProviderAuth) -> None:
-        self.owners.setdefault(owner, {})[auth.provider] = auth
-        self.save()
-
-    def delete(self, owner: str, provider: str) -> None:
-        if self.owners.get(owner, {}).pop(provider, None) is not None:
+        with self.lock:
+            self.owners.setdefault(owner, {})[auth.provider] = auth
             self.save()
 
+    def delete(self, owner: str, provider: str) -> None:
+        with self.lock:
+            if self.owners.get(owner, {}).pop(provider, None) is not None:
+                self.save()
+
     def list_providers(self, owner: str) -> list[str]:
-        return sorted(self.owners.get(owner, {}))
+        with self.lock:
+            return sorted(self.owners.get(owner, {}))
