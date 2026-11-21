@@ -49,7 +49,7 @@ export function FeedTurn({ turn, step, onDecide, compact = false }: FeedTurnProp
             {!compact &&
               turn.widgets.map((widget) => {
                 const part = toWidgetPart(widget.id, widget.type, widget.props);
-                return part ? <MessageContent key={widget.id} parts={[part]} /> : null;
+                return part ? <div className="osmo-widget-container" key={widget.id}><MessageContent parts={[part]} /></div> : <p className="osmo-widget-error" role="status" key={widget.id}>This {widget.type} widget could not be displayed.</p>;
               })}
           </div>
         </div>

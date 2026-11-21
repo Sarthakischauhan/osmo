@@ -18,9 +18,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
+import { AgentWorkbench } from "@/components/AgentWorkbench";
 import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
 import { AsciiHome } from "@/components/home/AsciiHome";
+import { VoiceField } from "@/components/home/VoiceField";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
@@ -71,6 +73,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadId, setThreadId] = useState<string>();
+  const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [runs, setRuns] = useState<Runs>({});
   const approvals = useRef<ApprovalRequest[]>([]);
   const now = useNow();
@@ -111,6 +114,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   }, []);
   const openThread = useCallback(
     async (id: string | undefined) => {
+      setWorkbenchOpen(false);
       end();
       void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
@@ -334,6 +338,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const currentThought = liveThought(feed.turns);
   const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
   const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
+  // The welcome screen holds the orb at the centre over the voice field; the first turn docks it.
+  const home = !workbenchOpen && feed.turns.length === 0;
 
   return (
     <>
@@ -347,13 +353,15 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
         onOpenSettings={() => setAgentModelOpen(true)}
+        onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
-      <SidebarInset className="app">
+      <SidebarInset className="app" data-home={home}>
+        {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
         <header className="topbar">
           <div className="brand">
             {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
             <img className="brand-mark" src="/favicon.svg" alt="" width={18} height={18} />
-            <strong>{conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
+            <strong>{workbenchOpen ? "Tasks" : conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
             {session.startedAt !== undefined && <Clock since={session.startedAt} />}
@@ -365,6 +373,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
           </div>
         </header>
 
+        {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} /> : <>
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
             <div className="osmo-scroll-host">
@@ -393,7 +402,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
               awaitingChoice={pending !== undefined}
               activity={showOrbBubble ? (
                 <section aria-label="Orb activity">
-                  {showThought && <div className="osmo-compact-thinking"><strong>Thinking</strong><p>{currentThought.reasoning || "Thinking…"}</p></div>}
+                  {showThought && <div className="osmo-compact-thinking"><strong>Thinking</strong><p>{currentThought.reasoning}</p></div>}
                   <CompactAgentActivity activity={orbActivity} runs={runs} onDecide={decide} />
                 </section>
               ) : undefined}
@@ -416,6 +425,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
               }
             />
         </footer>
+        </>}
       </SidebarInset>
       <ConnectProviderDialog
         provider={connecting}

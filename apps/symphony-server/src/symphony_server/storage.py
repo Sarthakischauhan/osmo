@@ -92,7 +92,7 @@ class Storage(Protocol):
 
     def connections(self) -> list[ProviderConnection]: ...
 
-    def interrupt_unfinished(self, reason: str) -> int: ...
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int: ...
 
     def setting(self, key: str) -> str | None: ...
 
@@ -273,14 +273,16 @@ class SQLiteStorage:
             rows = db.execute("SELECT * FROM runs WHERE thread_id = ? ORDER BY created_at, run_id", (thread_id,)).fetchall()
         return [run_row(row) for row in rows]
 
-    def interrupt_unfinished(self, reason: str) -> int:
-        """Mark runs that cannot still be executing as failed. Live execution is in-process, so a
-        restart cannot resume one; the stored record must not keep saying that it is running."""
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int:
+        """Mark runs that are not executing any more as failed, except `keep` (the runs the durable
+        backend resumed); the stored record must not keep saying that the others are running."""
         now = time.time()
+        held = tuple(keep)
+        excluded = f" AND run_id NOT IN ({', '.join('?' for _ in held)})" if held else ""
         with self.transaction() as db:
             changed = db.execute(
-                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')",
-                (reason, now),
+                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')" + excluded,
+                (reason, now, *held),
             )
         return changed.rowcount
 

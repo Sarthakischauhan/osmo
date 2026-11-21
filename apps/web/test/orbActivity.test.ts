@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentActivity } from "../src/compact";
-import { orbBubbleVisible } from "../src/orbActivity";
+import { liveThought, orbBubbleVisible } from "../src/orbActivity";
 
 const quiet = agentActivity({}, [], undefined, 0);
 
@@ -21,9 +21,16 @@ describe("the thought bubble above the orb", () => {
     expect(orbBubbleVisible("thinking", quiet, false)).toBe(false);
   });
 
-  it("stays up for a run that is still going after the voice state leaves thinking", () => {
+  it("keeps the picker clear when a run has no thinking tokens", () => {
     const running = { ...quiet, cards: [{ runId: "r", task: "Look up", status: "running" as const, detail: undefined, approval: undefined }], running: 1 };
-    expect(orbBubbleVisible("listening", running, false)).toBe(true);
-    expect(orbBubbleVisible("idle", { ...quiet, elsewhere: 1 }, false)).toBe(true);
+    expect(orbBubbleVisible("working", running, false)).toBe(false);
+    expect(orbBubbleVisible("idle", { ...quiet, elsewhere: 1 }, false)).toBe(false);
+  });
+
+  it("requires non-whitespace reasoning on the live turn", () => {
+    const turn = { role: "assistant" as const, key: "a", text: "", thinking: true, activities: [], widgets: [], runs: [] };
+    expect(liveThought([turn])).toBeUndefined();
+    expect(liveThought([{ ...turn, reasoning: "  " }])).toBeUndefined();
+    expect(liveThought([{ ...turn, reasoning: "Considering the options" }])?.reasoning).toBe("Considering the options");
   });
 });

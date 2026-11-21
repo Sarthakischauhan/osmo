@@ -96,7 +96,7 @@ export function ScrollDirectionBar({ target, label = "Scroll position" }: Scroll
         onClick={() => step(-1)}
       >
         <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M2.5 7.5 6 4l3.5 3.5" />
+          <path d="M2.5 6h7" />
         </svg>
       </button>
       <button
@@ -122,7 +122,7 @@ export function ScrollDirectionBar({ target, label = "Scroll position" }: Scroll
         onClick={() => step(1)}
       >
         <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M2.5 4.5 6 8l3.5-3.5" />
+          <path d="M2.5 6h7" />
         </svg>
       </button>
     </div>

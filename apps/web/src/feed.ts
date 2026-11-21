@@ -170,6 +170,11 @@ export function feedFromMessages(
     if (at === -1) at = lastAssistantIndex(feed.turns);
     const card: RunCard = { runId: run.runId, task: run.task, status: run.status, phases: [], result: run.result ?? undefined };
     if (at !== -1) feed = withRun(feed, at, card);
+    else {
+      // Tasks started from the workbench may not have voice messages to attach to.
+      const assistant: AssistantTurn = { role: "assistant", key: `a${feed.seq}`, text: "", activities: [], widgets: [], runs: [card] };
+      feed = { seq: feed.seq + 1, turns: [...feed.turns, assistant] };
+    }
   }
   return feed;
 }
