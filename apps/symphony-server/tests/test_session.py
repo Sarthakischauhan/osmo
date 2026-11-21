@@ -126,6 +126,7 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert names == {
             "render_widget", "update_widget", "write_code", "set_voice",
             "run_agent", "agent_status", "cancel_agent",
+            "vault_search", "vault_read", "vault_write",
         }
         assert all(tool["type"] == "function" for tool in session["tools"])
 

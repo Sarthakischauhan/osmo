@@ -64,6 +64,13 @@ def activity_label(name: str, args: Mapping[str, Any]) -> str:
         return f"Typing · {args.get('target', '')}"
     if name == "browser_scroll":
         return f"Scrolling {args.get('direction', '')}"
+    if name == "vault_search":
+        return f"Searching your notes · {args.get('query', '')}"
+    if name == "vault_read":
+        return f"Reading {args.get('path', '')}"
+    if name == "vault_write":
+        verb = {"create": "Creating", "replace": "Rewriting", "append": "Adding to"}.get(str(args.get("mode") or "append"), "Writing")
+        return f"{verb} {args.get('path', '')}"
     if name == "create_image":
         return "Drawing a picture"
     if name == "workspace_open":

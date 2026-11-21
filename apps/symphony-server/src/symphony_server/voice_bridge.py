@@ -41,6 +41,7 @@ from websockets.exceptions import WebSocketException
 
 from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
+from symphony_server.approvals import APPROVAL_REQUIRED, ApprovalAddon, ApprovalBroker, ApprovalPayload, ApprovalResolvedPayload
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.browser import BrowserSession
 from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
@@ -56,6 +57,8 @@ from symphony_server.protocol import (
     DesktopConfigure,
     DesktopResult,
     Interrupt,
+    ApprovalRequest,
+    ApprovalResolved,
     ModelsEvent,
     OsmoState,
     ServerEvent,
@@ -113,6 +116,10 @@ UNHEARD_WAIT_S = 10.0
 # Tools whose result needs no answer when the answer that called them already said something:
 # "I'll look into it" is enough, and a second line after run_agent returns only repeats it.
 ANNOUNCED_TOOLS = frozenset({"run_agent"})
+# The run id a voice tool's approval card carries: it belongs to the voice session, not to an agent run.
+VOICE_RUN = "voice"
+# A voice tool waits this long for the user's Approve / Deny; the voice turn is held meanwhile, so it is shorter than a run's.
+VOICE_APPROVAL_TIMEOUT_S = 120.0
 
 
 class VoiceToolSink(EventSink):
@@ -166,6 +173,8 @@ class VoiceBridge:
         board: WidgetBoard,
         previews: PreviewCache,
         default_voice: str,
+        broker: ApprovalBroker,
+        approval_tools: frozenset[str],
     ) -> None:
         self.browser, self.instructions = browser, instructions
         self.desktop = DesktopSession(self.emit)
@@ -175,6 +184,9 @@ class VoiceBridge:
         voice_tools = [*tools, RunAgentTool(self.desk), AgentStatusTool(self.desk), CancelAgentTool(self.desk)]
         self.tools = {tool.name: tool for tool in voice_tools}
         self.sink = VoiceToolSink(self)
+        # The voice model's risky tools (vault_write, ...) wait on the user exactly as an agent run's do.
+        self.broker = broker
+        self.approvals = ApprovalAddon(broker, f"voice-{secrets.token_hex(6)}", approval_tools, VOICE_APPROVAL_TIMEOUT_S)
         self.thread: ThreadRecord | None = None
         self.voice: VoiceSession | None = None
         self.selection = default_selection(access.models(), default_voice)
@@ -225,6 +237,7 @@ class VoiceBridge:
                 task.cancel()
             if self.thread is not None:
                 self.agents.unobserve(self.thread.id, self)
+            self.broker.deny_session(self.approvals.session_id)
             await self.close_voice()
 
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
@@ -622,6 +635,9 @@ class VoiceBridge:
         if not isinstance(args, dict):
             return json.dumps({"error": "arguments must be a JSON object"})
         await self.set_state("working", activity_label(call.name, args))
+        refused = await self.approvals.before_tool(tool_name=call.name, arguments=args, emit=self.approval_event)
+        if refused is not None:
+            return json.dumps({"error": refused})
         token = RUN_DESKTOP.set(self.desktop)
         try:
             with tracing.tool_call(call.name, args) as observation:
@@ -637,6 +653,15 @@ class VoiceBridge:
                 return result
         finally:
             RUN_DESKTOP.reset(token)
+
+    async def approval_event(self, kind: str, payload: dict[str, Any]) -> None:
+        """A voice tool's approval, as the same feed card an agent run's approval gets."""
+        if kind == APPROVAL_REQUIRED:
+            asked = ApprovalPayload.model_validate(payload)
+            await self.emit(ApprovalRequest(approvalId=asked.approval_id, runId=VOICE_RUN, tool=asked.tool, summary=asked.summary, arguments=asked.arguments))
+        else:
+            resolved = ApprovalResolvedPayload.model_validate(payload)
+            await self.emit(ApprovalResolved(approvalId=resolved.approval_id, runId=VOICE_RUN, approved=resolved.approved))
 
     async def turn_over(self) -> None:
         """No answer is under way: apply a deferred model switch, and go back to listening."""

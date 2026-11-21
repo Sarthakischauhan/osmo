@@ -17,6 +17,8 @@ dependencies = [
     "cryptography>=43",
     "infisicalsdk>=1.0.17",
     "langfuse==5.0.4",
+    # Note vaults: the file watcher that keeps the search index fresh.
+    "watchfiles>=1.0",
 ]
 
 [project.scripts]

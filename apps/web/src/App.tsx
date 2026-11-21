@@ -30,10 +30,13 @@ import { toast } from "sonner";
 import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
-import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
 import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { UsageDialog } from "@/components/UsageDialog";
+import { NotesView } from "@/components/NotesView";
+import type { SidebarPlace } from "@/components/ThreadSidebar";
+import { NotebookPen } from "lucide-react";
 import { FeedTurn } from "./FeedTurn";
 import { agentActivity } from "./compact";
 import { liveThought, orbBubbleVisible } from "./orbActivity";
@@ -61,6 +64,15 @@ export function App() {
   );
 }
 
+/** The main pane's screens; `#notes` (etc.) in the URL opens one directly. */
+export type AppView = "chat" | "notes";
+const VIEWS: readonly AppView[] = ["chat", "notes"];
+
+function initialView(): AppView {
+  const hash = window.location.hash.slice(1);
+  return VIEWS.find((view) => view === hash) ?? "chat";
+}
+
 function useNow(): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -86,6 +98,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const savePick = useRef<(next: VoiceSelection) => void>();
   const [liveUsage, setLiveUsage] = useState<UsageRecord>();
   const [usageOpen, setUsageOpen] = useState(false);
+  // The main pane: the conversation, or one of Osmo's other screens (the orb stays in the dock on all of them).
+  const [view, setView] = useState<AppView>(initialView);
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -123,6 +137,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       end();
       void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
+      setView("chat");
       if (id === undefined) {
         dispatchFeed({ kind: "load", feed: emptyFeed });
         return;
@@ -344,13 +359,23 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
   const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
   // The welcome screen holds the orb at the centre over the voice field; the first turn docks it.
-  const home = !workbenchOpen && feed.turns.length === 0;
+  const home = view === "chat" && !workbenchOpen && feed.turns.length === 0;
+
+  const place = (id: Exclude<AppView, "chat">, label: string, icon: ReactNode): SidebarPlace => ({
+    id,
+    label,
+    icon,
+    active: view === id,
+    onOpen: () => setView(id),
+  });
+  const places = [place("notes", "Notes", <NotebookPen size={16} aria-hidden />)];
+  const screen = view === "notes" ? <NotesView /> : undefined;
 
   return (
     <>
       <ThreadSidebar
         threads={threads}
-        activeId={threadId}
+        activeId={view === "chat" ? threadId : undefined}
         onSelect={(id) => void openThread(id)}
         onNew={() => void openThread(undefined)}
         onRename={(id, title) => void renameThread(id, title)}
@@ -360,9 +385,11 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onOpenSettings={() => setAgentModelOpen(true)}
         onOpenWorkbench={() => setWorkbenchOpen(true)}
         onOpenUsage={() => setUsageOpen(true)}
+        places={places}
       />
       <SidebarInset className="app" data-home={home}>
         {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
+        {screen !== undefined ? <div className="osmo-screen">{screen}</div> : <>
         <header className="topbar">
           <div className="brand">
             {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
@@ -400,6 +427,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             </div>
           </BrowserControlsContext.Provider>
         </WidgetProvider>
+        </>}
 
         <footer className="dock">
 
