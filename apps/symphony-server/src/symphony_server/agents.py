@@ -343,15 +343,27 @@ class AgentRuns:
         await self.show(changed.threadId, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
 
     async def show(self, thread_id: str, event: ServerEvent) -> None:
-        """Show `event` to whoever observes the thread."""
+        """Best-effort live UI delivery. A broken socket must not fail the durable run."""
         observer = self.observers.get(thread_id)
         if observer is not None:
-            await observer.show(event)
+            try:
+                await observer.show(event)
+            except Exception:
+                log.exception("agent observer delivery failed (thread=%s)", thread_id)
+                if self.observers.get(thread_id) is observer:
+                    self.observers.pop(thread_id, None)
 
     async def notify(self, record: AgentRunRecord, notice: Notice) -> None:
+        """Persist notifications before attempting voice delivery; reconnect can replay history."""
+        self.storage.add_message(record.threadId, "agent", notice.text)
         observer = self.observers.get(record.threadId)
         if observer is not None:
-            await observer.tell(notice)
+            try:
+                await observer.tell(notice)
+            except Exception:
+                log.exception("agent notice delivery failed (run=%s)", record.runId)
+                if self.observers.get(record.threadId) is observer:
+                    self.observers.pop(record.threadId, None)
 
 
 class RunList(BaseModel):
