@@ -131,6 +131,7 @@ class VoiceTurns:
         """React to speech starting and stopping, transcripts, audio and errors."""
         if isinstance(event, SpeechStarted):
             log.debug("voice VAD speech_started")
+            self.idle.clear()
             # Barge-in: stop the speech (never an agent run) and tell the client to flush its
             # playback queue now (a plain `listening` at the end of a turn must not cut audio off).
             await self.cut_off(voice)
