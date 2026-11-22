@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 from collections.abc import Coroutine, Sequence
 from typing import Any
@@ -160,8 +161,8 @@ class VoiceBridge:
         try:
             await self.voice.send_audio(pcm)
             self.audio_frames += 1
-            if self.audio_frames % 50 == 0:
-                log.debug("voice PCM frames forwarded to provider: %d", self.audio_frames)
+            if self.audio_frames % 50 == 0 and os.getenv("OSMO_AUDIO_DEBUG") == "1":
+                log.info("voice PCM frames forwarded to provider: %d", self.audio_frames)
         except WebSocketException:
             await self.voice_lost()
 
