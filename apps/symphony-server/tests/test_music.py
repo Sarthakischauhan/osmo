@@ -112,6 +112,10 @@ def test_search_needs_every_word_and_ranks_title_hits_first(music_dir: Path) -> 
     assert len(library.search("", limit=2)) == 2
 
 
+# What the app's own page sends; the token route refuses anything else when there is no app token.
+SAME_ORIGIN = {"sec-fetch-site": "same-origin"}
+
+
 def music_client(music_dir: Path, handler: Any = None, client_id: str | None = None, grok: FakeGrok | None = None) -> TestClient:
     settings = Settings(music_dirs=(MusicRoot(music_dir),), spotify_client_id=client_id, xai_base_url=grok.base_url if grok else DEFAULT_XAI_BASE_URL)
     if handler is None:
@@ -255,12 +259,12 @@ def test_the_spotify_routes_sign_in_and_hand_the_app_a_token(music_dir: Path) ->
     with music_client(music_dir, spotify_api, client_id="client-123") as client:
         url = client.get("/api/music/spotify/login").json()["url"]
         query = parse_qs(urlsplit(url).query)
-        assert query["redirect_uri"] == ["http://testserver/api/music/spotify/callback"]
-        assert client.get("/api/music/spotify/token").status_code == 409
+        assert query["redirect_uri"] == ["http://127.0.0.1:8787/api/music/spotify/callback"]
+        assert client.get("/api/music/spotify/token", headers=SAME_ORIGIN).status_code == 409
         page = client.get("/api/music/spotify/callback", params={"code": "c", "state": query["state"][0]})
         assert page.status_code == 200 and "Spotify is connected" in page.text
         assert client.get("/api/music/status").json()["spotifyConnected"] is True
-        assert client.get("/api/music/spotify/token").json()["accessToken"] == "access-1"
+        assert client.get("/api/music/spotify/token", headers=SAME_ORIGIN).json()["accessToken"] == "access-1"
         denied = client.get("/api/music/spotify/callback", params={"error": "access_denied"})
         assert denied.status_code == 400
         assert client.post("/api/music/spotify/logout").status_code == 204

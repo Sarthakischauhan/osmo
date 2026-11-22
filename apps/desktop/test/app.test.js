@@ -8,11 +8,16 @@ import { SWITCH_ACCELERATOR } from '../src/window-mode.js';
 // src/app.js against a stand-in for Electron: the windows, the session in main, and what each window may ask of it.
 const ORIGIN = 'http://127.0.0.1:18787';
 process.env.OSMO_DESKTOP_URL = ORIGIN;
+// A server the user runs with this token, as `OSMO_DESKTOP_TOKEN=... make server` would.
+const TOKEN = 'launch-secret';
+process.env.OSMO_DESKTOP_TOKEN = TOKEN;
+const requests = [];
+globalThis.fetch = async (url, init) => { requests.push({ url, init }); return { ok: true, json: async () => ({ automations: [], runs: [] }) }; };
 register('./support/electron-hooks.js', import.meta.url);
 
 class FakeSocket {
   static all = [];
-  constructor(url) { this.url = url; this.readyState = 0; this.sent = []; FakeSocket.all.push(this); }
+  constructor(url, protocols) { this.url = url; this.protocols = protocols; this.readyState = 0; this.sent = []; FakeSocket.all.push(this); }
   send(data) { this.sent.push(data); }
   close() { this.readyState = 3; this.closed = true; queueMicrotask(() => this.onclose?.({})); }
   open() { this.readyState = 1; this.onopen?.({}); }
@@ -220,4 +225,18 @@ test('a tray item keeps automations visible with the window closed, and Osmo nev
 
 test('Widevine (castLabs ECS components) is waited for once at startup', () => {
   assert.equal(fake.componentsReady, 1);
+});
+
+test('the windows carry the token as an HttpOnly cookie set before any of them loads', () => {
+  assert.deepEqual(fake.cookies, [{ cookie: { url: ORIGIN, name: 'osmo_token', value: TOKEN, httpOnly: true, sameSite: 'strict' }, windowsBefore: 0 }]);
+});
+
+test('main presents the token on every voice socket it opened and every tray request', () => {
+  assert.ok(FakeSocket.all.length > 0);
+  for (const socket of FakeSocket.all) assert.deepEqual(socket.protocols, ['osmo', `osmo-token.${TOKEN}`]);
+  assert.ok(requests.length > 0);
+  for (const { url, init } of requests) {
+    assert.ok(url.startsWith(ORIGIN));
+    assert.equal(init?.headers?.['X-Osmo-Desktop-Token'], TOKEN);
+  }
 });

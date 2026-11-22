@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import AwareDatetime, BaseModel
 
 from symphony_server.calendar_models import Automation, AutomationInput, AutomationRun, CalendarEvent, EventInput, Occurrence, RunStatus, Strict, Trigger
@@ -70,6 +70,12 @@ class PauseBody(Strict):
     """Pause or resume every automation."""
 
     paused: bool
+
+
+class IcsImport(Strict):
+    """An .ics file to import, as JSON: a cross-site form cannot send it (local_access refuses other content types)."""
+
+    ics: str
 
 
 class Imported(BaseModel):
@@ -157,11 +163,10 @@ def create_calendar_router(store: CalendarStore, scheduler: Scheduler) -> APIRou
         scheduler.replan()
 
     @router.post("/calendar/import")
-    async def import_ics(request: Request) -> Imported:
+    async def import_ics(body: IcsImport) -> Imported:
         """Add or update the events of an .ics file (matched by UID)."""
-        data = await request.body()
         try:
-            imported = await asyncio.to_thread(store.import_ics, data)
+            imported = await asyncio.to_thread(store.import_ics, body.ics.encode())
         except ValueError as exc:
             raise HTTPException(400, f"not an .ics calendar: {exc}") from exc
         scheduler.replan()

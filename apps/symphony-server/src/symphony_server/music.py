@@ -19,10 +19,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core_harness import EventSink, Tool
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from symphony_server.local_access import require_same_origin
 from symphony_server.music_library import MEDIA_TYPES, SEARCH_LIMIT_MAX, LocalLibrary, art_of
 from symphony_server.protocol import MusicCommand, MusicState, Track
 from symphony_server.spotify import SpotifyAccount, SpotifyError
@@ -259,9 +260,9 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         return HTMLResponse(CALLBACK_PAGE.format(message="Spotify is connected."))
 
-    @router.get("/spotify/token")
+    @router.get("/spotify/token", dependencies=[Depends(require_same_origin)])
     async def token() -> dict[str, Any]:
-        """A fresh Spotify access token for the app's player."""
+        """A fresh Spotify access token for the app's player, and nothing else (local_access.require_same_origin)."""
         try:
             access, expires = await spotify.access_token()
         except SpotifyError as exc:

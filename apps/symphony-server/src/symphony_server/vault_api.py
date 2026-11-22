@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from symphony_server.local_access import require_app
 from symphony_server.vault_index import Note, NoteEntry, NoteHit, VaultIndex
 from symphony_server.vault_paths import VaultError
 
@@ -48,8 +49,11 @@ class NoteSave(BaseModel):
     mode: Literal["create", "replace"] = "replace"
 
 
-def create_vault_router(index: VaultIndex) -> APIRouter:
-    """The editor's view of the vaults: the user's own reads and edits, which need no approval."""
+def create_vault_router(index: VaultIndex, *, writes_approved: bool) -> APIRouter:
+    """The editor's view of the vaults: the user's own reads and edits, which need no approval.
+
+    When vault_write needs approval (`writes_approved`), saving is the desktop app's alone (see local_access.require_app):
+    otherwise the agent could write a note by calling this route instead of its tool."""
     router = APIRouter(prefix="/api/vault", tags=["vault"])
 
     def refused(exc: VaultError) -> HTTPException:
@@ -87,7 +91,7 @@ def create_vault_router(index: VaultIndex) -> APIRouter:
         except VaultError as exc:
             raise refused(exc) from exc
 
-    @router.put("/note")
+    @router.put("/note", dependencies=[Depends(require_app)] if writes_approved else [])
     async def save(body: NoteSave) -> Note:
         """Save a note from the editor."""
         try:

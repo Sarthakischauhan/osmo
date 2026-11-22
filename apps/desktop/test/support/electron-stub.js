@@ -12,6 +12,8 @@ export const fake = {
   notifications: [],
   loginItems: [],
   componentsReady: 0,
+  // Cookies set on the default session, each with how many windows existed when it was set.
+  cookies: [],
 };
 
 class Emitter {
@@ -23,7 +25,9 @@ class Emitter {
 const defaultSession = {
   setPermissionCheckHandler(handler) { this.check = handler; },
   setPermissionRequestHandler(handler) { this.request = handler; },
+  cookies: { set: async cookie => { fake.cookies.push({ cookie, windowsBefore: fake.windows.length }); } },
 };
+export const session = { defaultSession };
 
 class WebContents extends Emitter {
   constructor() {

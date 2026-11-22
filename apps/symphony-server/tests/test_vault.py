@@ -198,7 +198,8 @@ def test_vault_write_waits_for_approval_by_default() -> None:
 
 
 def test_the_editor_lists_reads_saves_and_refuses_escapes(vault: Vault) -> None:
-    with make_client(Settings(vaults=(vault,))) as client:
+    with make_client(Settings(vaults=(vault,), app_token="launch-secret")) as client:
+        client.headers["X-Osmo-Desktop-Token"] = "launch-secret"
         assert client.get("/api/vault").json() == {"vaults": [{"name": "notes", "root": str(vault.root)}]}
         notes = client.get("/api/vault/notes").json()["notes"]
         assert [n["path"] for n in notes] == ["Projects/osmo.md", "groceries.md"]

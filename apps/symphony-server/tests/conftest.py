@@ -6,12 +6,13 @@ import asyncio
 import json
 import queue
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 from pydantic import SecretStr
 from websockets.asyncio.server import ServerConnection, serve
 
@@ -132,6 +133,17 @@ class FakeGrok:
 # How long the fake waits for a pending `response.create` before treating a pushed
 # `response.created` as a server-VAD response (null metadata).
 REQUEST_WAIT_S = 0.2
+LOCAL_BASE_URL = "http://127.0.0.1:8787"
+
+
+class LocalClient(TestClient):
+    """A TestClient that, like the desktop app, calls the server as 127.0.0.1:8787 (WebSockets included: Starlette
+    otherwise sends them as `testserver`, a host LocalAccess refuses)."""
+
+    def websocket_connect(self, url: str, subprotocols: Sequence[str] | None = None, **kwargs: Any) -> WebSocketTestSession:
+        """Open `url` with the local Host header unless the test sets its own."""
+        headers = {"host": "127.0.0.1:8787", **kwargs.pop("headers", {})}
+        return super().websocket_connect(url, subprotocols, headers=headers, **kwargs)
 
 
 def record_request(message: str | bytes, requests: asyncio.Queue[dict[str, Any]]) -> None:
@@ -186,7 +198,8 @@ def make_client(
         context_limits=context_limits,
         registry=registry,
     )
-    return TestClient(app)
+    # The address the desktop app uses: LocalAccess refuses any other Host.
+    return LocalClient(app, base_url=LOCAL_BASE_URL)
 
 
 def xai_key_store(key: str = "test-key") -> SecretStore:
