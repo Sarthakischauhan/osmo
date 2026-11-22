@@ -146,12 +146,15 @@ describe("click bridge", () => {
     });
   // jsdom has no user activation: each test says whether the user just clicked.
   const activation = (isActive: boolean) => Object.defineProperty(navigator, "userActivation", { value: { isActive, hasBeenActive: isActive }, configurable: true });
+  // The user clicked into the widget's own frame (a real focus on its element), so its activation is theirs.
+  const focusFrame = () => act(() => onlyFrame().focus());
   beforeEach(() => activation(true));
   afterEach(() => activation(false));
 
   it("reports a declared action from its own frame, with the value", () => {
     const onAction = vi.fn();
     render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    focusFrame();
     post(onlyFrame().contentWindow, { osmo: "action", id: "approve", value: "yes" });
     expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, "yes");
   });
@@ -172,6 +175,7 @@ describe("click bridge", () => {
   it("ignores a message the frame posts without a user click", () => {
     const onAction = vi.fn();
     render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    focusFrame();
     activation(false);
     post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
     expect(onAction).not.toHaveBeenCalled();
@@ -180,6 +184,7 @@ describe("click bridge", () => {
   it("takes one answer per widget", () => {
     const onAction = vi.fn();
     render(<HtmlWidget html={DOC} title="t" actions={[...actions, { id: "hold", label: "Hold" }]} onAction={onAction} />);
+    focusFrame();
     post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
     post(onlyFrame().contentWindow, { osmo: "action", id: "hold" });
     expect(onAction).toHaveBeenCalledTimes(1);
@@ -189,7 +194,41 @@ describe("click bridge", () => {
     const onAction = vi.fn();
     render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
     fireEvent.click(screen.getByRole("button", { name: "Open fullscreen" }));
+    focusFrame();
     post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
     expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, undefined);
+  });
+
+  // Re-review N1: the user's activation must come from a gesture on this widget's own frame.
+  it("ignores a message posted while the user is typing or clicking in Osmo itself, outside the frame", () => {
+    const onAction = vi.fn();
+    render(
+      <>
+        <input aria-label="composer" />
+        <HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />
+      </>,
+    );
+    act(() => screen.getByRole("textbox", { name: "composer" }).focus());
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("does not count focus events a script fakes, nor a frame the user has since left", () => {
+    const onAction = vi.fn();
+    render(
+      <>
+        <input aria-label="composer" />
+        <HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />
+      </>,
+    );
+    act(() => {
+      onlyFrame().dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      window.dispatchEvent(new FocusEvent("blur"));
+    });
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    focusFrame();
+    act(() => screen.getByRole("textbox", { name: "composer" }).focus());
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

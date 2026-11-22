@@ -99,6 +99,44 @@ function HtmlFrame({ srcDoc, title, state, height, frame, theme }: HtmlBodyProps
   );
 }
 
+/**
+ * The frame the user last moved focus into with a real click, tap or Tab (trusted focus events on its element, or
+ * this window blurring onto it), or null once focus leaves it. A frame script cannot fake these: its own events stay
+ * in its document, and an opaque-origin frame cannot take focus without the user.
+ */
+function useUserFocusedFrame(frame: RefObject<HTMLIFrameElement | null>): RefObject<HTMLIFrameElement | null> {
+  const focused = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => {
+    const enter = (event: Event) => {
+      const own = frame.current;
+      if (event.isTrusted && own !== null && document.activeElement === own) focused.current = own;
+    };
+    const leave = (event: Event) => {
+      if (event.isTrusted && document.activeElement !== frame.current) focused.current = null;
+    };
+    document.addEventListener("focusin", enter, true);
+    window.addEventListener("blur", enter);
+    document.addEventListener("focusout", leave, true);
+    window.addEventListener("focus", leave);
+    return () => {
+      document.removeEventListener("focusin", enter, true);
+      window.removeEventListener("blur", enter);
+      document.removeEventListener("focusout", leave, true);
+      window.removeEventListener("focus", leave);
+    };
+  }, [frame]);
+  return focused;
+}
+
+/**
+ * Whether a message from the frame can be the user's answer: the user is interacting right now (transient activation)
+ * and that interaction is inside this widget's own frame, which they focused themselves. Activation alone is not
+ * enough: typing or clicking in Osmo itself activates this window too, and a widget's timer could post then.
+ */
+function userGesturedIn(own: HTMLIFrameElement | null, focused: HTMLIFrameElement | null): boolean {
+  return navigator.userActivation?.isActive === true && own !== null && focused === own && document.activeElement === own;
+}
+
 interface HeaderProps {
   title: string;
   zoom: number;
@@ -154,6 +192,7 @@ export function HtmlWidget({ html, title = "Widget", actions, onAction }: HtmlWi
 
   // One answer per widget: after the first accepted action the frame cannot send another.
   const answered = useRef(false);
+  const focused = useUserFocusedFrame(frame);
 
   useEffect(() => {
     if (onAction === undefined || !actions?.length) return;
@@ -163,9 +202,7 @@ export function HtmlWidget({ html, title = "Widget", actions, onAction }: HtmlWi
       const parsed = bridgeMessageSchema.safeParse(event.data);
       const action = parsed.success ? actions.find((declared) => declared.id === parsed.data.id) : undefined;
       if (!parsed.success || !action) return;
-      // Only a real click or key press counts as the user's answer. Activation in the frame also activates this
-      // window, but a frame script posting on its own (a timer, onload) does not, so it cannot answer for the user.
-      if (navigator.userActivation?.isActive !== true) return;
+      if (!userGesturedIn(frame.current, focused.current)) return;
       answered.current = true;
       onAction(action, parsed.data.value);
     };
