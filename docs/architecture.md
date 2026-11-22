@@ -1,0 +1,46 @@
+# Architecture
+
+Osmo combines a voice-first client, a Python session server, Symphony's agent execution, and a protocol-aware Chat SDK. The [README](../README.md) is the product tour; [configuration](configuration.md) covers runtime behavior and integrations.
+
+## Responsibilities
+
+| Part | Responsibility |
+| --- | --- |
+| `apps/web` | Composes the conversation, canvas, Tasks, notes, calendar, and provider UI. |
+| `apps/desktop` | Electron host, orb window, audio bridge, and consent-gated native computer support. |
+| `packages/osmo-composer` | Microphone capture, playback, orb, and browser-side session transport. |
+| `packages/osmo-widgets` | Widget schemas and renderers integrated with Chat SDK. |
+| `apps/symphony-server` | Provider credentials, live voice sessions, tools, background runs, persistence, and integrations. |
+| Symphony / core_ai | Agent turns, tools, model integration, and execution events. |
+| Chat SDK | Protocol-aware conversation rendering and interactive presentation. |
+
+## Voice and session flow
+
+The client captures speech and streams audio to the Python session endpoint. The server's default voice path connects directly to xAI Realtime; this is separate from the background-agent model selection. Model events drive tool execution, validated widget payloads, transcripts, audio, and client activity state. Widget interactions return through the session as user actions.
+
+The protocol separates execution from presentation: the server coordinates work, while the client renders structured events rather than scraping output. The separate `/api` text-run interface uses the vendored `core_server`.
+
+## Interruptions and audio
+
+Talking over Osmo ends its speech, not its background work. The client detects roughly 150 ms of speech, cuts playback locally, and tells the server to interrupt. Audio from that answer still arriving is discarded until the server confirms the interruption.
+
+`packages/osmo-composer/src/echoGuard.ts` keeps playback from being mistaken for user speech: microphone frames are held back unless they stand out from the assistant's audio. While music plays, only speech that stands out from it reaches server turn detection; other frames become silence. The client also ducks music during spoken responses.
+
+## Background work
+
+The voice model delegates with `run_agent` and continues the conversation. Tasks have independent status and cancellation. Approval requests, completion, and failures notify and interrupt the voice model; intermediate steps remain in the task UI and status API.
+
+Durable runs checkpoint conversation and execution events to disk so recoverable work can resume after restart. Browser processes belong to a thread and can outlive individual runs. Calendar automations start ordinary durable runs rather than a separate execution system.
+
+See [configuration](configuration.md) for recovery limits, retention, browser lifecycle, and scheduling semantics.
+
+## Trust and storage boundaries
+
+- Provider keys stay in the server's secret store, separately from conversation records.
+- Threads and integrations use local SQLite storage; durable execution has its own adjacent run database.
+- Browser actions use approvals, site rules, and explicit takeover controls. A persistent Osmo browser profile can carry user logins into later agent runs.
+- macOS coding execution uses Seatbelt workspaces; host-side clone and publish operations are separate from sandbox execution.
+- Vault tools validate paths and enforce approval for writes by default.
+- Desktop computer support requires native consent and acts on the user's primary display, not a server desktop.
+
+These are different boundaries, not one universal sandbox. Review [configuration](configuration.md) and [desktop controls](../apps/desktop/README.md#use) before enabling tools with real-world effects.
