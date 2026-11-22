@@ -188,6 +188,14 @@ class StateEvent(_Event):
     detail: str | None = None
 
 
+class VoiceErrorEvent(_Event):
+    """A recoverable voice/transcription failure, surfaced to the client instead of hidden in server logs."""
+
+    type: Literal["voice.error"] = "voice.error"
+    code: Literal["transcript_timeout", "provider_error"]
+    message: str
+
+
 class TranscriptDelta(_Event):
     type: Literal["transcript.delta"] = "transcript.delta"
     role: Literal["user", "assistant"]
@@ -300,6 +308,7 @@ class UsageEvent(_Event):
 
 ServerEvent = Union[
     StateEvent,
+    VoiceErrorEvent,
     TranscriptDelta,
     WidgetRender,
     WidgetUpdate,

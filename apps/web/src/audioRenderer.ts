@@ -23,11 +23,23 @@ export function browserRuntime(): AudioRuntime {
   const player = new PcmPlayer(context, () => undefined);
   const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
   let music = false;
+  const debugAudio = new URLSearchParams(window.location.search).has("debugAudio");
+  let captured = 0;
+  let forwarded = 0;
+  let guarded = 0;
+  let bargeIns = 0;
   return {
     async start(onFrame, onBargeIn) {
       await context.resume();
       await mic.start((frame) => {
         const step = guard.push(frame, player.playing, player.rms(), performance.now(), music);
+        captured++;
+        forwarded += step.send.length;
+        if (step.send.length === 0) guarded++;
+        if (step.bargeIn) bargeIns++;
+        if (debugAudio && captured % 50 === 0) {
+          console.info("[osmo audio] desktop capture/forwarded/held/bargeIns", { captured, forwarded, guarded, bargeIns, playing: player.playing, music });
+        }
         if (step.bargeIn) {
           // Cut Osmo off here and now, before main and the server hear about it; the rest of that answer still on its
           // way is dropped until main passes on the server's barge-in (a flush).

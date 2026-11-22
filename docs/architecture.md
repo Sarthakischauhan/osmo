@@ -26,6 +26,18 @@ Talking over Osmo ends its speech, not its background work. The client detects r
 
 `packages/osmo-composer/src/echoGuard.ts` keeps playback from being mistaken for user speech: microphone frames are held back unless they stand out from the assistant's audio. While music plays, only speech that stands out from it reaches server turn detection; other frames become silence. The client also ducks music during spoken responses.
 
+## Voice diagnostics and missing transcription
+
+Audio is captured in 100 ms PCM16 frames. EchoGuard gates during assistant playback to avoid self-interruption, but it must **never** suppress the first words after playback stops. When playing music, the guard can still suppress low-volume speech; pause music if debugging quiet speech.
+
+For an opt-in, privacy-safe trace (frame counts only, no PCM or transcripts in these counters):
+
+- Web: open Osmo with `?debugAudio=1` in the URL, then check the browser console for captured/forwarded/held frame counts.
+- Desktop: launch with `OSMO_AUDIO_DEBUG=1`; the hidden audio renderer logs capture/forward/held counters to its console, and the Python server logs frames forwarded to the voice provider.
+- The server logs provider speech-start, speech-stop and transcript-length at DEBUG level. Missing transcripts after 10 seconds and provider voice errors now surface to the client as `voice.error`.
+
+If capture increases but forwarded stays flat, investigate EchoGuard. If forwarded increases but provider speech events do not arrive, check provider connection and VAD. If a transcript reaches the server but does not render, inspect the client event/parser path.
+
 ## Background work
 
 The voice model delegates with `run_agent` and continues the conversation. Tasks have independent status and cancellation. Approval requests, completion, and failures notify and interrupt the voice model; intermediate steps remain in the task UI and status API.

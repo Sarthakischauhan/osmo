@@ -29,7 +29,7 @@ from core_ai.voice import (
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from symphony_server.grok_compat import ReasoningDelta
-from symphony_server.protocol import OsmoState, ServerEvent, TranscriptDelta
+from symphony_server.protocol import OsmoState, ServerEvent, TranscriptDelta, VoiceErrorEvent
 from symphony_server.voice_switch import VoiceSwitch
 from symphony_server.voice_tool_calls import VoiceToolCalls
 from symphony_server.voice_transcript import Transcript
@@ -89,6 +89,9 @@ class TurnHost(Protocol):
     async def voice_lost(self) -> None:
         """The voice session ended on its own."""
 
+    async def flush_notices(self) -> bool:
+        """Deliver queued background-run notices when the active voice turn has finished."""
+
 
 class VoiceTurns:
     """Reads one voice session's events and answers for as long as it is the session's voice."""
@@ -127,11 +130,14 @@ class VoiceTurns:
     async def on_voice_event(self, voice: VoiceSession, event: VoiceEvent) -> None:
         """React to speech starting and stopping, transcripts, audio and errors."""
         if isinstance(event, SpeechStarted):
+            log.debug("voice VAD speech_started")
+            self.idle.clear()
             # Barge-in: stop the speech (never an agent run) and tell the client to flush its
             # playback queue now (a plain `listening` at the end of a turn must not cut audio off).
             await self.cut_off(voice)
             await self.host.set_state("listening", BARGE_IN)
         elif isinstance(event, SpeechStopped):
+            log.debug("voice VAD speech_stopped")
             self.idle.clear()
             utterance = self.transcript.next_utterance()
             self.transcript.unheard.append(utterance)
@@ -140,6 +146,7 @@ class VoiceTurns:
             self.host.spawn(self.expire(utterance))
             await self.host.set_state("thinking")
         elif isinstance(event, UserTranscript):
+            log.debug("voice transcript received (chars=%d)", len(event.text))
             utterance = self.transcript.unheard.pop(0) if self.transcript.unheard else self.transcript.next_utterance()
             await self.host.emit(TranscriptDelta(role="user", text=event.text, itemId=utterance, final=True))
             if event.text:
@@ -159,12 +166,16 @@ class VoiceTurns:
                 log.info("browser gone while sending audio")
         elif isinstance(event, VoiceError):
             log.error("voice model error: %s", event.message)
+            await self.host.emit(VoiceErrorEvent(code="provider_error", message="Voice provider reported an error. Try reconnecting your voice session."))
 
     async def expire(self, utterance: str) -> None:
         """Close an utterance's bubble when its transcript never comes."""
         await asyncio.sleep(UNHEARD_WAIT_S)
         if self.transcript.forget(utterance):
+            log.warning("speech was detected but transcript was not received before timeout (utterance=%s)", utterance)
             await self.host.emit(TranscriptDelta(role="user", text="", itemId=utterance, final=True))
+            await self.host.emit(VoiceErrorEvent(code="transcript_timeout", message="Speech was detected, but transcription did not arrive. Please try again."))
+            await self.host.set_state("listening", "Speech was detected, but transcription did not arrive.")
 
     async def answer(self, voice: VoiceSession) -> None:
         """Read the session's responses in order for as long as it is open: show and store each
@@ -244,6 +255,7 @@ class VoiceTurns:
             self.swap_after_turn = False
             await self.host.switch.apply_swap("tool")
         await self.host.set_state("listening")
+        await self.host.flush_notices()
 
     async def ask(self, voice: VoiceSession) -> None:
         """Ask the model for an answer now."""

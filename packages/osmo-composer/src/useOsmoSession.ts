@@ -143,9 +143,21 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       // A preview plays on the speakers: keep it out of the mic so it is not heard as the user. Osmo's own voice is
       // held back by the echo guard, which also cuts Osmo off here the moment the user talks over it.
       const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
+      const debugAudio = new URLSearchParams(window.location.search).has("debugAudio");
+      let captured = 0;
+      let forwarded = 0;
+      let guarded = 0;
+      let bargeIns = 0;
       await mic.start((frame) => {
         if (previewingRef.current) return;
         const step = guard.push(frame, player.playing, player.rms(), performance.now(), musicPlaying.current);
+        captured++;
+        forwarded += step.send.length;
+        if (step.send.length === 0) guarded++;
+        if (step.bargeIn) bargeIns++;
+        if (debugAudio && captured % 50 === 0) {
+          console.info("[osmo audio] web capture/forwarded/held/bargeIns", { captured, forwarded, guarded, bargeIns, playing: player.playing, music: musicPlaying.current });
+        }
         if (step.bargeIn) {
           player.cut();
           client.send({ type: "interrupt" });

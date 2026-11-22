@@ -9,7 +9,7 @@ from conftest import FakeGrok
 from core_harness import ControlPlaneEvent
 from test_agents import Step, agent_client, start_agent
 from test_browser import HoldingAgent
-from test_session import call, next_event, say, tool_output
+from test_session import answer, call, next_event, say, tool_output
 
 from symphony_server.agents import AgentRuns, Notice
 from symphony_server.browser_sessions import BrowserSessions
@@ -107,6 +107,7 @@ def test_phases_never_reach_the_voice_model_and_agent_status_has_the_latest(grok
             if update["status"] == "completed":
                 break
         assert phases == ["Running alpha", "Running beta", None]
+        answer(grok, "Working on it.", "ack1")
         # Nothing but the finished run's own notice was added to the voice conversation, and it asked for a response.
         assert items_until(grok, f"[agent {run_id}]") == [f"[agent {run_id}] done: All done."]
         grok.next_of("response.create")
@@ -128,6 +129,7 @@ def test_agent_status_reports_the_phase_the_run_is_in(grok: FakeGrok) -> None:
         call(grok, "agent_status", {"run_id": run_id}, "s1", "r2")
         status = tool_output(grok)
         assert (status["status"], status["phase"]) == ("running", "Running alpha")
+        answer(grok, "Checking status.", "ack2")
         agent.release.set()
         while next_event(ws, "agent.update")["status"] != "completed":
             pass
@@ -142,6 +144,7 @@ def test_a_failed_run_interrupts_the_voice_model(grok: FakeGrok) -> None:
     agent = HoldingAgent([Step(tool="alpha")])  # no second step: the next model call raises
     with agent_client(grok, agent) as client, client.websocket_connect("/ws") as ws:
         run_id = start_agent(ws, grok, "do one thing")
+        answer(grok, "Working on it.", "ack1")
         agent.release.set()
         texts = items_until(grok, f"[agent {run_id}] failed")
         assert len(texts) == 1

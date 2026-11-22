@@ -27,7 +27,7 @@ from core_harness import EventSink
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 from test_agents import ScriptedAgent, Step, start_agent, told
-from test_session import call, next_event, say, tool_output
+from test_session import answer, call, next_event, say, tool_output
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
@@ -731,6 +731,8 @@ def test_a_run_ending_leaves_its_browser_up_and_streaming_and_the_next_run_reuse
         while (patch := next_event(ws, "widget.update")["patch"]).get("frame") != "data:image/jpeg;base64,/9j/DDDD":
             assert patch != {"status": "ended"}
 
+        # Finish the voice acknowledgement before announcing completion.
+        answer(grok, "Browsing.", "ack1")
         # The next run of the thread gets the same browser: no new chrome, no second widget.
         told(grok, f"[agent {first_run}] done")
         say(grok, "Look at it again.")

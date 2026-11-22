@@ -264,6 +264,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
     case "models":
     case "voice.configured":
     case "voice.preview":
+    case "voice.error":
     case "usage":
       // Voice picker and usage events; the feed has nothing to show for them.
       return feed;

@@ -99,6 +99,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     }
     cues.current?.onServerEvent(event);
     if (event.type === "usage") setLiveUsage(event.usage);
+    if (event.type === "voice.error") toast.error(event.message);
     if (event.type === "music.command") void musicPlayer.command(event);
     // What the server applied (session start, picker, or `set_voice`), or on error what is still in effect.
     if (event.type === "voice.configured") savePick.current?.(event.selection);
