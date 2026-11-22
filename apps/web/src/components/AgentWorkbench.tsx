@@ -1,7 +1,7 @@
 import { ArrowUp, CalendarClock, Check, ChevronDown, CircleAlert, LoaderCircle, Square } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { agentRunSchema, threadApi, type AgentRun } from "@/lib/threads";
-import { decideApproval, fetchRuns, type ApprovalRequest } from "@/lib/runs";
+import { threadApi, type AgentRun } from "@/lib/threads";
+import { decideApproval, fetchRuns, startTask, stopTask, type ApprovalRequest } from "@/lib/runs";
 import { agentModelApi, type AgentModelState } from "@/agentModel";
 import { calendarApi, taskOrigin, taskPrompt, type TaskLink } from "@/lib/calendar";
 
@@ -49,12 +49,7 @@ export function AgentWorkbench({ onOpenThread, onOpenSettings, onOpenAutomation 
     setError("");
     try {
       const thread = await threadApi().create();
-      const response = await fetch("/api/runs/start/task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadId: thread.id, task: text }) });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(typeof body.detail === "string" ? body.detail : `Could not start task (${response.status}).`);
-      }
-      agentRunSchema.parse(await response.json());
+      await startTask(thread.id, text);
       setTask("");
       await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not start task."); }
@@ -62,8 +57,7 @@ export function AgentWorkbench({ onOpenThread, onOpenSettings, onOpenAutomation 
   };
   const stop = async (id: string) => {
     try {
-      const response = await fetch(`/api/runs/${encodeURIComponent(id)}/stop`, { method: "POST" });
-      if (!response.ok) throw new Error("Could not stop task.");
+      await stopTask(id);
       await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Could not stop task."); }
   };
@@ -75,22 +69,7 @@ export function AgentWorkbench({ onOpenThread, onOpenSettings, onOpenAutomation 
   };
   const running = runs.filter(active);
   const recent = runs.filter((run) => !active(run));
-  const renderRun = (run: AgentRun) => {
-    const approval = approvals.find((item) => item.runId === run.runId);
-    const origin = origins[run.runId];
-    return <article className="agent-workbench-run" key={run.runId}>
-      <div className="agent-run-icon" data-status={run.status} aria-hidden="true">{run.status === "running" ? <LoaderCircle size={15} /> : run.status === "completed" ? <Check size={15} /> : <CircleAlert size={15} />}</div>
-      <div className="agent-run-content">
-        <div className="agent-workbench-run-top"><span className="agent-workbench-status" data-status={run.status}>{label(run.status)}</span><time dateTime={new Date(run.createdAt * 1000).toISOString()}>{new Date(run.createdAt * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time></div>
-        <h3>{origin ? taskPrompt(run.task) : run.task}</h3>
-        {origin && onOpenAutomation && <button type="button" className="agent-workbench-origin" onClick={() => onOpenAutomation(origin.automationId)} title="Open the automation in Calendar"><CalendarClock size={12} aria-hidden /><span>{taskOrigin(origin)}</span></button>}
-        {phases[run.runId] && <p role="status">{phases[run.runId]}</p>}
-        {run.result && <details className="agent-run-result"><summary>View result <ChevronDown size={14} /></summary><p>{run.result}</p></details>}
-        {approval && <div className="agent-workbench-approval"><strong>Approval needed</strong><p>{approval.summary}</p><button type="button" onClick={() => void decide(approval.approvalId, true)}>Approve</button><button type="button" onClick={() => void decide(approval.approvalId, false)}>Deny</button></div>}
-        <div className="agent-workbench-actions"><button type="button" onClick={() => onOpenThread(run.threadId)}>Open conversation</button>{active(run) && <button type="button" onClick={() => void stop(run.runId)}><Square size={11} /> Stop</button>}</div>
-      </div>
-    </article>;
-  };
+  const renderRun = (run: AgentRun) => <TaskRow key={run.runId} run={run} approval={approvals.find((item) => item.runId === run.runId)} origin={origins[run.runId]} phase={phases[run.runId]} onOpenThread={onOpenThread} onOpenAutomation={onOpenAutomation} onStop={stop} onDecide={decide} />;
   return <main className="agent-workbench osmo-scroll">
     <div className="agent-workbench-inner">
       <header className="agent-workbench-header"><div><h1>Tasks</h1><p>Give Osmo something to work on in the background.</p></div></header>
@@ -107,4 +86,30 @@ export function AgentWorkbench({ onOpenThread, onOpenSettings, onOpenAutomation 
       </>}
     </div>
   </main>;
+}
+
+interface TaskRowProps {
+  run: AgentRun;
+  approval: ApprovalRequest | undefined;
+  origin: TaskLink | undefined;
+  phase: string | undefined;
+  onOpenThread: (id: string) => void;
+  onOpenAutomation: ((id: string) => void) | undefined;
+  onStop: (id: string) => Promise<void>;
+  onDecide: (id: string, approved: boolean) => Promise<void>;
+}
+
+function TaskRow({ run, approval, origin, phase, onOpenThread, onOpenAutomation, onStop, onDecide }: TaskRowProps) {
+  return <article className="agent-workbench-run">
+      <div className="agent-run-icon" data-status={run.status} aria-hidden="true">{run.status === "running" ? <LoaderCircle size={15} /> : run.status === "completed" ? <Check size={15} /> : <CircleAlert size={15} />}</div>
+      <div className="agent-run-content">
+        <div className="agent-workbench-run-top"><span className="agent-workbench-status" data-status={run.status}>{label(run.status)}</span><time dateTime={new Date(run.createdAt * 1000).toISOString()}>{new Date(run.createdAt * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time></div>
+        <h3>{origin ? taskPrompt(run.task) : run.task}</h3>
+        {origin && onOpenAutomation && <button type="button" className="agent-workbench-origin" onClick={() => onOpenAutomation(origin.automationId)} title="Open the automation in Calendar"><CalendarClock size={12} aria-hidden /><span>{taskOrigin(origin)}</span></button>}
+        {phase && <p role="status">{phase}</p>}
+        {run.result && <details className="agent-run-result"><summary>View result <ChevronDown size={14} /></summary><p>{run.result}</p></details>}
+        {approval && <div className="agent-workbench-approval"><strong>Approval needed</strong><p>{approval.summary}</p><button type="button" onClick={() => void onDecide(approval.approvalId, true)}>Approve</button><button type="button" onClick={() => void onDecide(approval.approvalId, false)}>Deny</button></div>}
+        <div className="agent-workbench-actions"><button type="button" onClick={() => onOpenThread(run.threadId)}>Open conversation</button>{active(run) && <button type="button" onClick={() => void onStop(run.runId)}><Square size={11} /> Stop</button>}</div>
+      </div>
+    </article>;
 }

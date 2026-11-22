@@ -2,7 +2,6 @@ import type { ChangeEvent, ReactNode, RefObject } from "react";
 import { BrowserControlsContext, type BrowserControls, osmoWidgets } from "@osmo/osmo-widgets";
 import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
 import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
-import { AsciiHome } from "@/components/home/AsciiHome";
 import type { Theme } from "@/appearance";
 import type { Runs } from "@/lib/runs";
 import type { Feed } from "@/feed";
@@ -31,7 +30,7 @@ export function ChatFeed({ feed, runs, runsList, theme, connected, browserContro
         <div className="osmo-scroll-host">
           <main ref={scrollRef} className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onChange}>
             {feed.turns.length === 0 ? (
-              <AsciiHome />
+              <div className="osmo-ascii-home chat-welcome"><h1 className="sr-only">New conversation</h1></div>
             ) : (
               <div className="feed">
                 {runsList !== undefined && <div className="osmo-feed-runs">{runsList}</div>}
