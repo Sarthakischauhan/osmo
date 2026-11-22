@@ -129,6 +129,8 @@ class LocalAccess:
         if host_name(host) not in self.hosts:
             return 403, "unknown host"
         origin = headers.get("origin")
+        # Behind a TLS reverse proxy, uvicorn must apply its X-Forwarded-Proto (--proxy-headers, with FORWARDED_ALLOW_IPS
+        # naming the proxy) so the scheme here is https and matches the page's Origin.
         if origin is not None and origin.lower() != own_origin(scope, host):
             return 403, "cross-site request"
         if scope["type"] == "http" and scope["method"] in UNSAFE_METHODS and has_body(headers) and not json_typed(headers):
