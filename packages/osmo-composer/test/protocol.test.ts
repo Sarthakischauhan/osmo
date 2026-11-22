@@ -12,6 +12,7 @@ describe("wire protocol", () => {
       { type: "browser.scroll", id: "w1", x: 0, y: 1, deltaX: 0, deltaY: -120 },
       { type: "browser.key", id: "w1", key: "Enter", code: "Enter", keyCode: 13 },
       { type: "browser.close", id: "w1" },
+      { type: "browser.takeover", id: "w1", user: true },
     ]) {
       expect(clientEventSchema.parse(ev)).toEqual(ev);
     }

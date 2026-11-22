@@ -1,4 +1,4 @@
-import { DesktopSupport, useDesktopSupport } from "./desktopSupport";
+import { useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
 import { BrowserControlsContext, osmoWidgets } from "@osmo/osmo-widgets";
 import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
@@ -7,6 +7,7 @@ import {
   OrbComposer,
   type ServerEvent,
   type Thread,
+  type UsageRecord,
   type VoiceModel,
   type VoiceSelection,
   orbMode,
@@ -18,18 +19,30 @@ import { Toaster } from "@/components/ui/sonner";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
+import { AgentWorkbench } from "@/components/AgentWorkbench";
 import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
-import { AsciiHome } from "@/components/home/AsciiHome";
+import { VoiceField } from "@/components/home/VoiceField";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
 import { toast } from "sonner";
 import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
 import { Cues } from "./cues";
-import { type ChangeEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
+import { AgentModelDialog } from "@/components/AgentModelDialog";
+import { UsageDialog } from "@/components/UsageDialog";
+import { NotesView } from "@/components/NotesView";
+import type { SidebarPlace } from "@/components/ThreadSidebar";
+import { CalendarDays, ListTodo, NotebookPen } from "lucide-react";
+import { CalendarView } from "@/components/CalendarView";
+import { MusicMini } from "@/components/MusicMini";
+import { musicPlayer, reportable } from "@/music/player";
 import { FeedTurn } from "./FeedTurn";
+import { agentActivity } from "./compact";
+import { liveThought, orbBubbleVisible } from "./orbActivity";
+import { CompactAgentActivity } from "./CompactAgentActivity";
 import { type Feed, conversationTitle, emptyFeed, feedFromMessages, pendingChoice, reduceFeed } from "./feed";
 
 const NO_PROVIDERS: ProviderInfo[] = [];
@@ -53,6 +66,15 @@ export function App() {
   );
 }
 
+/** The main pane's screens; `#notes` (etc.) in the URL opens one directly. */
+export type AppView = "chat" | "tasks" | "calendar" | "notes";
+const VIEWS: readonly AppView[] = ["chat", "tasks", "calendar", "notes"];
+
+function initialView(): AppView {
+  const hash = window.location.hash.slice(1);
+  return VIEWS.find((view) => view === hash) ?? "chat";
+}
+
 function useNow(): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -67,6 +89,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadId, setThreadId] = useState<string>();
+  // The automation the calendar opens on (Tasks links each automation task to it).
+  const [calendarFocus, setCalendarFocus] = useState<string>();
   const [runs, setRuns] = useState<Runs>({});
   const approvals = useRef<ApprovalRequest[]>([]);
   const now = useNow();
@@ -75,6 +99,16 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
   const savePick = useRef<(next: VoiceSelection) => void>();
+  const [liveUsage, setLiveUsage] = useState<UsageRecord>();
+  const [usageOpen, setUsageOpen] = useState(false);
+  // The main pane: the conversation, or one of Osmo's other screens (the orb stays in the dock on all of them).
+  const [view, setView] = useState<AppView>(initialView);
+  // The desktop tray's "Open calendar" changes the hash of the open page.
+  useEffect(() => {
+    const follow = () => setView(initialView());
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -83,6 +117,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       setThreads((previous) => [event.thread, ...previous.filter((t) => t.id !== event.thread.id)]);
     }
     cues.current?.onServerEvent(event);
+    if (event.type === "usage") setLiveUsage(event.usage);
+    if (event.type === "music.command") void musicPlayer.command(event);
     // What the server applied (session start, picker, or `set_voice`), or on error what is still in effect.
     if (event.type === "voice.configured") savePick.current?.(event.selection);
   }, []);
@@ -97,7 +133,21 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     threadId,
     onEvent,
   });
-  const { end } = session;
+  const { end, reportMusic } = session;
+  // The server's music_status reads what the player last reported; ducking follows Osmo's voice.
+  useEffect(() => {
+    let last = musicPlayer.getSnapshot();
+    return musicPlayer.subscribe(() => {
+      const next = musicPlayer.getSnapshot();
+      if (reportable(last, next)) reportMusic(musicPlayer.state());
+      last = next;
+    });
+  }, [reportMusic]);
+  useEffect(() => musicPlayer.duck(session.state === "speaking"), [session.state]);
+  // A new call starts with what is playing now.
+  useEffect(() => {
+    if (session.connection === "connected") reportMusic(musicPlayer.state());
+  }, [session.connection, reportMusic]);
   // In the Electron app the orb window starts calls too: it continues whichever thread this window has open.
   useEffect(() => {
     window.osmoDesktop?.session.openThread(threadId).catch(() => toast.error("Could not share the open thread with the orb"));
@@ -110,6 +160,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       end();
       void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
+      setView("chat");
       if (id === undefined) {
         dispatchFeed({ kind: "load", feed: emptyFeed });
         return;
@@ -215,6 +266,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
   const providers = catalog?.providers ?? NO_PROVIDERS;
   const [connecting, setConnecting] = useState<ProviderInfo>();
+  const [agentModelOpen, setAgentModelOpen] = useState(false);
+  const [returnToAgentSettings, setReturnToAgentSettings] = useState(false);
   // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
     if (catalog !== undefined) setRegistry(catalog.models);
@@ -259,8 +312,11 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     if (previousConnection.current !== "disconnected" && session.connection === "disconnected") void window.osmoDesktop?.setEnabled(false);
     previousConnection.current = session.connection;
   }, [session.connection]);
-  const { sendWidgetAction, sendBrowserInput, closeBrowser } = session;
-  const browserControls = useMemo(() => ({ input: sendBrowserInput, close: closeBrowser }), [sendBrowserInput, closeBrowser]);
+  const { sendWidgetAction, sendBrowserInput, closeBrowser, takeOverBrowser } = session;
+  const browserControls = useMemo(
+    () => ({ input: sendBrowserInput, close: closeBrowser, takeOver: takeOverBrowser }),
+    [sendBrowserInput, closeBrowser, takeOverBrowser],
+  );
   const [answered, setAnswered] = useState<ReadonlySet<string>>(() => new Set());
   const respondToWidget = useCallback(
     async (response: WidgetResponse) => {
@@ -321,29 +377,63 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   // This thread's runs are cards under the answers that started them; the list is for the others'.
   const shownRuns = visibleRuns(runs, now).filter((run) => run.threadId !== undefined && run.threadId !== threadId);
   const runsList = <RunsList runs={shownRuns} now={now} onReview={(run) => void review(run)} />;
+  const orbActivity = agentActivity(runs, feed.turns, threadId, now);
+  // Reasoning remains in the transcript after a turn ends. The bubble above the orb is the
+  // live "working" indicator, same for every provider: only while this turn is thinking or a
+  // tool/agent run is still going. Idle, listening and speaking stay the orb alone.
+  const currentThought = liveThought(feed.turns);
+  const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
+  const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
+  // The welcome screen holds the orb at the centre over the voice field; the first turn docks it.
+  const workbenchOpen = view === "tasks";
+  const home = view === "chat" && feed.turns.length === 0;
+
+  const place = (id: Exclude<AppView, "chat">, label: string, icon: ReactNode): SidebarPlace => ({
+    id,
+    label,
+    icon,
+    active: view === id,
+    onOpen: () => setView(id),
+  });
+  // Tasks first, the calendar directly below it (its automations run as tasks), then the notes.
+  const places = [
+    place("tasks", "Tasks", <ListTodo size={16} aria-hidden />),
+    place("calendar", "Calendar", <CalendarDays size={16} aria-hidden />),
+    place("notes", "Notes", <NotebookPen size={16} aria-hidden />),
+  ];
+  const openAutomation = (id: string) => {
+    setCalendarFocus(id);
+    setView("calendar");
+  };
+  const screen =
+    view === "notes" ? <NotesView /> : view === "calendar" ? <CalendarView focus={calendarFocus} onOpenTask={(id) => void openThread(id)} /> : undefined;
 
   return (
     <>
       <ThreadSidebar
         threads={threads}
-        activeId={threadId}
+        activeId={view === "chat" ? threadId : undefined}
         onSelect={(id) => void openThread(id)}
         onNew={() => void openThread(undefined)}
         onRename={(id, title) => void renameThread(id, title)}
         onFork={forkThread}
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
-        footer={desktop.available ? <DesktopSupport desktop={desktop} /> : undefined}
+        onOpenSettings={() => setAgentModelOpen(true)}
+        onOpenUsage={() => setUsageOpen(true)}
+        places={places}
+        player={(collapsed) => <MusicMini player={musicPlayer} collapsed={collapsed} />}
       />
-      <SidebarInset className="app">
+      <SidebarInset className="app" data-home={home}>
+        {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
+        {screen !== undefined ? <div className="osmo-screen">{screen}</div> : <>
         <header className="topbar">
           <div className="brand">
             {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
             <img className="brand-mark" src="/favicon.svg" alt="" width={18} height={18} />
-            <strong>{conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
+            <strong>{workbenchOpen ? "Tasks" : conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
           </div>
           <div className="topbar-right">
-            {(sidebar.state === "collapsed" || sidebar.isMobile) && <DesktopSupport desktop={desktop} />}
             {session.startedAt !== undefined && <Clock since={session.startedAt} />}
             {connected && (
               <button type="button" className="end" onClick={session.end}>
@@ -353,12 +443,13 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
           </div>
         </header>
 
+        {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} onOpenAutomation={openAutomation} /> : <>
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
             <div className="osmo-scroll-host">
               <main ref={feedScrollRef} className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
                 {feed.turns.length === 0 ? (
-                  <AsciiHome />
+                  <div className="osmo-ascii-home chat-welcome"><h1 className="sr-only">New conversation</h1></div>
                 ) : (
                   <div className="feed">
                     {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
@@ -373,12 +464,19 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             </div>
           </BrowserControlsContext.Provider>
         </WidgetProvider>
+        </>}
 
         <footer className="dock">
 
             <OrbComposer
               session={session}
               awaitingChoice={pending !== undefined}
+              activity={showOrbBubble ? (
+                <section aria-label="Orb activity">
+                  {showThought && <div className="osmo-compact-thinking"><strong>Thinking</strong><p>{currentThought.reasoning}</p></div>}
+                  <CompactAgentActivity activity={orbActivity} runs={runs} onDecide={decide} />
+                </section>
+              ) : undefined}
               pickerError={catalogError}
               picker={
                 pick && registry.length > 0
@@ -398,17 +496,33 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
               }
             />
         </footer>
+        </>}
       </SidebarInset>
       <ConnectProviderDialog
         provider={connecting}
         onOpenChange={(open) => {
-          if (!open) setConnecting(undefined);
+          if (!open) {
+            setConnecting(undefined);
+            if (returnToAgentSettings) setAgentModelOpen(true);
+            setReturnToAgentSettings(false);
+          }
         }}
         onConnected={() => {
           setConnecting(undefined);
+          if (returnToAgentSettings) setAgentModelOpen(true);
+          setReturnToAgentSettings(false);
           refresh();
         }}
       />
+      <AgentModelDialog
+        open={agentModelOpen}
+        onOpenChange={setAgentModelOpen}
+        providers={providers}
+        onCredentialsChanged={refresh}
+        onConnectKey={(provider) => { setReturnToAgentSettings(true); setAgentModelOpen(false); setConnecting(provider); }}
+        desktop={desktop}
+      />
+      <UsageDialog open={usageOpen} onOpenChange={setUsageOpen} threadId={threadId} live={liveUsage} />
       <Toaster position="top-center" theme={theme} />
     </>
   );

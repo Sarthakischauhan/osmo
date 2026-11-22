@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createOrbGl } from "./orbGl";
 import { type OrbMode, drawOrb, initialFrame, step } from "./orbVisual";
 
 /** Canvas size in CSS pixels; larger than the 64px button so the wobble has room. */
@@ -8,13 +9,15 @@ export interface GlassOrbProps {
   mode: OrbMode;
   /** Current playback level, 0..1; read every frame. */
   outputLevel: () => number;
+  /** Mic level 0..1; read every frame. The louder of the two drives the blob. */
+  inputLevel?: () => number;
 }
 
 /**
  * The orb: a solid `--foreground` canvas blob redrawn every frame from `mode` and the
  * playback level. It draws only; the parent owns the button and what a tap does.
  */
-export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
+export function GlassOrb({ mode, outputLevel, inputLevel }: GlassOrbProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const modeRef = useRef<OrbMode>(mode);
   modeRef.current = mode;
@@ -22,8 +25,10 @@ export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
   // One rAF loop for the component's lifetime; it reads mode and level through refs, so audio never re-renders React.
   useEffect(() => {
     const element = canvas.current;
-    const ctx = element?.getContext("2d");
-    if (!element || !ctx) return;
+    if (!element) return;
+    const gl = createOrbGl(element);
+    const ctx = gl ? null : element.getContext("2d");
+    if (!gl && !ctx) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const size = Math.round(ORB_CANVAS * dpr);
     element.width = size;
@@ -35,15 +40,20 @@ export function GlassOrb({ mode, outputLevel }: GlassOrbProps) {
     const tick = (now: number) => {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
-      const level = outputLevel();
+      const level = Math.max(outputLevel(), inputLevel?.() ?? 0);
       step(frame, modeRef.current, motion.matches ? 0 : level, motion.matches ? 1 : dt, motion.matches);
-      drawOrb(ctx, size, frame, modeRef.current);
+      if (gl && !gl.lost()) gl.draw(size, frame, modeRef.current);
+      else if (ctx) drawOrb(ctx, size, frame, modeRef.current);
       element.dataset.level = frame.level.toFixed(2);
+      element.dataset.renderer = gl && !gl.lost() ? "webgl" : "2d";
       handle = requestAnimationFrame(tick);
     };
     handle = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(handle);
-  }, [outputLevel]);
+    return () => {
+      cancelAnimationFrame(handle);
+      gl?.dispose();
+    };
+  }, [outputLevel, inputLevel]);
 
   return <canvas ref={canvas} className="orb-canvas" aria-hidden style={{ width: ORB_CANVAS, height: ORB_CANVAS }} />;
 }

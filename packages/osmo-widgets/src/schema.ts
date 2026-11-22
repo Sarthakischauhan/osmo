@@ -69,15 +69,43 @@ export const htmlPropsSchema = z
   .object({
     html: z.string().min(1).max(100_000),
     title: z.string().min(1).max(80).optional(),
+    /** The ids the frame may send through `osmo.action` / `data-osmo-action`; anything else is dropped. */
+    actions: z.array(widgetActionSchema).max(8).optional(),
   })
   .strict();
 
-/** The agent browser: the newest screencast frame (a data: URL, as card images) and the page it shows. */
+/**
+ * The agent browser: the newest screencast frame (a data: URL, as card images) and the page it shows, the user's
+ * site rule for that page (OSMO_BROWSER_RULES) and who drives it (`user` after Take over).
+ */
 export const browserPropsSchema = z
   .object({
     status: z.enum(["live", "ended"]),
     url: z.string().optional(),
     frame: z.string().regex(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/).optional(),
+    rule: z.enum(["allow", "ask", "deny"]).optional(),
+    control: z.enum(["agent", "user"]).optional(),
+  })
+  .strict();
+
+/** A day of the local calendar (calendar_events with show=true): time, title and state per row, and the next automation. */
+export const agendaPropsSchema = z
+  .object({
+    title: z.string().min(1).max(80),
+    subtitle: z.string().max(80).optional(),
+    items: z
+      .array(
+        z
+          .object({
+            time: z.string().min(1).max(20),
+            title: z.string().min(1).max(200),
+            state: z.enum(["past", "now", "upcoming"]).default("upcoming"),
+            tag: z.string().max(24).optional(),
+          })
+          .strict(),
+      )
+      .max(40),
+    footer: z.object({ label: z.string().min(1).max(40), value: z.string().min(1).max(120), detail: z.string().max(60).optional() }).strict().optional(),
   })
   .strict();
 
@@ -87,6 +115,7 @@ export const widgetSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chart"), props: chartPropsSchema }),
   z.object({ type: z.literal("html"), props: htmlPropsSchema }),
   z.object({ type: z.literal("browser"), props: browserPropsSchema }),
+  z.object({ type: z.literal("agenda"), props: agendaPropsSchema }),
 ]);
 
 export type Widget = z.infer<typeof widgetSchema>;
@@ -96,8 +125,10 @@ export type OptionsProps = z.infer<typeof optionsPropsSchema>;
 export type ChartProps = z.infer<typeof chartPropsSchema>;
 export type HtmlProps = z.infer<typeof htmlPropsSchema>;
 export type BrowserProps = z.infer<typeof browserPropsSchema>;
+export type AgendaProps = z.infer<typeof agendaPropsSchema>;
+export type WidgetAction = z.infer<typeof widgetActionSchema>;
 
-export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser"];
+export const WIDGET_TYPES: readonly WidgetType[] = ["card", "options", "chart", "html", "browser", "agenda"];
 
 /** One-line description of a validated widget, returned to the model as `shown`. */
 export function describeWidget(widget: Widget): string {
@@ -116,15 +147,20 @@ export function describeWidget(widget: Widget): string {
     }
     case "browser":
       return "agent browser";
-    case "html":
-      return widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
+    case "agenda":
+      return `agenda "${widget.props.title}" with ${widget.props.items.length} items`;
+    case "html": {
+      const named = widget.props.title ? `interactive html widget "${widget.props.title}"` : "interactive html widget";
+      return widget.props.actions?.length ? `${named} with ${widget.props.actions.length} actions` : named;
+    }
   }
 }
 
-/** True when a widget is waiting on the user to choose: any options list, or a card with buttons. */
+/** True when a widget is waiting on the user to choose: any options list, or a card or html widget with actions. */
 export function isActionableWidget(type: string, props: unknown): boolean {
   const parsed = widgetSchema.safeParse({ type, props });
   if (!parsed.success) return false;
   if (parsed.data.type === "options") return true;
-  return parsed.data.type === "card" && (parsed.data.props.actions?.length ?? 0) > 0;
+  if (parsed.data.type === "card" || parsed.data.type === "html") return (parsed.data.props.actions?.length ?? 0) > 0;
+  return false;
 }

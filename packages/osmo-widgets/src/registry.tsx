@@ -1,12 +1,13 @@
 import { MessageContent, QuestionWidget, defineWidget, type WidgetComponentProps } from "@sarchauhan/chat";
 import type { AgentWidgetPart } from "@sarchauhan/protocol";
 import { useContext } from "react";
+import { AgendaWidget } from "./agenda";
 import { AsciiArt } from "./asciiArt";
 import { BrowserWidget } from "./browser";
 import { BrowserControlsContext } from "./controls";
 import { ChartWidget } from "./chart";
 import { HtmlWidget } from "./html";
-import { browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, optionsPropsSchema, widgetSchema } from "./schema";
+import { type WidgetAction, agendaPropsSchema, browserPropsSchema, cardPropsSchema, chartPropsSchema, htmlPropsSchema, isActionableWidget, optionsPropsSchema, widgetSchema } from "./schema";
 
 /** Action ids reported back as `widget.action`. */
 export const CARD_PRESS = "press";
@@ -65,9 +66,12 @@ function Chart({ widget: _widget, ...raw }: WidgetComponentProps) {
   return parsed.success ? <ChartWidget {...parsed.data} /> : null;
 }
 
-function Html({ widget: _widget, ...raw }: WidgetComponentProps) {
+function Html({ widget, ...raw }: WidgetComponentProps) {
   const parsed = htmlPropsSchema.safeParse(raw);
-  return parsed.success ? <HtmlWidget {...parsed.data} /> : null;
+  if (!parsed.success) return null;
+  // The declared action id is the `widget.action` action; the value is what the frame sent with it.
+  const onAction = widget.disabled ? undefined : (action: WidgetAction, value: string | undefined) => void widget.respond(value ?? "", action.label, action.id);
+  return <HtmlWidget {...parsed.data} onAction={onAction} />;
 }
 
 function Browser({ widget, ...raw }: WidgetComponentProps) {
@@ -76,7 +80,12 @@ function Browser({ widget, ...raw }: WidgetComponentProps) {
   if (!parsed.success) return null;
   const id = widget.widgetId;
   if (controls === undefined || id === undefined || widget.disabled) return <BrowserWidget {...parsed.data} />;
-  return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} />;
+  return <BrowserWidget {...parsed.data} onInput={(input) => controls.input(id, input)} onClose={() => controls.close(id)} onTakeOver={(user) => controls.takeOver(id, user)} />;
+}
+
+function Agenda({ widget: _widget, ...raw }: WidgetComponentProps) {
+  const parsed = agendaPropsSchema.safeParse(raw);
+  return parsed.success ? <AgendaWidget {...parsed.data} /> : null;
 }
 
 /**
@@ -94,6 +103,7 @@ export const osmoWidgets = [
   defineWidget("chart", Chart, { shell: false }),
   defineWidget("html", Html, { shell: false }),
   defineWidget("browser", Browser, { shell: false }),
+  defineWidget("agenda", Agenda, { shell: false }),
 ];
 
 /** Validates a `widget.render` payload and turns it into a chat-sdk widget part; invalid widgets are dropped. */
@@ -105,6 +115,6 @@ export function toWidgetPart(id: string, type: string, props: unknown): AgentWid
     id,
     name: parsed.data.type,
     props: parsed.data.props,
-    interactive: parsed.data.type === "options" || parsed.data.type === "card",
+    interactive: isActionableWidget(parsed.data.type, parsed.data.props),
   };
 }

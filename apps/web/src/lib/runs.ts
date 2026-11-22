@@ -39,7 +39,7 @@ const approvalRequestSchema = z.object({
   summary: z.string(),
   arguments: z.string(),
 });
-const runListSchema = z.object({ runs: z.array(agentRunSchema), approvals: z.array(approvalRequestSchema) });
+const runListSchema = z.object({ runs: z.array(agentRunSchema), approvals: z.array(approvalRequestSchema), phases: z.record(z.string()).default({}) });
 export type RunList = z.infer<typeof runListSchema>;
 
 /** Every thread's live runs, and those finished since `since` (ms), from `GET /api/runs`. */
@@ -49,8 +49,29 @@ export async function fetchRuns(since: number, fetcher: typeof fetch = fetch): P
   return runListSchema.parse(await response.json());
 }
 
+/** Start a background task on an existing thread. */
+export async function startTask(threadId: string, task: string, fetcher: typeof fetch = fetch): Promise<AgentRun> {
+  const response = await fetcher("/api/runs/start/task", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId, task }),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => undefined);
+    const detail = z.object({ detail: z.string() }).safeParse(body);
+    throw new Error(detail.success ? detail.data.detail : `Could not start task (${response.status}).`);
+  }
+  return agentRunSchema.parse(await response.json());
+}
+
+/** Stop a background task. */
+export async function stopTask(runId: string, fetcher: typeof fetch = fetch): Promise<void> {
+  const response = await fetcher(`/api/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" });
+  if (!response.ok) throw new Error("Could not stop task.");
+}
+
 /** The server's list folded into what the socket's events built (which know the step count). */
-export function mergeListed(runs: Runs, listed: RunList): Runs {
+export function mergeListed(runs: Runs, listed: Pick<RunList, "runs" | "approvals">): Runs {
   const asking = new Map(listed.approvals.map((approval) => [approval.runId, approval.approvalId]));
   const next: Runs = { ...runs };
   for (const run of listed.runs) next[run.runId] = listedView(runs[run.runId], run, asking.get(run.runId));
@@ -64,6 +85,7 @@ function listedView(previous: RunView | undefined, run: AgentRun, approvalId: st
     task: run.task,
     status: run.status,
     phase: previous?.phase,
+    reasoning: previous?.reasoning,
     steps: previous?.steps ?? 0,
     result: run.result ?? previous?.result,
     startedAt: run.createdAt * 1000,

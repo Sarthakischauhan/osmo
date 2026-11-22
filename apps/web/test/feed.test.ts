@@ -191,6 +191,11 @@ describe("approval turns", () => {
     expect(feed.turns.map((t) => t.role)).toEqual(["user", "assistant"]);
   });
 
+  it("restores a task-only thread without voice messages", () => {
+    const feed = feedFromMessages([], [{ runId: "r1", task: "Research a topic", status: "completed", result: "Done", createdAt: 1 }]);
+    expect(feed.turns).toMatchObject([{ role: "assistant", runs: [{ runId: "r1", task: "Research a topic", result: "Done" }] }]);
+  });
+
   it("tracks thinking state, reasoning tokens, and preserves code snippets on final transcript", () => {
     let feed = reduceFeed(emptyFeed, { type: "transcript.delta", role: "user", text: "Show go code", itemId: "u1", final: true });
     feed = reduceFeed(feed, { type: "state", state: "thinking" });

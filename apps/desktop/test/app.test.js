@@ -93,6 +93,7 @@ test('each window may use only its own channels', async () => {
   await assert.rejects(async () => call(orb(), CHANNELS.openThread, 't1'), /Untrusted/);
   await assert.rejects(async () => call(orb(), CHANNELS.audioFrame, new ArrayBuffer(8)), /Untrusted/);
   await assert.rejects(async () => call(workspace(), CHANNELS.audioStarted, {}), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.audioBargeIn), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.start, {}), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.send, { type: 'browser.close', id: 'b' }), /Untrusted/);
   await assert.rejects(async () => fake.handlers.get(CHANNELS.audioReady)({ sender: orb().webContents, senderFrame: {} }), /Untrusted/);
@@ -138,6 +139,10 @@ test('a call from the orb continues the workspace\'s open thread, with the mic a
   assert.deepEqual(asked(audioWindow(), CHANNELS.audioPlay), [speech]);
   socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
   assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
+  // The audio renderer's echo guard heard the user over Osmo: main interrupts the answer at once.
+  await call(audioWindow(), CHANNELS.audioBargeIn);
+  assert.deepEqual(socket.json().at(-1), { type: 'interrupt' });
+  assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 2);
 
   // Switching windows changes who is showing, not the call.
   const flushes = asked(audioWindow(), CHANNELS.audioFlush).length;
@@ -187,4 +192,32 @@ test('quitting lets the workspace close', () => {
   let prevented = 0;
   workspace().emit('close', { preventDefault: () => prevented++ });
   assert.equal(prevented, 0);
+});
+
+test('dragging the orb moves its window, keeps it on screen, and the hover box opens from where it now is', async () => {
+  const start = { ...orb().bounds };
+  assert.deepEqual(await call(orb(), CHANNELS.move, { dx: -100, dy: -50 }), { side: 'below', orbLeft: 0 });
+  assert.deepEqual(orb().bounds, { ...start, x: start.x - 100, y: start.y - 50 });
+  await call(orb(), CHANNELS.move, { dx: 9000, dy: 9000 });
+  const area = { x: 0, y: 0, width: 1600, height: 900 };
+  assert.equal(orb().bounds.x + orb().bounds.width, area.x + area.width);
+  assert.equal(orb().bounds.y + orb().bounds.height, area.y + area.height);
+  // The box is open while it moves: the window keeps its room, flipped above at the bottom of the screen.
+  assert.equal((await call(orb(), CHANNELS.box, 200)).side, 'above');
+  await call(orb(), CHANNELS.move, { dx: -9000, dy: -9000 });
+  assert.deepEqual(orb().bounds, { x: area.x, y: area.y, width: 360, height: 112 + 200 });
+  await call(orb(), CHANNELS.box, 0);
+  await assert.rejects(async () => call(workspace(), CHANNELS.move, { dx: 1, dy: 1 }), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.move, { dx: 'far', dy: 1 }), /Invalid/);
+});
+
+test('a tray item keeps automations visible with the window closed, and Osmo never adds itself to the login items', () => {
+  assert.equal(fake.trays.length, 1);
+  const labels = fake.trays[0].menu.map(item => item.label);
+  assert.ok(labels.includes('Open Osmo') && labels.includes('Quit Osmo'));
+  assert.deepEqual(fake.loginItems, []);
+});
+
+test('Widevine (castLabs ECS components) is waited for once at startup', () => {
+  assert.equal(fake.componentsReady, 1);
 });

@@ -28,6 +28,7 @@ export interface AgentSummary {
   detail: string | undefined;
   /** The approval this run waits on, for Approve / Deny in the panel. */
   approval: ApprovalTurn | undefined;
+  reasoning?: string;
 }
 
 export interface AgentActivity {
@@ -51,7 +52,7 @@ function shown(run: RunView, now: number): boolean {
 function detail(run: RunView): string | undefined {
   if (run.status === "completed" || run.status === "failed") return run.result ?? run.phase;
   if (run.status === "cancelled") return "Cancelled";
-  return run.phase ?? run.reasoning;
+  return run.phase;
 }
 
 /**
@@ -67,7 +68,7 @@ export function agentActivity(runs: Runs, turns: readonly Turn[], threadId: stri
   const cards = own
     .filter((run) => shown(run, now))
     .sort((a, b) => PRIORITY[a.status] - PRIORITY[b.status] || a.startedAt - b.startedAt)
-    .map((run) => ({ runId: run.runId, task: run.task, status: run.status, detail: detail(run), approval: run.status === "waiting_approval" ? asking.get(run.runId) : undefined }));
+    .map((run) => ({ runId: run.runId, task: run.task, status: run.status, detail: detail(run), reasoning: run.reasoning, approval: run.status === "waiting_approval" ? asking.get(run.runId) : undefined }));
   return {
     cards,
     running: own.filter((run) => LIVE.has(run.status)).length,

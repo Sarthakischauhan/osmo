@@ -1,4 +1,4 @@
-"""Osmo's durable state: threads, their messages, agent runs and provider connections.
+"""Osmo's durable state: threads, their messages, agent runs, model usage and provider connections.
 
 Callers use the `Storage` protocol; `SQLiteStorage` is the one implementation today, so a
 Postgres store can replace it without touching them. Provider secrets never come here (they
@@ -22,6 +22,7 @@ from symphony_server.secret_store import AuthKind
 
 MessageRole = Literal["user", "assistant", "agent"]
 AgentRunStatus = Literal["running", "waiting_approval", "completed", "failed", "cancelled"]
+UsageSource = Literal["voice", "agent"]
 DEFAULT_THREAD_TITLE = "New conversation"
 
 
@@ -55,6 +56,25 @@ class AgentRunRecord(_Row):
     updatedAt: float
 
 
+class UsageRecord(_Row):
+    """One model response's tokens and price. `cachedTokens` is None when the provider or event did
+    not report it, `costUsd` when the model has no catalog price; neither is ever guessed.
+    `estimated` rows are the harness's token estimate (priced at catalog rates) and say so."""
+
+    threadId: str
+    runId: str | None = None
+    source: UsageSource
+    model: str
+    inputTokens: int
+    cachedTokens: int | None = None
+    outputTokens: int
+    reasoningTokens: int = 0
+    costUsd: float | None = None
+    # The provider reported no usage, so the harness estimated the tokens from the text.
+    estimated: bool = False
+    createdAt: float
+
+
 class ProviderConnection(_Row):
     provider: str
     kind: AuthKind
@@ -86,13 +106,21 @@ class Storage(Protocol):
 
     def runs(self, thread_id: str) -> list[AgentRunRecord]: ...
 
+    def add_usage(self, usage: UsageRecord) -> None: ...
+
+    def usage_since(self, since: float, thread_id: str | None = None, limit: int = 5000) -> list[UsageRecord]: ...
+
     def save_connection(self, provider: str, kind: AuthKind) -> None: ...
 
     def remove_connection(self, provider: str) -> None: ...
 
     def connections(self) -> list[ProviderConnection]: ...
 
-    def interrupt_unfinished(self, reason: str) -> int: ...
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int: ...
+
+    def setting(self, key: str) -> str | None: ...
+
+    def save_setting(self, key: str, value: str | None) -> None: ...
 
 
 SCHEMA = """
@@ -121,10 +149,31 @@ CREATE TABLE IF NOT EXISTS runs (
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_by_thread ON runs(thread_id, created_at);
+-- No foreign key to threads: spend stays counted after its thread is deleted.
+CREATE TABLE IF NOT EXISTS usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id TEXT NOT NULL,
+    run_id TEXT,
+    source TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    cached_tokens INTEGER,
+    output_tokens INTEGER NOT NULL,
+    reasoning_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    estimated INTEGER NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS usage_by_time ON usage(created_at);
+CREATE INDEX IF NOT EXISTS usage_by_thread ON usage(thread_id, created_at);
 CREATE TABLE IF NOT EXISTS provider_connections (
     provider TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
     connected_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -148,6 +197,22 @@ def run_row(row: sqlite3.Row) -> AgentRunRecord:
         result=row["result"],
         createdAt=row["created_at"],
         updatedAt=row["updated_at"],
+    )
+
+
+def usage_row(row: sqlite3.Row) -> UsageRecord:
+    return UsageRecord(
+        threadId=row["thread_id"],
+        runId=row["run_id"],
+        source=row["source"],
+        model=row["model"],
+        inputTokens=row["input_tokens"],
+        cachedTokens=row["cached_tokens"],
+        outputTokens=row["output_tokens"],
+        reasoningTokens=row["reasoning_tokens"],
+        costUsd=row["cost_usd"],
+        estimated=bool(row["estimated"]),
+        createdAt=row["created_at"],
     )
 
 
@@ -265,16 +330,49 @@ class SQLiteStorage:
             rows = db.execute("SELECT * FROM runs WHERE thread_id = ? ORDER BY created_at, run_id", (thread_id,)).fetchall()
         return [run_row(row) for row in rows]
 
-    def interrupt_unfinished(self, reason: str) -> int:
-        """Mark runs that cannot still be executing as failed. Live execution is in-process, so a
-        restart cannot resume one; the stored record must not keep saying that it is running."""
+    def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int:
+        """Mark runs that are not executing any more as failed, except `keep` (the runs the durable
+        backend resumed); the stored record must not keep saying that the others are running."""
         now = time.time()
+        held = tuple(keep)
+        excluded = f" AND run_id NOT IN ({', '.join('?' for _ in held)})" if held else ""
         with self.transaction() as db:
             changed = db.execute(
-                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')",
-                (reason, now),
+                "UPDATE runs SET status = 'failed', result = ?, updated_at = ? WHERE status IN ('running', 'waiting_approval')" + excluded,
+                (reason, now, *held),
             )
         return changed.rowcount
+
+    # ------------------------------------------------------------ usage
+
+    def add_usage(self, usage: UsageRecord) -> None:
+        with self.transaction() as db:
+            db.execute(
+                "INSERT INTO usage (thread_id, run_id, source, model, input_tokens, cached_tokens, output_tokens, reasoning_tokens, cost_usd, estimated, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    usage.threadId,
+                    usage.runId,
+                    usage.source,
+                    usage.model,
+                    usage.inputTokens,
+                    usage.cachedTokens,
+                    usage.outputTokens,
+                    usage.reasoningTokens,
+                    usage.costUsd,
+                    int(usage.estimated),
+                    usage.createdAt,
+                ),
+            )
+
+    def usage_since(self, since: float, thread_id: str | None = None, limit: int = 5000) -> list[UsageRecord]:
+        """Usage from `since` on (of one thread, when given), newest first, at most `limit` rows."""
+        with self.transaction() as db:
+            rows = db.execute(
+                "SELECT * FROM usage WHERE created_at >= ? AND (? IS NULL OR thread_id = ?) ORDER BY created_at DESC, id DESC LIMIT ?",
+                (since, thread_id, thread_id, limit),
+            ).fetchall()
+        return [usage_row(row) for row in rows]
 
     # ------------------------------------------------------------ provider connections
 
@@ -294,3 +392,20 @@ class SQLiteStorage:
         with self.transaction() as db:
             rows = db.execute("SELECT * FROM provider_connections ORDER BY provider").fetchall()
         return [ProviderConnection(provider=row["provider"], kind=row["kind"], connectedAt=row["connected_at"]) for row in rows]
+
+    # ------------------------------------------------------------ settings
+
+    def setting(self, key: str) -> str | None:
+        with self.transaction() as db:
+            row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def save_setting(self, key: str, value: str | None) -> None:
+        """Store `value` under `key`; None removes it."""
+        with self.transaction() as db:
+            if value is None:
+                db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                db.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value)
+                )

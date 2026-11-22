@@ -22,6 +22,17 @@ export function allowMicrophone(webContents, contents, permission, requestingOri
   return trustedFrame(page, origin);
 }
 
+// The Spotify Web Playback SDK plays inside its own frame from this origin, within the workspace page.
+export const SPOTIFY_PLAYER_ORIGIN = 'https://sdk.scdn.co';
+
+/** Widevine (`mediaKeySystem`) for the workspace window only (`workspace`): the Osmo page and Spotify's player frame
+ * inside it. Other windows, and any other site, get no DRM. */
+export function allowMediaKeys(webContents, workspace, permission, requestingOrigin, details, origin) {
+  if (!workspace || webContents !== workspace || permission !== 'mediaKeySystem') return false;
+  const page = details?.requestingUrl || details?.securityOrigin || requestingOrigin;
+  return trustedFrame(page, origin) || trustedFrame(page, SPOTIFY_PLAYER_ORIGIN);
+}
+
 export function validateAction(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid desktop action');
   const action = value.action;

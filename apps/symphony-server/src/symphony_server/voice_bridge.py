@@ -41,22 +41,29 @@ from websockets.exceptions import WebSocketException
 
 from symphony_server import tracing
 from symphony_server.desktop import DesktopSession, RUN_DESKTOP
+from symphony_server.approvals import APPROVAL_REQUIRED, ApprovalAddon, ApprovalBroker, ApprovalPayload, ApprovalResolvedPayload
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
 from symphony_server.browser import BrowserSession
 from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
 from symphony_server.cdp import BrowserError
 from symphony_server.grok_compat import ReasoningDelta
 from symphony_server.model_access import ModelAccess
+from symphony_server.music import OSMO_MUSIC, MusicNow
 from symphony_server.providers import provider_label
 from symphony_server.protocol import (
     BrowserClick,
     BrowserClose,
+    BrowserTakeover,
     BrowserKey,
     BrowserScroll,
     DesktopConfigure,
     DesktopResult,
     Interrupt,
+    ApprovalRequest,
+    ApprovalResolved,
     ModelsEvent,
+    MusicCommand,
+    MusicState,
     OsmoState,
     ServerEvent,
     SessionConfigure,
@@ -65,6 +72,7 @@ from symphony_server.protocol import (
     StateEvent,
     ThreadEvent,
     TranscriptDelta,
+    UsageEvent,
     VoiceConfigured,
     VoicePreviewRequest,
     WidgetAction,
@@ -74,6 +82,7 @@ from symphony_server.protocol import (
 from symphony_server.session_previews import SessionPreviews
 from symphony_server.storage import DEFAULT_THREAD_TITLE, MessageRole, Storage, ThreadRecord
 from symphony_server.turn_events import action_text, activity_label
+from symphony_server.usage import voice_usage
 from symphony_server.voices import (
     OSMO_VOICE,
     PreviewCache,
@@ -111,6 +120,10 @@ UNHEARD_WAIT_S = 10.0
 # Tools whose result needs no answer when the answer that called them already said something:
 # "I'll look into it" is enough, and a second line after run_agent returns only repeats it.
 ANNOUNCED_TOOLS = frozenset({"run_agent"})
+# The run id a voice tool's approval card carries: it belongs to the voice session, not to an agent run.
+VOICE_RUN = "voice"
+# A voice tool waits this long for the user's Approve / Deny; the voice turn is held meanwhile, so it is shorter than a run's.
+VOICE_APPROVAL_TIMEOUT_S = 120.0
 
 
 class VoiceToolSink(EventSink):
@@ -131,6 +144,8 @@ class VoiceToolSink(EventSink):
                 self.bridge.store_held()
         elif event_type == OSMO_VOICE:
             await self.bridge.configure(SetVoiceArgs.model_validate(payload), "tool")
+        elif event_type == OSMO_MUSIC:
+            await self.bridge.emit(MusicCommand.model_validate(payload))
 
 
 @dataclass
@@ -164,8 +179,13 @@ class VoiceBridge:
         board: WidgetBoard,
         previews: PreviewCache,
         default_voice: str,
+        broker: ApprovalBroker,
+        approval_tools: frozenset[str],
+        music: MusicNow,
     ) -> None:
         self.browser, self.instructions = browser, instructions
+        # What the app's music player last said it plays (for music_status).
+        self.music = music
         self.desktop = DesktopSession(self.emit)
         self.agents, self.storage, self.access, self.board = agents, storage, access, board
         self.previews = SessionPreviews(access, previews)
@@ -173,6 +193,9 @@ class VoiceBridge:
         voice_tools = [*tools, RunAgentTool(self.desk), AgentStatusTool(self.desk), CancelAgentTool(self.desk)]
         self.tools = {tool.name: tool for tool in voice_tools}
         self.sink = VoiceToolSink(self)
+        # The voice model's risky tools (vault_write, ...) wait on the user exactly as an agent run's do.
+        self.broker = broker
+        self.approvals = ApprovalAddon(broker, f"voice-{secrets.token_hex(6)}", approval_tools, VOICE_APPROVAL_TIMEOUT_S)
         self.thread: ThreadRecord | None = None
         self.voice: VoiceSession | None = None
         self.selection = default_selection(access.models(), default_voice)
@@ -223,6 +246,7 @@ class VoiceBridge:
                 task.cancel()
             if self.thread is not None:
                 self.agents.unobserve(self.thread.id, self)
+            self.broker.deny_session(self.approvals.session_id)
             await self.close_voice()
 
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
@@ -261,6 +285,11 @@ class VoiceBridge:
             self.spawn(self.drive_browser(event))
         elif isinstance(event, BrowserClose):
             await self.close_browser(event)
+        elif isinstance(event, MusicState):
+            self.music.state = event
+        elif isinstance(event, BrowserTakeover):
+            if self.thread is not None and self.browser_widget(event.id) is not None:
+                await self.agents.browsers.take_over(self.thread.id, event.user)
         elif isinstance(event, Interrupt):
             await self.interrupt()
         elif isinstance(event, WidgetAction):
@@ -325,6 +354,15 @@ class VoiceBridge:
     def record(self, role: MessageRole, text: str) -> None:
         if self.thread is not None:
             self.storage.add_message(self.thread.id, role, text)
+
+    async def record_usage(self, done: ResponseDone) -> None:
+        if self.thread is None:
+            return
+        model = self.model()
+        usage = voice_usage(self.thread.id, f"{model.provider}:{model.id}", done)
+        if usage is not None:
+            self.storage.add_usage(usage)
+            await self.emit(UsageEvent(usage=usage))
 
     def next_utterance(self) -> str:
         self.utterances += 1
@@ -411,7 +449,7 @@ class VoiceBridge:
         if isinstance(picked, Selection):
             self.selection = picked
         provider = self.model().provider
-        if not await self.access.prepare(provider):
+        if not await self.access.prepare(provider, voice=True):
             await self.set_state("idle", f"{provider_label(provider)} is not connected: add a key in Providers")
             return
         if not await self.open_voice():
@@ -435,7 +473,7 @@ class VoiceBridge:
     async def open_voice(self) -> bool:
         """Open a voice session on the selected model, seed it with the thread so far, and read it."""
         model = self.model()
-        if not await self.access.prepare(model.provider):
+        if not await self.access.prepare(model.provider, voice=True):
             return False
         try:
             voice = await self.access.open_voice(model, self.voice_config())
@@ -548,6 +586,7 @@ class VoiceBridge:
                     self.response_active = False
             if response.done is None or self.voice is not voice:
                 return
+            await self.record_usage(response.done)
             if response.text:
                 text = "".join(response.text)
                 self.note_answer(response.after, text)
@@ -610,6 +649,9 @@ class VoiceBridge:
         if not isinstance(args, dict):
             return json.dumps({"error": "arguments must be a JSON object"})
         await self.set_state("working", activity_label(call.name, args))
+        refused = await self.approvals.before_tool(tool_name=call.name, arguments=args, emit=self.approval_event)
+        if refused is not None:
+            return json.dumps({"error": refused})
         token = RUN_DESKTOP.set(self.desktop)
         try:
             with tracing.tool_call(call.name, args) as observation:
@@ -625,6 +667,15 @@ class VoiceBridge:
                 return result
         finally:
             RUN_DESKTOP.reset(token)
+
+    async def approval_event(self, kind: str, payload: dict[str, Any]) -> None:
+        """A voice tool's approval, as the same feed card an agent run's approval gets."""
+        if kind == APPROVAL_REQUIRED:
+            asked = ApprovalPayload.model_validate(payload)
+            await self.emit(ApprovalRequest(approvalId=asked.approval_id, runId=VOICE_RUN, tool=asked.tool, summary=asked.summary, arguments=asked.arguments))
+        else:
+            resolved = ApprovalResolvedPayload.model_validate(payload)
+            await self.emit(ApprovalResolved(approvalId=resolved.approval_id, runId=VOICE_RUN, approved=resolved.approved))
 
     async def turn_over(self) -> None:
         """No answer is under way: apply a deferred model switch, and go back to listening."""
@@ -650,6 +701,8 @@ class VoiceBridge:
         if self.voice is None or widget is None:
             return
         text = action_text(action, widget)
+        if text is None:
+            return
         self.barge_ins += 1
         await self.cancel_response(self.voice)
         self.record("user", text)

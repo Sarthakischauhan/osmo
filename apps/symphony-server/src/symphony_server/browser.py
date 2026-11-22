@@ -12,7 +12,17 @@ an idle browser is not closed while one runs. A client that connects to the thre
 again gets the widget back (`BrowserSession.render`).
 
 The user can click, scroll and type into the page from the widget's fullscreen view (`BrowserSession.drive`); that
-is the user's own input and needs no approval, unlike the agent's `browser_click` and `browser_type`.
+is the user's own input and needs no approval, unlike the agent's `browser_click` and `browser_type`. The widget's
+Take over button hands the browser to the user (`BrowserSessions.take_over`): until they hand it back, every agent
+browser tool refuses, so the user can log in or pay without the agent acting under them.
+
+What the model sees of a page is its text and its controls; password, one-time-code and card fields are marked
+`sensitive` and the agent cannot type into them (`sensitive_kind`), so secrets stay the user's to enter.
+Per-domain rules (`browser_rules.DomainRules`) deny sites outright here and, through `BrowserApprovalPolicy`,
+let the approval addon skip or force approval for clicks, typing and key presses by the site of the page.
+
+Chrome starts headless on a throwaway profile by default; `visible` shows its window too, and `profile` (Osmo's
+own persistent profile, opt-in) keeps logins between sessions for one thread at a time (others get a throwaway one).
 
 Frames and the widget's render reach the browser straight through `show` (the thread's observer),
 not as run events: core_server keeps every run event in memory for replay.
@@ -21,6 +31,7 @@ not as run events: core_server keeps every run event in memory for replay.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -29,14 +40,16 @@ from collections.abc import Awaitable, Callable, Coroutine
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
+from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 from core_harness import Addon, EventSink, Tool
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from symphony_server.browser_rules import DomainRules
 from symphony_server.canvas import WidgetBoard, render_event
 from symphony_server.cdp import BrowserError, CdpConnection
-from symphony_server.chrome import BrowserUnavailable, drain, kill_group, listening_url, start_chrome
+from symphony_server.chrome import OWNER_FILE, BrowserUnavailable, drain, kill_group, listening_url, start_chrome
 from symphony_server.protocol import BrowserClick, BrowserKey, BrowserScroll, RenderedWidget, ServerEvent, WidgetRender, WidgetUpdate
 from symphony_server.widgets import BrowserProps, BrowserWidget
 
@@ -53,6 +66,48 @@ IDLE_CHECK_SECONDS = 60
 # The keyCode of Enter (what a DOM KeyboardEvent calls it, and CDP's windowsVirtualKeyCode).
 ENTER_KEY_CODE = 13
 READ_EXPRESSION = "({url: location.href, title: document.title, text: document.body ? document.body.innerText : ''})"
+# How long browser_back/forward wait for the page they go to, and the longest browser_wait.
+HISTORY_WAIT_SECONDS = 10.0
+WAIT_MAX_SECONDS = 10.0
+WAIT_POLL_SECONDS = 0.25
+# The keys browser_press may press: DOM `key` -> (`code`, keyCode).
+PRESSABLE_KEYS: dict[str, tuple[str, int]] = {
+    "Enter": ("Enter", ENTER_KEY_CODE),
+    "Escape": ("Escape", 27),
+    "Tab": ("Tab", 9),
+    "Backspace": ("Backspace", 8),
+    "Space": ("Space", 32),
+    "ArrowUp": ("ArrowUp", 38),
+    "ArrowDown": ("ArrowDown", 40),
+    "ArrowLeft": ("ArrowLeft", 37),
+    "ArrowRight": ("ArrowRight", 39),
+    "PageUp": ("PageUp", 33),
+    "PageDown": ("PageDown", 34),
+    "Home": ("Home", 36),
+    "End": ("End", 35),
+}
+# Input `autocomplete` tokens of secrets (besides type=password), and what browser_read calls them.
+SENSITIVE_AUTOCOMPLETE = {
+    "current-password": "password",
+    "new-password": "password",
+    "one-time-code": "one-time code",
+    "cc-number": "card",
+    "cc-csc": "card",
+    "cc-exp": "card",
+    "cc-exp-month": "card",
+    "cc-exp-year": "card",
+}
+# The roles of nodes that can hold typed text (the ones checked for being sensitive).
+TEXT_ROLES = frozenset({"textbox", "searchbox", "combobox", "spinbutton"})
+SELECT_FUNCTION = """function (wanted) {
+  if (!(this instanceof HTMLSelectElement)) return {error: 'not a dropdown (select element)'};
+  const option = Array.from(this.options).find(o => o.value === wanted || o.label.trim() === wanted || o.text.trim() === wanted);
+  if (!option) return {error: 'no option ' + JSON.stringify(wanted), options: Array.from(this.options).map(o => o.label.trim()).slice(0, 50)};
+  this.value = option.value;
+  this.dispatchEvent(new Event('input', {bubbles: true}));
+  this.dispatchEvent(new Event('change', {bubbles: true}));
+  return {selected: option.label.trim()};
+}"""
 
 Show = Callable[[str, ServerEvent], Awaitable[None]]
 
@@ -142,6 +197,43 @@ class BoxModelResult(_Cdp):
     model: BoxModel
 
 
+class DescribedNode(_Cdp):
+    nodeName: str = ""
+    # Flat: name, value, name, value...
+    attributes: list[str] = []
+
+
+class Described(_Cdp):
+    node: DescribedNode = DescribedNode()
+
+
+class ResolvedObject(_Cdp):
+    objectId: str
+
+
+class Resolved(_Cdp):
+    object: ResolvedObject
+
+
+class HistoryEntry(_Cdp):
+    id: int
+    url: str
+
+
+class NavigationHistory(_Cdp):
+    currentIndex: int
+    entries: list[HistoryEntry]
+
+
+def sensitive_kind(node: DescribedNode) -> str | None:
+    """What secret an input holds ("password", "one-time code", "card"), or None for an ordinary field."""
+    attributes = dict(zip(node.attributes[0::2], node.attributes[1::2], strict=False))
+    if node.nodeName.upper() == "INPUT" and attributes.get("type", "").lower() == "password":
+        return "password"
+    tokens = attributes.get("autocomplete", "").lower().split()
+    return next((SENSITIVE_AUTOCOMPLETE[token] for token in tokens if token in SENSITIVE_AUTOCOMPLETE), None)
+
+
 def frame_data_url(data: str) -> str:
     media_type = next((kind for prefix, kind in FRAME_MEDIA_TYPES if data.startswith(prefix)), None)
     if media_type is None:
@@ -168,8 +260,14 @@ class BrowserSession:
         target: str,
         widget_id: str,
         show: Callable[[ServerEvent], Awaitable[None]],
+        keep_profile: bool = False,
+        rules: DomainRules = DomainRules(),
     ) -> None:
         self.process, self.profile, self.cdp, self.target, self.widget_id, self.show = process, profile, cdp, target, widget_id, show
+        # A persistent profile (Osmo's own) stays when the browser closes; a throwaway one is removed.
+        self.keep_profile, self.rules = keep_profile, rules
+        # The user took the browser over from the widget: agent tools refuse until they hand it back.
+        self.taken_over = False
         self.drain: asyncio.Task[None] | None = None
         self.relays: set[asyncio.Task[None]] = set()
         self.closed = False
@@ -183,9 +281,18 @@ class BrowserSession:
         self.last_used = 0.0
 
     @classmethod
-    async def launch(cls, executable: str, widget_id: str, show: Callable[[ServerEvent], Awaitable[None]]) -> BrowserSession:
-        """Start Chrome and open a blank page on it; kills it again if anything fails or is cancelled."""
-        process, profile = await start_chrome(executable)
+    async def launch(
+        cls,
+        executable: str,
+        widget_id: str,
+        show: Callable[[ServerEvent], Awaitable[None]],
+        profile: Path | None = None,
+        visible: bool = False,
+        rules: DomainRules = DomainRules(),
+    ) -> BrowserSession:
+        """Start Chrome (on `profile`, or a throwaway one) and open a blank page on it; kills it again if anything fails or is cancelled."""
+        keep_profile = profile is not None
+        process, profile = await start_chrome(executable, profile, visible)
         session: BrowserSession | None = None
         try:
             url = await listening_url(process)
@@ -196,7 +303,7 @@ class BrowserSession:
             except BaseException:
                 await cdp.close()
                 raise
-            session = cls(process, profile, cdp, attached.sessionId, widget_id, show)
+            session = cls(process, profile, cdp, attached.sessionId, widget_id, show, keep_profile, rules)
             session.drain = asyncio.create_task(drain(process))
             return session
         except BaseException:
@@ -205,7 +312,7 @@ class BrowserSession:
             else:
                 kill_group(process)
                 await process.wait()
-                shutil.rmtree(profile, ignore_errors=True)
+                forget_profile(profile, keep_profile)
             raise
 
     @property
@@ -261,7 +368,7 @@ class BrowserSession:
     def on_navigated(self, params: dict[str, Any], session_id: str | None) -> None:
         navigated = FrameNavigated.model_validate(params).frame
         if session_id == self.target and navigated.parentId is None:
-            self.spawn(self.patch({"url": navigated.url}))
+            self.spawn(self.patch({"url": navigated.url, "rule": self.rules.decide(navigated.url)}))
 
     # ------------------------------------------------------------ what the tools do
 
@@ -284,14 +391,23 @@ class BrowserSession:
         return PageText.model_validate(evaluated.result.value)
 
     async def read(self) -> dict[str, Any]:
+        """The page's text and controls. Nothing typed into a field is included (not even its AX value), and secret
+        fields are marked `sensitive` so the model knows to leave them to the user."""
         page = await self.read_page()
         tree = AxTree.model_validate(await self.page("Accessibility.getFullAXTree"))
-        elements = [
-            {"ref": node.backendDOMNodeId, "role": role_of(node), "name": node.name.value if node.name else ""}
-            for node in tree.nodes
-            if not node.ignored and node.backendDOMNodeId is not None and is_focusable(node) and role_of(node) != "RootWebArea"
-        ]
+        elements: list[dict[str, Any]] = []
+        for node in tree.nodes:
+            if node.ignored or node.backendDOMNodeId is None or not is_focusable(node) or role_of(node) == "RootWebArea":
+                continue
+            element: dict[str, Any] = {"ref": node.backendDOMNodeId, "role": role_of(node), "name": node.name.value if node.name else ""}
+            kind = await self.sensitive(node.backendDOMNodeId) if role_of(node) in TEXT_ROLES else None
+            if kind is not None:
+                element["sensitive"] = kind
+            elements.append(element)
         return {"url": page.url, "title": page.title, "text": page.text, "elements": elements}
+
+    async def sensitive(self, ref: int) -> str | None:
+        return sensitive_kind(Described.model_validate(await self.page("DOM.describeNode", {"backendNodeId": ref})).node)
 
     async def center_of(self, ref: int) -> tuple[float, float]:
         await self.page("DOM.scrollIntoViewIfNeeded", {"backendNodeId": ref})
@@ -307,6 +423,11 @@ class BrowserSession:
             await self.page("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1})
 
     async def type(self, ref: int, text: str, submit: bool) -> None:
+        kind = await self.sensitive(ref)
+        if kind is not None:
+            raise BrowserError(
+                f"that is a {kind} field: Osmo never types secrets. Ask the user to take over the browser and enter it themselves"
+            )
         await self.page("DOM.focus", {"backendNodeId": ref})
         await self.page("Input.insertText", {"text": text})
         if submit:
@@ -319,6 +440,50 @@ class BrowserSession:
         # A key that types something is a keyDown with its text; one that does not (Backspace, arrows) is a rawKeyDown.
         await self.page("Input.dispatchKeyEvent", {"type": "rawKeyDown" if text is None else "keyDown", **keys, **({} if text is None else {"text": text})})
         await self.page("Input.dispatchKeyEvent", {"type": "keyUp", **keys})
+
+    async def go(self, delta: Literal[-1, 1]) -> str:
+        """Back (-1) or forward (1) in the tab's history; the address it lands on."""
+        history = NavigationHistory.model_validate(await self.page("Page.getNavigationHistory"))
+        index = history.currentIndex + delta
+        if not 0 <= index < len(history.entries):
+            raise BrowserError("there is no page to go " + ("back to" if delta < 0 else "forward to"))
+        loaded = self.cdp.expect("Page.loadEventFired", self.target)
+        try:
+            await self.page("Page.navigateToHistoryEntry", {"entryId": history.entries[index].id})
+            # A page from the back/forward cache fires no load: give up waiting after a while, it is there anyway.
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(HISTORY_WAIT_SECONDS):
+                    await loaded
+        finally:
+            loaded.cancel()
+        return (await self.read_page()).url
+
+    async def select(self, ref: int, option: str) -> dict[str, Any]:
+        resolved = Resolved.model_validate(await self.page("DOM.resolveNode", {"backendNodeId": ref}))
+        called = Evaluated.model_validate(
+            await self.page(
+                "Runtime.callFunctionOn",
+                {"objectId": resolved.object.objectId, "functionDeclaration": SELECT_FUNCTION, "arguments": [{"value": option}], "returnByValue": True},
+            )
+        )
+        result = called.result.value
+        if called.exceptionDetails is not None or not isinstance(result, dict):
+            raise BrowserError("could not choose that option")
+        if "error" in result:
+            raise BrowserError(json.dumps(result))
+        return {"selected": str(result["selected"])}
+
+    async def wait_for(self, text: str, seconds: float) -> bool:
+        """Whether `text` shows up in the page's text within `seconds`."""
+        expression = f"(document.body ? document.body.innerText : '').includes({json.dumps(text)})"
+        deadline = time.monotonic() + seconds
+        while True:
+            found = Evaluated.model_validate(await self.page("Runtime.evaluate", {"expression": expression, "returnByValue": True}))
+            if found.result.value is True:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(WAIT_POLL_SECONDS)
 
     async def scroll(self, direction: Literal["down", "up"]) -> None:
         sign = "" if direction == "down" else "-"
@@ -360,7 +525,15 @@ class BrowserSession:
         await self.cdp.close()
         kill_group(self.process)
         await self.process.wait()
-        shutil.rmtree(self.profile, ignore_errors=True)
+        forget_profile(self.profile, self.keep_profile)
+
+
+def forget_profile(profile: Path, keep: bool) -> None:
+    """After Chrome is gone: remove a throwaway profile; a kept one only loses its owner file (no server runs it now)."""
+    if keep:
+        (profile / OWNER_FILE).unlink(missing_ok=True)
+    else:
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 class BrowserSessions:
@@ -372,8 +545,18 @@ class BrowserSessions:
     `clock` tells the time for the idle check (seconds, monotonic).
     """
 
-    def __init__(self, executable: str | None, board: WidgetBoard, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        executable: str | None,
+        board: WidgetBoard,
+        clock: Callable[[], float] = time.monotonic,
+        *,
+        profile: Path | None = None,
+        visible: bool = False,
+        rules: DomainRules = DomainRules(),
+    ) -> None:
         self.executable, self.board, self.clock = executable, board, clock
+        self.profile, self.visible, self.rules = profile, visible, rules
         self.sessions: dict[str, BrowserSession] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         # The agent runs of each thread that are not over, which keep its browser open.
@@ -385,7 +568,7 @@ class BrowserSessions:
     async def open(self, thread_id: str) -> BrowserSession:
         """The thread's browser: the one that is running, or a new one (its widget shown) on first use or after Chrome died."""
         if self.executable is None:
-            raise BrowserUnavailable("the browser is not configured: set OSMO_BROWSER_PATH to a Chrome or Chromium executable")
+            raise BrowserUnavailable("no Chrome or Chromium was found: install one, or set OSMO_BROWSER_PATH to its executable")
         async with self.locks.setdefault(thread_id, asyncio.Lock()):
             session = self.sessions.get(thread_id)
             if session is not None and not session.usable:
@@ -403,7 +586,10 @@ class BrowserSessions:
         async def show(event: ServerEvent) -> None:
             await self.show(thread_id, event)
 
-        session = await BrowserSession.launch(executable, render.widget.id, show)
+        # Osmo's persistent profile serves one browser at a time (Chrome locks it); the others get a throwaway one.
+        in_use = any(session.keep_profile for session in self.sessions.values())
+        profile = self.profile if self.profile is not None and not in_use else None
+        session = await BrowserSession.launch(executable, render.widget.id, show, profile, self.visible, self.rules)
         try:
             await show(render)
             await session.start_screencast()
@@ -448,6 +634,14 @@ class BrowserSessions:
         """A voice session began on the thread: its browser is not on its way out any more."""
         self.ending.discard(thread_id)
         self.touch(thread_id)
+
+    async def take_over(self, thread_id: str, user: bool) -> None:
+        """The user takes the thread's browser over (`user`) or hands it back to the agent."""
+        session = self.sessions.get(thread_id)
+        if session is not None and session.usable:
+            session.taken_over = user
+            session.last_used = self.clock()
+            await session.patch({"control": "user" if user else "agent"})
 
     async def close(self, thread_id: str) -> None:
         """End a thread's browser: kill it and freeze its widget on the last frame."""
@@ -524,6 +718,30 @@ class ScrollArgs(BaseModel):
     direction: Literal["down", "up"]
 
 
+class HistoryArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PressArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: Literal[
+        "Enter", "Escape", "Tab", "Backspace", "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"
+    ]
+    target: str = Field(min_length=1, description="Why, in a few words, e.g. 'submit the search'. The user sees it when approving.")
+
+
+class SelectArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ref: int = Field(description="The ref of a dropdown (combobox) from browser_read.")
+    option: str = Field(min_length=1, description="The option's visible label (or its value).")
+
+
+class WaitArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=200, description="Text to wait for on the page.")
+    seconds: float = Field(default=5.0, gt=0, le=WAIT_MAX_SECONDS)
+
+
 A = TypeVar("A", bound=BaseModel)
 
 
@@ -542,6 +760,10 @@ class BrowserTool(Tool, Generic[A]):
         try:
             command = self.args_model.model_validate(args)
             session = await self.sessions.open(thread_id)
+            if session.taken_over:
+                raise BrowserError("the user has taken over the browser: stop using it, and say what is left for when they hand it back")
+            if session.rules.decide(session.props.url) == "deny":
+                raise BrowserError(f"browsing {session.props.url} is not allowed by the user's site rules")
             return json.dumps(await self.act(session, command))
         except (ValidationError, BrowserError) as exc:
             return json.dumps({"error": str(exc)})
@@ -560,7 +782,14 @@ class OpenTool(BrowserTool[OpenArgs]):
     async def act(self, session: BrowserSession, command: OpenArgs) -> dict[str, Any]:
         if urlsplit(command.url).scheme not in ("http", "https"):
             raise BrowserError("only http and https addresses can be opened")
-        return {"url": await session.navigate(command.url)}
+        if session.rules.decide(command.url) == "deny":
+            raise BrowserError(f"{urlsplit(command.url).hostname} is blocked by the user's site rules")
+        landed = await session.navigate(command.url)
+        if session.rules.decide(landed) == "deny":
+            # A redirect into a denied site: leave it at once.
+            await session.navigate("about:blank")
+            raise BrowserError(f"{command.url} led to {urlsplit(landed).hostname}, which the user's site rules block")
+        return {"url": landed}
 
 
 class ReadTool(BrowserTool[ReadArgs]):
@@ -608,8 +837,96 @@ class ScrollTool(BrowserTool[ScrollArgs]):
         return {"scrolled": command.direction}
 
 
+class BackTool(BrowserTool[HistoryArgs]):
+    def __init__(self, sessions: BrowserSessions) -> None:
+        super().__init__(sessions, "browser_back", "Go back to the previous page, as the Back button does.", HistoryArgs)
+
+    async def act(self, session: BrowserSession, command: HistoryArgs) -> dict[str, Any]:
+        return {"url": await session.go(-1)}
+
+
+class ForwardTool(BrowserTool[HistoryArgs]):
+    def __init__(self, sessions: BrowserSessions) -> None:
+        super().__init__(sessions, "browser_forward", "Go forward again after browser_back.", HistoryArgs)
+
+    async def act(self, session: BrowserSession, command: HistoryArgs) -> dict[str, Any]:
+        return {"url": await session.go(1)}
+
+
+class PressTool(BrowserTool[PressArgs]):
+    def __init__(self, sessions: BrowserSessions) -> None:
+        super().__init__(
+            sessions, "browser_press", "Press one key on the focused element (Enter submits, Escape closes, arrows move in lists and menus).", PressArgs
+        )
+
+    async def act(self, session: BrowserSession, command: PressArgs) -> dict[str, Any]:
+        code, key_code = PRESSABLE_KEYS[command.key]
+        await session.press(" " if command.key == "Space" else command.key, code, key_code)
+        return {"pressed": command.key}
+
+
+class SelectTool(BrowserTool[SelectArgs]):
+    def __init__(self, sessions: BrowserSessions) -> None:
+        super().__init__(sessions, "browser_select", "Choose an option of a dropdown (a select element) by its ref from browser_read.", SelectArgs)
+
+    async def act(self, session: BrowserSession, command: SelectArgs) -> dict[str, Any]:
+        return await session.select(command.ref, command.option)
+
+
+class WaitTool(BrowserTool[WaitArgs]):
+    def __init__(self, sessions: BrowserSessions) -> None:
+        super().__init__(sessions, "browser_wait", f"Wait up to `seconds` (at most {WAIT_MAX_SECONDS:g}) for text to appear on the page.", WaitArgs)
+
+    async def act(self, session: BrowserSession, command: WaitArgs) -> dict[str, Any]:
+        return {"found": await session.wait_for(command.text, command.seconds)}
+
+
 def browser_tools(sessions: BrowserSessions) -> list[Tool]:
-    return [OpenTool(sessions), ReadTool(sessions), ClickTool(sessions), TypeTool(sessions), ScrollTool(sessions)]
+    return [
+        OpenTool(sessions),
+        ReadTool(sessions),
+        ClickTool(sessions),
+        TypeTool(sessions),
+        ScrollTool(sessions),
+        BackTool(sessions),
+        ForwardTool(sessions),
+        PressTool(sessions),
+        SelectTool(sessions),
+        WaitTool(sessions),
+    ]
 
 
-BROWSER_TOOL_NAMES = frozenset({"browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll"})
+BROWSER_TOOL_NAMES = frozenset(
+    {
+        "browser_open",
+        "browser_read",
+        "browser_click",
+        "browser_type",
+        "browser_scroll",
+        "browser_back",
+        "browser_forward",
+        "browser_press",
+        "browser_select",
+        "browser_wait",
+    }
+)
+# The steps that act on a page (and so can submit, buy or send): the ones site rules allow without asking, or make ask.
+BROWSER_ACTION_TOOLS = frozenset({"browser_click", "browser_type", "browser_press"})
+
+
+class BrowserApprovalPolicy:
+    """Approval by the site of the thread's page: `allow` sites let actions through, `ask` sites always ask for them."""
+
+    def __init__(self, sessions: BrowserSessions, thread_id: str | None) -> None:
+        self.sessions, self.thread_id = sessions, thread_id
+
+    def decide(self, tool_name: str, arguments: Mapping[str, Any]) -> Literal["allow", "ask"] | None:
+        del arguments
+        session = self.sessions.sessions.get(self.thread_id) if self.thread_id is not None else None
+        if tool_name not in BROWSER_ACTION_TOOLS or session is None:
+            return None
+        rule = session.rules.match(session.props.url)
+        if rule == "deny":
+            # The tool itself refuses on a denied site; asking the user first would be a prompt for nothing.
+            return "allow"
+        return rule

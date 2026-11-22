@@ -177,3 +177,35 @@ describe("BrowserWidget in fullscreen", () => {
     expect(screen.queryByRole("button", { name: "Close browser" })).toBeNull();
   });
 });
+
+describe("BrowserWidget take over and site rules", () => {
+  it("takes the browser over into fullscreen, says the user drives, and hands it back", () => {
+    const onTakeOver = vi.fn();
+    const onInput = vi.fn();
+    const { rerender } = render(<BrowserWidget status="live" url="https://shop.test/" frame={FRAME} onInput={onInput} onTakeOver={onTakeOver} />);
+    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    expect(onTakeOver).toHaveBeenCalledWith(true);
+    // Fullscreen opened, so the page takes the user's input right away.
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector(".osmo-browser-live")).not.toBeNull();
+
+    rerender(<BrowserWidget status="live" url="https://shop.test/" frame={FRAME} control="user" onInput={onInput} onTakeOver={onTakeOver} />);
+    const statuses = screen.getAllByRole("status").map((status) => status.textContent);
+    expect(statuses.every((text) => text === "You")).toBe(true);
+    const handBack = screen.getAllByRole("button", { name: "Hand back" })[0];
+    expect(handBack?.getAttribute("aria-pressed")).toBe("true");
+    if (handBack) fireEvent.click(handBack);
+    expect(onTakeOver).toHaveBeenLastCalledWith(false);
+  });
+
+  it("names a trusted or blocked site, and offers no take over once ended", () => {
+    const { rerender } = render(<BrowserWidget status="live" url="https://github.com/" rule="allow" onTakeOver={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toBe("Trusted");
+    rerender(<BrowserWidget status="live" url="https://bank.test/" rule="deny" onTakeOver={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toBe("Blocked");
+    rerender(<BrowserWidget status="live" url="https://news.test/" rule="ask" onTakeOver={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toBe("Live");
+    rerender(<BrowserWidget status="ended" url="https://news.test/" rule="ask" onTakeOver={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
+  });
+});

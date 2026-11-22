@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('osmoAudio', {
   ready: () => ipcRenderer.invoke('audio:ready'),
   started: result => ipcRenderer.invoke('audio:started', result),
   frame: pcm16 => ipcRenderer.invoke('audio:frame', pcm16),
+  bargeIn: () => ipcRenderer.invoke('audio:barge-in'),
   onStart: callback => listen('audio:start', callback),
   onStop: callback => listen('audio:stop', callback),
   onPlay: callback => listen('audio:play', callback),

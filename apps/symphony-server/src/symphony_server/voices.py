@@ -98,6 +98,7 @@ class SetVoiceArgs(_Wire):
 CORE_NAMESPACES: dict[str, str] = {
     "xai": "grok",
     "openai": "openai",
+    "anthropic": "anthropic",
     "vercel": "vercel",
     "gemini": "gemini",
     "sarvam": "sarvam",
@@ -397,7 +398,7 @@ class PreviewCache:
     async def generate(self, model: str, voice: str) -> bytes:
         """Open a short-lived voice session and keep the first ~2 s it speaks."""
         entry = find_model(self.models(), model)
-        if entry is None or not self.access.connect(entry.provider):
+        if entry is None or not self.access.voice_ready(entry.provider):
             raise RuntimeError(f"{entry.provider if entry else model} is not connected on the server")
         config = VoiceConfig(voice=voice, instructions="Read the user's line aloud, exactly, once.", turn_detection="manual")
         audio = bytearray()

@@ -1,6 +1,6 @@
 [project]
 name = "core-server"
-version = "0.4.0"
+version = "0.0.1"
 description = "FastAPI framework for managed Symphony chat runs and replayable harness events (import as core_server; workspace-only, not published)"
 readme = "README.md"
 license = "MIT"
@@ -10,8 +10,8 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "symphony-core",
-    "symphony-harness",
+    "symphony-core>=0.0.7",
+    "symphony-harness>=0.0.7",
     "dotenv>=0.9.9",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",

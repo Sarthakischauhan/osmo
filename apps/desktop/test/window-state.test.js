@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BOX_MAX_HEIGHT, BOX_WIDTH, ORB_MARGIN, ORB_SIZE, boxLayout, defaultOrbBounds } from '../src/window-state.js';
+import { BOX_MAX_HEIGHT, BOX_WIDTH, ORB_MARGIN, ORB_SIZE, boxLayout, defaultOrbBounds, moveOrb } from '../src/window-state.js';
 
 const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
 const orb = defaultOrbBounds(workArea);
@@ -48,4 +48,11 @@ test('the window is kept inside the work area sideways, and the orb is placed in
   const second = { x: 1920, y: 0, width: 1440, height: 900 };
   const onSecond = boxLayout({ ...ORB_SIZE, x: 1930, y: 100 }, second, 100);
   assert.equal(onSecond.bounds.x, 1920);
+});
+
+test('a dragged orb follows the pointer and stays inside the work area', () => {
+  const start = { ...ORB_SIZE, x: 800, y: 400 };
+  assert.deepEqual(moveOrb(start, workArea, -30.4, 12.6), { ...ORB_SIZE, x: 770, y: 413 });
+  assert.deepEqual(moveOrb(start, workArea, -5000, -5000), { ...ORB_SIZE, x: 0, y: 0 });
+  assert.deepEqual(moveOrb(start, workArea, 5000, 5000), { ...ORB_SIZE, x: 1920 - 112, y: 1080 - 112 });
 });
