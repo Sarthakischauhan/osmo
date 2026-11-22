@@ -5,17 +5,20 @@ have:
 
 - **Writes** only inside the policy's ``writable`` directories (the run's workspace, its
   home and temp dirs) and a few character devices.
-- **Reads** of the user's home directory are denied, except the ``readable`` toolchain
-  directories (``~/.cargo``, ``~/.bun``, ...) and the writable directories. Secrets in
-  ``~/.ssh``, ``~/.config/gh``, ``~/.aws``, browser profiles and app data stay hidden.
-- **The keychain**, **AppleEvents** and **LaunchServices** are unreachable, and
-  ``osascript``, ``open`` and ``launchctl`` cannot be executed: each of those could ask
-  an unsandboxed process to run something on the sandbox's behalf.
-- **Network** is allowed unless the policy turns it off (package installs need it).
+- **Reads** of the user's home directory are denied, except the ``readable`` paths
+  (toolchains such as ``~/.cargo`` and ``~/.bun``, and whatever the caller grants) and the
+  writable directories. ``hidden`` paths (``~/.ssh``, ``~/.aws``, ...) stay unreadable even
+  inside a readable one.
+- **AppleEvents** and **LaunchServices** are unreachable, and ``osascript``, ``open`` and
+  ``launchctl`` cannot be executed: each could ask an unsandboxed process to run something
+  on the sandbox's behalf. **The keychain** is unreachable too, unless ``keychain`` is set
+  (the GitHub CLI keeps its login there).
+- **Network** is allowed unless the policy turns it off (models and package installs need it).
 
-The child gets a minimal environment: no inherited secrets, ``HOME`` and ``TMPDIR``
-pointing at the sandbox's own directories. Children inherit the sandbox; a copied Apple
-binary is killed by code signing, not run outside it.
+``wrap(argv)`` prefixes a command with ``sandbox-exec`` and the profile, for callers that
+run a long-lived process themselves; ``run`` runs one bash command and collects its output.
+Give the child a minimal environment (``sandbox_env``). Children inherit the sandbox; a
+copied Apple binary is killed by code signing, not run outside it.
 
 Seatbelt is deprecated as a public API but is what macOS's own services and other agent
 sandboxes use; it is the only kernel-enforced option without a VM.
@@ -52,17 +55,13 @@ DEFAULT_TOOLCHAIN_DIRS = (
     ".volta",
     ".asdf",
 )
-# Never readable, even if a readable directory contains them.
-DEFAULT_HIDDEN = (".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", ".docker/config.json", ".kube", "Library/Keychains")
+# Under $HOME and never readable, even if a readable directory contains them.
+DEFAULT_HIDDEN = (".ssh", ".gnupg", ".aws", ".netrc", ".docker/config.json", ".kube")
 
-_DENIED_EXECUTABLES = ("/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/security", "/usr/bin/sudo")
-_DENIED_SERVICES = (
-    "com.apple.SecurityServer",
-    "com.apple.securityd.xpc",
-    "com.apple.security.agent",
-    "com.apple.coreservices.launchservicesd",
-    "com.apple.coreservices.appleevents",
-)
+_DENIED_EXECUTABLES = ("/usr/bin/osascript", "/usr/bin/open", "/bin/launchctl", "/usr/bin/sudo")
+_DENIED_SERVICES = ("com.apple.coreservices.launchservicesd", "com.apple.coreservices.appleevents")
+_KEYCHAIN_EXECUTABLES = ("/usr/bin/security",)
+_KEYCHAIN_SERVICES = ("com.apple.SecurityServer", "com.apple.securityd.xpc", "com.apple.security.agent")
 _WRITABLE_DEVICES = ("/dev/null", "/dev/zero", "/dev/tty", "/dev/random", "/dev/urandom", "/dev/dtracehelper")
 
 
@@ -85,19 +84,36 @@ class SandboxPolicy:
     readable: tuple[Path, ...] = ()
     hidden: tuple[Path, ...] = ()
     network: bool = True
+    keychain: bool = False
     home: Path = field(default_factory=Path.home)
 
     @classmethod
-    def for_workspace(cls, workspace: Path, scratch: tuple[Path, ...] = (), *, network: bool = True, home: Path | None = None) -> SandboxPolicy:
+    def confined(
+        cls,
+        writable: tuple[Path, ...],
+        readable: tuple[Path, ...] = (),
+        *,
+        network: bool = True,
+        keychain: bool = False,
+        home: Path | None = None,
+    ) -> SandboxPolicy:
+        """`writable` plus the toolchains under `home` (and `readable`); the usual secrets hidden."""
         home = home or Path.home()
-        readable = tuple(home / name for name in DEFAULT_TOOLCHAIN_DIRS if (home / name).exists())
+        toolchains = tuple(home / name for name in DEFAULT_TOOLCHAIN_DIRS if (home / name).exists())
         return cls(
-            writable=(workspace, *scratch),
-            readable=readable,
+            writable=writable,
+            readable=(*toolchains, *readable),
             hidden=tuple(home / name for name in DEFAULT_HIDDEN),
             network=network,
+            keychain=keychain,
             home=home,
         )
+
+    def wrap(self, argv: list[str]) -> list[str]:
+        """`argv` run under this policy."""
+        if not sandbox_available():
+            raise RuntimeError("the macOS sandbox (sandbox-exec) is not available on this system")
+        return [SANDBOX_EXEC, "-p", self.profile(), *argv]
 
     def profile(self) -> str:
         writable = " ".join(f"(subpath {_quote(_real(path))})" for path in self.writable)
@@ -115,11 +131,16 @@ class SandboxPolicy:
         ]
         if self.hidden:
             lines.append("(deny file-read* " + " ".join(f"(subpath {_quote(_real(path))})" for path in self.hidden) + ")")
+        executables = _DENIED_EXECUTABLES if self.keychain else (*_DENIED_EXECUTABLES, *_KEYCHAIN_EXECUTABLES)
+        services = _DENIED_SERVICES if self.keychain else (*_DENIED_SERVICES, *_KEYCHAIN_SERVICES)
         lines += [
-            "(deny process-exec " + " ".join(f"(literal {_quote(path)})" for path in _DENIED_EXECUTABLES) + ")",
+            "(deny process-exec " + " ".join(f"(literal {_quote(path)})" for path in executables) + ")",
             "(deny appleevent-send)",
-            "(deny mach-lookup " + " ".join(f"(global-name {_quote(name)})" for name in _DENIED_SERVICES) + ")",
+            "(deny mach-lookup " + " ".join(f"(global-name {_quote(name)})" for name in services) + ")",
         ]
+        keychains = _quote(_real(self.home / "Library" / "Keychains"))
+        # The Security framework reads the keychain files in the calling process.
+        lines.append(f"(allow file-read* (subpath {keychains}))" if self.keychain else f"(deny file-read* (subpath {keychains}))")
         if not self.network:
             lines.append("(deny network-outbound (remote ip))")
         return "\n".join(lines) + "\n"
@@ -240,4 +261,4 @@ def _kill(process: asyncio.subprocess.Process) -> None:
         pass
 
 
-__all__ = ["CommandResult", "SandboxPolicy", "SeatbeltSandbox", "sandbox_available", "sandbox_env"]
+__all__ = ["CommandResult", "DEFAULT_HIDDEN", "SandboxPolicy", "SeatbeltSandbox", "sandbox_available", "sandbox_env"]

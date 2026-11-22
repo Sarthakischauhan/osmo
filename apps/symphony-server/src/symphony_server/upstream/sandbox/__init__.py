@@ -1,23 +1,5 @@
-"""Sandboxed coding workspaces for server runs (macOS Seatbelt)."""
+"""The macOS sandbox (Seatbelt) for processes a server runs on the user's behalf."""
 
-from .seatbelt import CommandResult, SandboxPolicy, SeatbeltSandbox, sandbox_available, sandbox_env
-from .tools import PUBLISH_TOOL, RUN_WORKSPACE, WORKSPACE_TOOL_NAMES, WorkspaceLink, workspace_link, workspace_tools
-from .workspace import Workspace, WorkspaceError, WorkspaceInfo, Workspaces
+from .seatbelt import DEFAULT_HIDDEN, CommandResult, SandboxPolicy, SeatbeltSandbox, sandbox_available, sandbox_env
 
-__all__ = [
-    "CommandResult",
-    "PUBLISH_TOOL",
-    "RUN_WORKSPACE",
-    "SandboxPolicy",
-    "SeatbeltSandbox",
-    "WORKSPACE_TOOL_NAMES",
-    "Workspace",
-    "WorkspaceError",
-    "WorkspaceInfo",
-    "WorkspaceLink",
-    "Workspaces",
-    "sandbox_available",
-    "sandbox_env",
-    "workspace_link",
-    "workspace_tools",
-]
+__all__ = ["CommandResult", "DEFAULT_HIDDEN", "SandboxPolicy", "SeatbeltSandbox", "sandbox_available", "sandbox_env"]

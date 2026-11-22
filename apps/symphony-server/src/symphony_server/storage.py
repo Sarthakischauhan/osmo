@@ -94,6 +94,10 @@ class Storage(Protocol):
 
     def interrupt_unfinished(self, reason: str, keep: frozenset[str] = frozenset()) -> int: ...
 
+    def save_coding_run(self, run_id: str, session_id: str, workspace: str) -> None: ...
+
+    def unfinished_coding_runs(self) -> list[tuple[AgentRunRecord, str, str]]: ...
+
     def setting(self, key: str) -> str | None: ...
 
     def save_setting(self, key: str, value: str | None) -> None: ...
@@ -125,6 +129,11 @@ CREATE TABLE IF NOT EXISTS runs (
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_by_thread ON runs(thread_id, created_at);
+CREATE TABLE IF NOT EXISTS coding_runs (
+    run_id TEXT PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL,
+    workspace TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS provider_connections (
     provider TEXT PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -285,6 +294,22 @@ class SQLiteStorage:
                 (reason, now, *held),
             )
         return changed.rowcount
+
+    def save_coding_run(self, run_id: str, session_id: str, workspace: str) -> None:
+        """The Symphony session and workspace of a coding run (symphony_runs.py), to resume it."""
+        with self.transaction() as db:
+            if db.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone() is None:
+                return
+            db.execute("INSERT OR REPLACE INTO coding_runs (run_id, session_id, workspace) VALUES (?, ?, ?)", (run_id, session_id, workspace))
+
+    def unfinished_coding_runs(self) -> list[tuple[AgentRunRecord, str, str]]:
+        """Coding runs stored as live, with their session id and workspace, oldest first."""
+        with self.transaction() as db:
+            rows = db.execute(
+                "SELECT runs.*, coding_runs.session_id, coding_runs.workspace FROM runs JOIN coding_runs USING (run_id) "
+                "WHERE runs.status IN ('running', 'waiting_approval') ORDER BY runs.created_at, runs.run_id"
+            ).fetchall()
+        return [(run_row(row), row["session_id"], row["workspace"]) for row in rows]
 
     # ------------------------------------------------------------ provider connections
 

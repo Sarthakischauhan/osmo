@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, get_args
@@ -13,17 +14,16 @@ DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"
 DEFAULT_CREDENTIALS_FILE = "~/.config/osmo/credentials.enc"
 DEFAULT_DATABASE_FILE = "~/.config/osmo/osmo.db"
-# Where agent runs clone repositories and work on them in the macOS sandbox (one directory per run).
+# Fresh working directories for coding runs that are not given one (one per run).
 DEFAULT_WORKSPACES_DIR = "~/.config/osmo/workspaces"
-# Turn budget of one background agent run: coding tasks (explore, edit, test, commit, open a PR) need dozens.
-DEFAULT_AGENT_MAX_TURNS = 60
+# Osmo's own SYMPHONY_HOME for the coding agent: its sessions, and a config Osmo writes before each launch.
+DEFAULT_SYMPHONY_HOME = "~/.config/osmo/symphony"
 # The text model background agents (run_agent) run on: core_ai's default xAI model.
 DEFAULT_AGENT_MODEL = "grok:grok-4.20-0309-reasoning"
 # Agent tools that wait for the user's approval in the web app (OSMO_APPROVAL_TOOLS).
 # Clicking and typing in the agent browser can submit, buy or send, so they wait; opening, reading and
-# scrolling pages do not. Search does not wait unless it is added here. Opening a pull request pushes to
-# GitHub under the user's name, so it waits; sandboxed shell commands and file edits do not.
-DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type", "open_pull_request")
+# scrolling pages do not. Search does not wait unless it is added here.
+DEFAULT_APPROVAL_TOOLS: tuple[str, ...] = ("browser_click", "browser_type")
 
 DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can only talk to you; they see an orb and a canvas of widgets.
 
@@ -49,7 +49,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 # Background agent
 - For anything that needs the web (facts, news, weather, prices, research), call run_agent with a full, self-contained task and say one line that you started. Keep talking with the user meanwhile. The agent can search the web and, when its browser is enabled, browse pages (the browser appears live on screen); it cannot draw, show widgets, or use the computer.
-- The agent can also do coding work on a repository: clone it into a sandbox, change code, run tests, commit, and open a pull request (the user approves the pull request on screen). For that, give run_agent the repository (owner/name or a local path) and what to change. Runs keep going if Osmo restarts.
+- For coding work (changing a repository, fixing a bug, opening a pull request), call run_agent with code set to true, and workspace set to the local repository path when the user names one. That run is Symphony's coding agent, in a sandbox; pushing and opening pull requests wait for the user's Approve on screen. Runs keep going if Osmo restarts.
 - Messages starting with [agent <run id>] report on a run: when it is done, summarize the result in one or two sentences; when it needs approval, ask the user to tap Approve or Deny on screen; never approve for them.
 - Once a run is started, wait to be told: do not call agent_status or say it is still working unless the user asks how it is going. cancel_agent stops a run the user no longer wants.
 
@@ -65,9 +65,8 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 
 
 # Tool groups the server can enable (OSMO_TOOLS); see app.osmo_tools.
-ToolCategory = Literal["search", "image", "osmo", "desktop", "browser", "code"]
-# `code` only takes effect where the macOS sandbox is available (see app.osmo_tools).
-DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo", "code")
+ToolCategory = Literal["search", "image", "osmo", "desktop", "browser"]
+DEFAULT_TOOL_CATEGORIES: tuple[ToolCategory, ...] = ("search", "image", "osmo")
 # The OSMO_TOOLS category of each of Osmo's tools, by tool name.
 TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "computer": "desktop",
@@ -84,12 +83,6 @@ TOOL_CATEGORIES: dict[str, ToolCategory] = {
     "browser_click": "browser",
     "browser_type": "browser",
     "browser_scroll": "browser",
-    "workspace_open": "code",
-    "shell": "code",
-    "read_file": "code",
-    "write_file": "code",
-    "edit_file": "code",
-    "open_pull_request": "code",
 }
 
 
@@ -147,9 +140,15 @@ class Settings:
     exa_api_key: str | None = None
     # SQLite file for threads, messages, agent runs and provider connections; None keeps them in memory.
     database_file: Path | None = None
-    # Sandboxed per-run repository workspaces (OSMO_WORKSPACES_DIR); None puts them in a temporary directory.
+    # The Symphony coding agent (`symphony stdio`) that run_agent(code=true) runs; None turns coding runs off.
+    symphony_path: str | None = None
+    # Its model (OSMO_SYMPHONY_MODEL); None uses Symphony's own default.
+    symphony_model: str | None = None
+    # Run it inside the macOS sandbox (OSMO_SYMPHONY_SANDBOX=0 turns that off; required where there is none).
+    symphony_sandbox: bool = True
+    # Osmo's SYMPHONY_HOME and the fresh workspaces of coding runs; None puts both in a temporary directory.
+    symphony_home: Path | None = None
     workspaces_dir: Path | None = None
-    agent_max_turns: int = DEFAULT_AGENT_MAX_TURNS
     agent_model: str = DEFAULT_AGENT_MODEL
     # When no explicit model is configured, prefer a connected subscription for agent runs.
     agent_model_auto: bool = False
@@ -178,8 +177,11 @@ class Settings:
             image_model=os.getenv("OSMO_IMAGE_MODEL", DEFAULT_IMAGE_MODEL),
             exa_api_key=os.getenv("EXA_API_KEY") or None,
             database_file=Path(os.getenv("OSMO_DATABASE_FILE") or DEFAULT_DATABASE_FILE).expanduser(),
+            symphony_path=os.getenv("OSMO_SYMPHONY_PATH") or shutil.which("symphony"),
+            symphony_model=os.getenv("OSMO_SYMPHONY_MODEL") or None,
+            symphony_sandbox=os.getenv("OSMO_SYMPHONY_SANDBOX", "1") != "0",
+            symphony_home=Path(os.getenv("OSMO_SYMPHONY_HOME") or DEFAULT_SYMPHONY_HOME).expanduser(),
             workspaces_dir=Path(os.getenv("OSMO_WORKSPACES_DIR") or DEFAULT_WORKSPACES_DIR).expanduser(),
-            agent_max_turns=int(os.getenv("OSMO_AGENT_MAX_TURNS") or DEFAULT_AGENT_MAX_TURNS),
             agent_model=os.getenv("OSMO_AGENT_MODEL") or DEFAULT_AGENT_MODEL,
             agent_model_auto=not bool(os.getenv("OSMO_AGENT_MODEL")),
             approval_tools=approval_tools(os.getenv("OSMO_APPROVAL_TOOLS")),

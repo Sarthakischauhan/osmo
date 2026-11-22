@@ -49,6 +49,7 @@ from symphony_server.protocol import (
 from symphony_server.providers import provider_label
 from symphony_server.storage import DEFAULT_THREAD_TITLE, AgentRunRecord, AgentRunStatus, Storage
 from symphony_server.turn_events import RunFailedPayload, ToolStartedPayload, activity_label
+from symphony_server.symphony_runs import CodingRuns, SymphonyRunner
 from symphony_server.upstream.durable import RUN_RESUMED, DurableRunBackend
 from symphony_server.voices import provider_of
 
@@ -63,7 +64,11 @@ INTERRUPTED = "Interrupted when Osmo restarted. Start it again if you still want
 
 RUN_AGENT_PARAMETERS: dict[str, Any] = {
     "type": "object",
-    "properties": {"task": {"type": "string", "description": "What the agent should do, in full, self-contained."}},
+    "properties": {
+        "task": {"type": "string", "description": "What the agent should do, in full, self-contained."},
+        "code": {"type": "boolean", "description": "True for coding work (change a repository, fix a bug, open a pull request): runs Symphony's coding agent."},
+        "workspace": {"type": "string", "description": "For coding work: the local directory to work in, when the user names one. Omit for a fresh directory."},
+    },
     "required": ["task"],
 }
 RUN_ID_PARAMETERS: dict[str, Any] = {
@@ -97,7 +102,10 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: DurableRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None, auto_model: bool = False) -> None:
+    def __init__(
+        self, backend: DurableRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions,
+        *, desktops: dict[str, DesktopSession] | None = None, auto_model: bool = False, symphony: SymphonyRunner | None = None,
+    ) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
         self.auto_model = auto_model
         # The model chosen in the app (agent_model.py); it wins over OSMO_AGENT_MODEL and automatic selection.
@@ -114,6 +122,17 @@ class AgentRuns:
         self.asking: dict[str, ApprovalRequest] = {}
         # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
         self.phases: dict[str, str] = {}
+        # Coding runs: Symphony's coding agent (symphony_runs.py); None when it is not installed.
+        self.coding = CodingRuns(symphony, self) if symphony is not None else None
+
+    def notice(self, run_id: str, tag: NoticeTag, text: str) -> Notice:
+        return Notice(run_id, tag, text)
+
+    async def start_code(self, thread_id: str, task: str, workspace: str | None = None) -> AgentRunRecord | str:
+        """Submit coding `task` for `thread_id` to Symphony's coding agent; the record, or why it could not start."""
+        if self.coding is None:
+            return "coding runs need Symphony's coding agent (`symphony`) installed, on macOS for its sandbox"
+        return await self.coding.start(thread_id, task[:TASK_MAX], workspace)
 
     async def recover(self) -> list[str]:
         """Follow the runs the backend resumed after a restart; the ids of those it took back."""
@@ -134,6 +153,8 @@ class AgentRuns:
             self.browsers.hold(record.threadId)
             self.spawn(self.follow(record.runId, after=cursor))
             adopted.append(record.runId)
+        if self.coding is not None:
+            adopted += self.coding.recover()
         # Anything else stored as live (the backend gave up on it, or it predates durable runs) is not running.
         self.storage.interrupt_unfinished(INTERRUPTED, keep=frozenset(adopted))
         return adopted
@@ -229,6 +250,9 @@ class AgentRuns:
         if record is None:
             return self.storage.get_run(run_id)
         if record.status in ("running", "waiting_approval"):
+            if self.coding is not None and run_id in self.coding.ids:
+                await self.coding.cancel(run_id)
+                return self.runs[run_id]
             self.broker.deny_session(self.sessions[run_id])
             await self.backend.cancel(run_id)
         return record
@@ -242,8 +266,11 @@ class AgentRuns:
         return sorted(picked, key=lambda run: (run.createdAt, run.runId))
 
     async def shutdown(self) -> None:
-        for task in tuple(self.tasks):
+        tasks = tuple(self.tasks)
+        for task in tasks:
             task.cancel()
+        # Let each follower finish its cleanup (a coding run's worker saves its session and exits).
+        await asyncio.gather(*tasks, return_exceptions=True)
         await self.browsers.close_all()
 
     # ------------------------------------------------------------ run events
@@ -344,6 +371,9 @@ class StartAgentRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
     threadId: str = Field(min_length=1)
     task: str = Field(min_length=1, max_length=TASK_MAX, pattern=r"\S")
+    # A coding run (Symphony's coding agent), in `workspace` or a fresh directory.
+    code: bool = False
+    workspace: str | None = None
 
 
 def create_run_router(runs: AgentRuns) -> APIRouter:
@@ -360,7 +390,8 @@ def create_run_router(runs: AgentRuns) -> APIRouter:
         thread = runs.storage.get_thread(body.threadId)
         if thread is None:
             raise HTTPException(404, "Thread not found")
-        result = await runs.start(body.threadId, body.task.strip())
+        task = body.task.strip()
+        result = await (runs.start_code(body.threadId, task, body.workspace) if body.code else runs.start(body.threadId, task))
         if isinstance(result, str):
             raise HTTPException(400, result)
         runs.storage.add_message(body.threadId, "user", body.task.strip())
@@ -400,7 +431,7 @@ class RunAgentTool(Tool):
         super().__init__(
             name="run_agent",
             description=(
-                "Start a background agent for multi-step work (research, comparisons, drafting, pictures, and coding on a repository up to opening a pull request). "
+                "Start a background agent for multi-step work (research, comparisons, drafting, pictures; with code=true, coding work on a repository). "
                 "Returns a run_id at once; keep talking. You will be told when it needs approval, fails or is done."
             ),
             parameters=RUN_AGENT_PARAMETERS,
@@ -412,7 +443,11 @@ class RunAgentTool(Tool):
         task = str(args.get("task", "")).strip()
         if not task:
             return json.dumps({"error": "task must say what to do"})
-        started = await self.desk.runs.start(self.desk.thread_id, task, desktop=self.desk.desktop)
+        if args.get("code"):
+            workspace = str(args.get("workspace") or "").strip() or None
+            started = await self.desk.runs.start_code(self.desk.thread_id, task, workspace)
+        else:
+            started = await self.desk.runs.start(self.desk.thread_id, task, desktop=self.desk.desktop)
         if isinstance(started, str):
             return json.dumps({"error": started})
         return json.dumps({"run_id": started.runId, "status": started.status, "say": "If you have not said so yet, say in one line that you started on it."})
