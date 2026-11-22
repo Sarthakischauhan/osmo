@@ -79,7 +79,8 @@ describe("osmo widget registry on chat-sdk", () => {
       </WidgetProvider>,
     );
     const frame = container.querySelector("iframe");
-    // The user clicked in the frame (jsdom has no user activation of its own).
+    // The user clicked in the frame: it took focus, and activation is active (jsdom has none of its own).
+    act(() => frame?.focus());
     Object.defineProperty(navigator, "userActivation", { value: { isActive: true, hasBeenActive: true }, configurable: true });
     await act(async () => {
       window.dispatchEvent(new MessageEvent("message", { data: { osmo: "action", id: "approve", value: "now" }, source: frame?.contentWindow ?? null }));
