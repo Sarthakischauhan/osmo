@@ -165,7 +165,8 @@ class VoiceBridge:
         try:
             event = client_event_adapter.validate_json(text)
         except ValidationError as exc:
-            log.warning("bad client event: %s", exc.errors()[:1])
+            # Where and what kind, never the input: a malformed browser.key would otherwise log what the user typed.
+            log.warning("bad client event: %s", [(error["loc"], error["type"]) for error in exc.errors()[:3]])
             return
         if isinstance(event, DesktopConfigure):
             self.desktop.configure(event.enabled)

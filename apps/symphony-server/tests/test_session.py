@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -456,3 +459,16 @@ def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok) -> None:
     assert "x-osmo-desktop-token" not in anonymous.headers
     assert trusted.headers["x-osmo-desktop-token"] == "desktop-secret"
     assert trusted.headers["cache-control"] == "no-store"
+
+
+def test_a_malformed_client_event_is_logged_without_what_was_typed(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    with client.websocket_connect("/ws") as ws:
+        # A browser.key without its `code`: pydantic's error would carry the whole event, the typed key included.
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "keyCode": 65}))
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "code": "KeyA", "keyCode": -1}))
+    deadline = time.monotonic() + 2
+    while caplog.text.count("bad client event") < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert caplog.text.count("bad client event") == 2
+    assert "hunter2-secret" not in caplog.text and "'input'" not in caplog.text
