@@ -235,7 +235,9 @@ export function runApp() {
     // A crashed audio page ends the call rather than leaving a session that cannot hear or speak.
     contents.on('render-process-gone', () => { audio.lost(); session.end(); audioWindow.reload(); });
     audioWindow.on('closed', () => { audioWindow = undefined; });
-    void audioWindow.loadURL(`${origin}/#audio`);
+    // Opt-in local audio metrics without logging raw PCM or recognized speech.
+    const audioUrl = process.env.OSMO_AUDIO_DEBUG === '1' ? `${origin}/?debugAudio=1#audio` : `${origin}/#audio`;
+    void audioWindow.loadURL(audioUrl);
   }
 
   function createWorkspace() {
