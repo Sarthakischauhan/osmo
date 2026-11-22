@@ -18,7 +18,7 @@ from starlette.testclient import WebSocketTestSession
 
 from conftest import FakeGrok, make_client, xai_key_store
 from symphony_server.settings import Settings
-from test_session import call, next_event, say, start, tool_output
+from test_session import answer, call, next_event, say, start, tool_output
 
 
 @dataclass(frozen=True)
@@ -106,9 +106,12 @@ def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_
         assert next_event(ws, "agent.update")["status"] == "waiting_approval"
         asked = next_event(ws, "approval.request")
         assert asked["runId"] == run_id and asked["tool"] == "web_search"
-        # Needing approval interrupts: the voice model is told and asked to speak.
+        # Approval is queued until the voice model completes its current acknowledgement.
+        answer(grok, "I'm working on it.", "r1-ack")
+        # Needing approval is announced once idle, without interrupting speech.
         assert "needs approval" in told(grok, f"[agent {run_id}]")
         grok.next_of("response.create")
+        answer(grok, "Please review the approval.", "r2-ack")
         # The home screen lists the waiting run with what it asks for.
         listed = client.get("/api/runs").json()
         assert [(run["runId"], run["status"]) for run in listed["runs"]] == [(run_id, "waiting_approval")]
@@ -159,6 +162,7 @@ def test_barge_in_stops_the_speech_but_not_the_agent(grok: FakeGrok, slow_answer
         call(grok, "agent_status", {"run_id": run_id}, "s1", "r2")
         assert tool_output(grok)["status"] == "running"
 
+        answer(grok, "Still working.", "r3-ack")
         slow_answer.gate.set()
         assert told(grok, f"[agent {run_id}]") == f"[agent {run_id}] done: All done."
         thread_id = client.get("/api/threads").json()["threads"][0]["id"]
@@ -171,6 +175,7 @@ def test_cancel_agent_stops_the_run(grok: FakeGrok, slow_answer: ScriptedAgent) 
         say(grok, "Never mind, stop it.")
         call(grok, "cancel_agent", {"run_id": run_id}, "c1", "r2")
         tool_output(grok)
+        answer(grok, "Cancelled.", "r3-ack")
         update = next_event(ws, "agent.update")
         while update["status"] != "cancelled":
             update = next_event(ws, "agent.update")
