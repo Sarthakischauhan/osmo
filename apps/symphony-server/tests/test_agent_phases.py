@@ -12,7 +12,7 @@ from test_browser import HoldingAgent
 from test_session import call, next_event, say, tool_output
 
 from symphony_server.agents import AgentRuns, Notice
-from symphony_server.browser import BrowserSessions
+from symphony_server.browser_sessions import BrowserSessions
 from symphony_server.canvas import WidgetBoard
 from symphony_server.protocol import AgentUpdate, ServerEvent
 from symphony_server.storage import AgentRunRecord, SQLiteStorage

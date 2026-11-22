@@ -35,29 +35,39 @@ LOGIN_TTL_S = 600.0
 
 
 class PendingLogin(BaseModel):
+    """A Spotify sign-in under way: its PKCE verifier, redirect URI and start time."""
+
     verifier: str
     redirect_uri: str
     created: float
 
 
 class SpotifyArtist(BaseModel):
+    """A track's artist."""
+
     model_config = ConfigDict(extra="ignore")
     name: str
 
 
 class SpotifyImage(BaseModel):
+    """An album cover in one size."""
+
     model_config = ConfigDict(extra="ignore")
     url: str
     width: int | None = None
 
 
 class SpotifyAlbum(BaseModel):
+    """A track's album."""
+
     model_config = ConfigDict(extra="ignore")
     name: str
     images: list[SpotifyImage] = []
 
 
 class SpotifyTrack(BaseModel):
+    """A Spotify track as search returns it."""
+
     model_config = ConfigDict(extra="ignore")
     id: str
     uri: str
@@ -67,6 +77,7 @@ class SpotifyTrack(BaseModel):
     album: SpotifyAlbum | None = None
 
     def track(self) -> Track:
+        """The track as Osmo's player takes it."""
         images = sorted(self.album.images if self.album else [], key=lambda image: image.width or 0)
         # The smallest cover that is still sharp at 64 px (the sidebar shows 32 px).
         art = next((image.url for image in images if (image.width or 0) >= 64), images[-1].url if images else None)
@@ -83,11 +94,15 @@ class SpotifyTrack(BaseModel):
 
 
 class SpotifyPage(BaseModel):
+    """A page of tracks."""
+
     model_config = ConfigDict(extra="ignore")
     items: list[SpotifyTrack] = []
 
 
 class SpotifySearch(BaseModel):
+    """Spotify's search reply."""
+
     model_config = ConfigDict(extra="ignore")
     tracks: SpotifyPage = SpotifyPage()
 
@@ -97,6 +112,7 @@ class SpotifyError(Exception):
 
 
 def pkce_challenge(verifier: str) -> str:
+    """The S256 PKCE challenge of a verifier."""
     return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
 
@@ -112,9 +128,11 @@ class SpotifyAccount:
 
     @property
     def configured(self) -> bool:
+        """Whether a Spotify client id is set."""
         return bool(self.client_id)
 
     def tokens(self) -> TokenSet | None:
+        """The stored Spotify tokens, or None."""
         stored = self.credentials.stored(SPOTIFY_CREDENTIAL)
         if stored is None:
             return None
@@ -125,9 +143,11 @@ class SpotifyAccount:
 
     @property
     def connected(self) -> bool:
+        """Whether Spotify is set up and signed in."""
         return self.configured and self.tokens() is not None
 
     def login_url(self, redirect_uri: str) -> str:
+        """Start a sign-in: the authorization URL to open (PKCE, with a one-time state)."""
         if not self.client_id:
             raise SpotifyError("set OSMO_SPOTIFY_CLIENT_ID to your Spotify app's client id first")
         now = self.clock()
@@ -146,6 +166,7 @@ class SpotifyAccount:
         return f"{SPOTIFY_AUTHORIZE_URL}?{urlencode(query)}"
 
     async def finish(self, code: str, state: str) -> None:
+        """Finish a sign-in: trade the code for tokens and store them."""
         login = self.pending.pop(state, None)
         if login is None or not self.client_id or self.clock() - login.created >= LOGIN_TTL_S:
             raise SpotifyError("this Spotify sign-in is unknown or too old; start it again from Osmo")
@@ -159,6 +180,7 @@ class SpotifyAccount:
         self.save((await self.token_call(form)).token_set(issued_at=self.clock()))
 
     async def token_call(self, form: dict[str, str]) -> TokenResponse:
+        """POST to Spotify's token endpoint; SpotifyError for a failure."""
         try:
             response = await self.http.post(SPOTIFY_TOKEN_URL, data=form)
         except httpx.HTTPError as exc:
@@ -171,6 +193,7 @@ class SpotifyAccount:
             raise SpotifyError("Spotify sent an unexpected token response") from None
 
     def save(self, tokens: TokenSet) -> None:
+        """Store tokens."""
         self.credentials.save(token_auth(SPOTIFY_CREDENTIAL, tokens))
 
     async def access_token(self) -> tuple[str, float]:
@@ -189,10 +212,12 @@ class SpotifyAccount:
             return fresh.access_token.get_secret_value(), fresh.expires_at
 
     def logout(self) -> None:
+        """Forget the stored tokens."""
         if self.credentials.stored(SPOTIFY_CREDENTIAL) is not None:
             self.credentials.remove(SPOTIFY_CREDENTIAL)
 
     async def search(self, query: str, limit: int = 10) -> list[Track]:
+        """Search Spotify's tracks."""
         token, _ = await self.access_token()
         try:
             response = await self.http.get(

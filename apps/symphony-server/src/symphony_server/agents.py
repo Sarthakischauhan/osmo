@@ -27,7 +27,7 @@ from core_server import RunCapacityError, RunContext, RunRequest, RunSubmission
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from symphony_server.browser import THREAD_ID, BrowserSessions
+from symphony_server.browser_sessions import THREAD_ID, BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,

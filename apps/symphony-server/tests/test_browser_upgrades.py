@@ -31,7 +31,8 @@ from test_browser import (
 )
 
 from symphony_server.approvals import APPROVAL_REQUIRED, APPROVAL_RESOLVED, ApprovalAddon, ApprovalBroker
-from symphony_server.browser import RUN_BROWSER, BrowserApprovalPolicy, BrowserSessions
+from symphony_server.browser_sessions import RUN_BROWSER, BrowserSessions
+from symphony_server.browser_tools import BrowserApprovalPolicy
 from symphony_server.browser_rules import DomainRules
 from symphony_server.canvas import WidgetBoard
 from symphony_server.chrome import OWNER_FILE, find_chrome, reap_stale

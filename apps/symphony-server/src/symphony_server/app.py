@@ -37,7 +37,8 @@ from core_server import (
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-from symphony_server.browser import BROWSER_TOOL_NAMES, THREAD_ID, BrowserApprovalPolicy, BrowserRunLink, BrowserSessions, browser_tools
+from symphony_server.browser_sessions import THREAD_ID, BrowserRunLink, BrowserSessions
+from symphony_server.browser_tools import BROWSER_TOOL_NAMES, BrowserApprovalPolicy, browser_tools
 from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agent_model import create_agent_model_router
@@ -69,14 +70,13 @@ from symphony_server.storage import SQLiteStorage
 from symphony_server.threads import create_thread_router
 from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.web_search import WebSearchTool
-from symphony_server.local_calendar import (
-    CALENDAR_TOOL_NAMES,
-    CalendarStore,
-    Scheduler,
-    calendar_tools,
-    create_calendar_router,
-)
-from symphony_server.vault import VAULT_TOOL_NAMES, VaultIndex, create_vault_router, vault_tools
+from symphony_server.calendar_api import create_calendar_router
+from symphony_server.calendar_store import CalendarStore
+from symphony_server.calendar_tools import CALENDAR_TOOL_NAMES, calendar_tools
+from symphony_server.scheduler import Scheduler
+from symphony_server.vault_api import create_vault_router
+from symphony_server.vault_index import VaultIndex
+from symphony_server.vault_tools import VAULT_TOOL_NAMES, vault_tools
 from symphony_server.voices import (
     PREVIEW_CLIENTS_MAX,
     PREVIEW_RATE_LIMIT,

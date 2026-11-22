@@ -25,6 +25,8 @@ PATTERN = re.compile(r"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$")
 
 @dataclass(frozen=True)
 class DomainRules:
+    """The user's per-domain browser rules, by domain pattern (`example.com` or `*.example.com`)."""
+
     rules: dict[str, DomainRule] = field(default_factory=dict)
 
     @classmethod
@@ -52,6 +54,7 @@ class DomainRules:
 
 
 def covers(pattern: str, host: str) -> bool:
+    """Whether a domain pattern covers `host` (the domain itself or a subdomain; `*.` only subdomains)."""
     if pattern.startswith("*."):
         return host.endswith(pattern[1:])
     return host == pattern or host.endswith(f".{pattern}")

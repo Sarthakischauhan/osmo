@@ -16,21 +16,16 @@ from pydantic import ValidationError
 
 from conftest import FakeGrok, make_client
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
-from symphony_server.local_calendar import (
-    MISSED_GRACE,
-    AutomationCreateTool,
-    AutomationInput,
-    CalendarEventsTool,
-    CalendarStore,
-    EventInput,
-    Scheduler,
-    expand,
-    next_run,
-    task_links,
-)
+from symphony_server.calendar_api import task_links
+from symphony_server.calendar_models import AutomationInput, EventInput
+from symphony_server.calendar_store import CalendarStore
+from symphony_server.calendar_tools import AutomationCreateTool, CalendarEventsTool
+from symphony_server.recurrence import expand, next_run
+from symphony_server.scheduler import MISSED_GRACE, Scheduler
 from symphony_server.settings import DEFAULT_APPROVAL_TOOLS, Settings
 from symphony_server.storage import AgentRunRecord, AgentRunStatus
-from symphony_server.vault import Note, WriteMode
+from symphony_server.vault_index import Note
+from symphony_server.vault_paths import WriteMode
 from test_agents import ScriptedAgent, Step, agent_client
 
 LA = ZoneInfo("America/Los_Angeles")

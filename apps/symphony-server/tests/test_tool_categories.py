@@ -12,7 +12,8 @@ from core_ai.types import Message
 from core_harness import EventSink
 
 from symphony_server.app import osmo_tools
-from symphony_server.browser import BROWSER_TOOL_NAMES, BrowserSessions
+from symphony_server.browser_sessions import BrowserSessions
+from symphony_server.browser_tools import BROWSER_TOOL_NAMES
 from symphony_server.canvas import OSMO_WIDGET, CreateImageTool, WidgetBoard
 from symphony_server.file_store import FileSecretStore
 from symphony_server.memory import MemoryPersistence
@@ -22,8 +23,9 @@ from symphony_server.spotify import SpotifyAccount
 from symphony_server.model_access import ModelAccess
 from symphony_server.providers import CredentialStore
 from symphony_server.settings import Settings, tool_categories
-from symphony_server.local_calendar import CalendarStore, Scheduler
-from symphony_server.vault import VaultIndex
+from symphony_server.calendar_store import CalendarStore
+from symphony_server.scheduler import Scheduler
+from symphony_server.vault_index import VaultIndex
 from symphony_server.web_search import EXA_MCP_URL, WebSearchTool
 
 JPEG = b"\xff\xd8\xff\xe0fake"

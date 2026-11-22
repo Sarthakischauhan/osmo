@@ -11,9 +11,9 @@ from pydantic import SecretStr
 from symphony_server.browser_rules import DomainRules
 from symphony_server.chrome import find_chrome
 from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
-from symphony_server.local_calendar import local_zone_name
+from symphony_server.calendar_models import local_zone_name
 from symphony_server.music_library import MusicRoot, parse_music_dirs
-from symphony_server.vault import Vault, parse_vaults
+from symphony_server.vault_paths import Vault, parse_vaults
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"

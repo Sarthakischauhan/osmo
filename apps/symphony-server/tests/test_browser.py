@@ -30,7 +30,8 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
 from symphony_server.browser_rules import DomainRules
-from symphony_server.browser import RUN_BROWSER, BrowserSessions, browser_tools
+from symphony_server.browser_sessions import RUN_BROWSER, BrowserSessions
+from symphony_server.browser_tools import browser_tools
 from symphony_server.canvas import WidgetBoard
 from symphony_server.cdp import BrowserError
 from symphony_server.chrome import OWNER_FILE, BrowserUnavailable, kill_group, reap_stale, start_chrome
@@ -996,7 +997,7 @@ async def test_idle_browsers_of_other_threads_are_closed_on_their_own_time(chrom
 
 
 async def test_the_idle_watch_closes_an_abandoned_browser_by_itself(chrome: FakeChrome, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("symphony_server.browser.IDLE_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr("symphony_server.browser_sessions.IDLE_CHECK_SECONDS", 0.01)
     clock = Clock()
     sessions, _ = sessions_for(chrome, clock)
     RUN_BROWSER.set("thread-watch")

@@ -15,17 +15,9 @@ from watchfiles import Change
 from conftest import FakeGrok, make_client, xai_key_store
 from test_session import call, next_event, say, start, tool_output
 from symphony_server.settings import DEFAULT_APPROVAL_TOOLS, Settings
-from symphony_server.vault import (
-    Vault,
-    VaultError,
-    VaultIndex,
-    VaultReadTool,
-    VaultSearchTool,
-    VaultWriteTool,
-    fts_query,
-    parse_vaults,
-    resolve_note,
-)
+from symphony_server.vault_index import VaultIndex, fts_query
+from symphony_server.vault_paths import Vault, VaultError, parse_vaults, resolve_note
+from symphony_server.vault_tools import VaultReadTool, VaultSearchTool, VaultWriteTool
 
 
 @pytest.fixture
