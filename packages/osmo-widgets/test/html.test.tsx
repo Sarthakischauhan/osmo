@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HtmlWidget, withKit } from "../src/html";
@@ -97,14 +97,30 @@ describe("HtmlWidget", () => {
 });
 
 describe("withKit", () => {
-  it("puts the CSP, kit and bridge inside head, after a doctype, or at the start", () => {
-    expect(withKit("<html><head></head></html>", "dark")).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy"/);
+  it("puts the CSP, kit and bridge first: right after a doctype, or at the start", () => {
+    expect(withKit("<html><head></head></html>", "dark")).toMatch(/^<meta http-equiv="Content-Security-Policy"/);
     expect(withKit("<!doctype html><p>x</p>", "dark")).toMatch(/^<!doctype html><meta/);
     expect(withKit("<p>x</p>", "dark")).toMatch(/^<meta/);
     const kit = withKit("<p>x</p>", "light");
     expect(kit.indexOf("<style>")).toBeLessThan(kit.indexOf("<p>x</p>"));
     expect(kit.indexOf("<script>")).toBeLessThan(kit.indexOf("<p>x</p>"));
     expect(kit).toContain('dataset.theme = "light"');
+  });
+
+  // Review B1: a CSP meta outside <head> is ignored, and a script parsed before the meta runs unrestricted.
+  const leak = '<script>fetch("http://127.0.0.1:8799/leak")</script>';
+  it.each([
+    ["a <header> and no <head>", `<!doctype html><body><header>Today</header>${leak}</body>`],
+    ["a script before <head>", `${leak}<html><head></head><body>hi</body></html>`],
+    ["an ordinary document", `<!doctype html><html><head><title>x</title></head><body>${leak}</body></html>`],
+  ])("puts the CSP in the head before any widget script, for %s", (_case, html) => {
+    const doc = new DOMParser().parseFromString(withKit(html, "dark"), "text/html");
+    const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    expect(csp?.parentElement).toBe(doc.head);
+    expect(doc.head.firstElementChild).toBe(csp);
+    for (const script of Array.from(doc.querySelectorAll("script"))) {
+      expect(csp?.compareDocumentPosition(script) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
   });
 
   it("defines every class the render_widget description tells the model about", () => {
@@ -128,6 +144,10 @@ describe("click bridge", () => {
     act(() => {
       window.dispatchEvent(new MessageEvent("message", { data, source }));
     });
+  // jsdom has no user activation: each test says whether the user just clicked.
+  const activation = (isActive: boolean) => Object.defineProperty(navigator, "userActivation", { value: { isActive, hasBeenActive: isActive }, configurable: true });
+  beforeEach(() => activation(true));
+  afterEach(() => activation(false));
 
   it("reports a declared action from its own frame, with the value", () => {
     const onAction = vi.fn();
@@ -146,6 +166,23 @@ describe("click bridge", () => {
     post(window, { osmo: "action", id: "approve" });
     post(null, { osmo: "action", id: "approve" });
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  // Review S4: a widget script must not answer for the user, and a widget answers once.
+  it("ignores a message the frame posts without a user click", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    activation(false);
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("takes one answer per widget", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={[...actions, { id: "hold", label: "Hold" }]} onAction={onAction} />);
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    post(onlyFrame().contentWindow, { osmo: "action", id: "hold" });
+    expect(onAction).toHaveBeenCalledTimes(1);
   });
 
   it("follows the frame into fullscreen", () => {

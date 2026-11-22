@@ -701,7 +701,8 @@ class VoiceBridge:
         if self.voice is None or widget is None:
             return
         text = action_text(action, widget)
-        if text is None:
+        # One answer per widget: a second tap (or a frame script replaying one) is not another user turn.
+        if text is None or not self.board.answer(action.id):
             return
         self.barge_ins += 1
         await self.cancel_response(self.voice)

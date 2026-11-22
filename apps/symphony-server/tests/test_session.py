@@ -270,6 +270,20 @@ def test_widget_action_becomes_a_user_turn(client: TestClient, grok: FakeGrok) -
         assert asked(grok) == f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"
 
 
+def test_a_widget_takes_one_answer(client: TestClient, grok: FakeGrok) -> None:
+    """Review S4: a repeated (or frame-forged) tap on an answered widget is not another user turn."""
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        first = render(ws, grok, DINNER, "c3")
+        second = render(ws, grok, DINNER, "c4")
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "ramen"}))
+        assert asked(grok) == f"[Tapped on screen] options widget {first}: select -> option 2, Ramen counter"
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "tacos"}))
+        ws.send_text(json.dumps({"type": "widget.action", "id": second, "action": "select", "value": "ramen"}))
+        # The next turn the model hears is the second widget's: the repeat on the first was dropped.
+        assert asked(grok) == f"[Tapped on screen] options widget {second}: select -> option 2, Ramen counter"
+
+
 def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)

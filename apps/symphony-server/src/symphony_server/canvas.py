@@ -47,9 +47,19 @@ class WidgetBoard:
     def __init__(self, max_widgets: int = WIDGETS_MAX) -> None:
         self.max_widgets = max_widgets
         self.widgets: OrderedDict[str, Widget] = OrderedDict()
+        # Widgets the user already answered: a widget takes one answer, so a replayed or forged tap is dropped.
+        self.answered: set[str] = set()
 
     def get(self, widget_id: str) -> Widget | None:
+        """The widget shown as `widget_id`, if it is still remembered."""
         return self.widgets.get(widget_id)
+
+    def answer(self, widget_id: str) -> bool:
+        """Record the user's answer to `widget_id`; False when it was already answered (or is unknown)."""
+        if widget_id not in self.widgets or widget_id in self.answered:
+            return False
+        self.answered.add(widget_id)
+        return True
 
     def add(self, widget: Widget) -> str:
         # A fresh uuid per render: unique within and across sessions, so an update can only
@@ -59,10 +69,12 @@ class WidgetBoard:
         return widget_id
 
     def put(self, widget_id: str, widget: Widget) -> None:
+        """Remember `widget` as `widget_id`, forgetting the oldest past `max_widgets`."""
         self.widgets[widget_id] = widget
         self.widgets.move_to_end(widget_id)
         while len(self.widgets) > self.max_widgets:
-            self.widgets.popitem(last=False)
+            forgotten, _ = self.widgets.popitem(last=False)
+            self.answered.discard(forgotten)
 
 
 def render_event(board: WidgetBoard, widget: Widget) -> WidgetRender:

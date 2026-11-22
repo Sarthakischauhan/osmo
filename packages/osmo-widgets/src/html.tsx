@@ -21,12 +21,14 @@ const DEFAULT_ZOOM = 1;
 export const CSP_POLICY =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
-/** The CSP, kit and bridge inside <head> (or right after the doctype) so the document keeps standards mode
- * and its own scripts find `osmo` already defined. */
+/**
+ * The CSP, kit and bridge as the very first thing in the document: right after the doctype (which keeps standards
+ * mode), or at the start. Never after a searched-for `<head>`: that match can be a `<header>` in the body, where a CSP
+ * meta is ignored, and a script before `<head>` would run before the policy exists. The parser puts these elements in
+ * the implied head, so the document's own scripts find `osmo` already defined and run under the policy.
+ */
 export function withKit(html: string, theme: KitTheme): string {
   const kit = `<meta http-equiv="Content-Security-Policy" content="${CSP_POLICY}"><style>${OSMO_UI_CSS}</style><script>${bridgeScript(theme)}</script>`;
-  const head = /<head[^>]*>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + kit + html.slice(head.index + head[0].length);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   if (doctype) return doctype[0] + kit + html.slice(doctype[0].length);
   return kit + html;
@@ -150,14 +152,22 @@ export function HtmlWidget({ html, title = "Widget", actions, onAction }: HtmlWi
   const srcDoc = withKit(html, startTheme);
   const frame = useRef<HTMLIFrameElement>(null);
 
+  // One answer per widget: after the first accepted action the frame cannot send another.
+  const answered = useRef(false);
+
   useEffect(() => {
     if (onAction === undefined || !actions?.length) return;
     const listen = (event: MessageEvent) => {
       const source = frame.current?.contentWindow;
-      if (!source || event.source !== source) return;
+      if (!source || event.source !== source || answered.current) return;
       const parsed = bridgeMessageSchema.safeParse(event.data);
       const action = parsed.success ? actions.find((declared) => declared.id === parsed.data.id) : undefined;
-      if (parsed.success && action) onAction(action, parsed.data.value);
+      if (!parsed.success || !action) return;
+      // Only a real click or key press counts as the user's answer. Activation in the frame also activates this
+      // window, but a frame script posting on its own (a timer, onload) does not, so it cannot answer for the user.
+      if (navigator.userActivation?.isActive !== true) return;
+      answered.current = true;
+      onAction(action, parsed.data.value);
     };
     window.addEventListener("message", listen);
     return () => window.removeEventListener("message", listen);
