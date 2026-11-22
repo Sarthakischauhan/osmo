@@ -38,8 +38,8 @@ Models of a provider without a credential arrive `locked`; picking one in the ra
 - `OSMO_CREDENTIALS_KEY`: Fernet key for that file. When unset, one is generated once into
   `<OSMO_CREDENTIALS_FILE>.key` (mode 0600); losing it makes the stored keys unreadable.
 - Keys come only from this store: the `XAI_API_KEY` environment variable is not read.
-- `OSMO_SECRET_STORE=infisical` stores them in Infisical instead; see "Provider keys: file or
-  Infisical" in the README.
+- `OSMO_SECRET_STORE=infisical` stores them in Infisical instead; see
+  [provider storage configuration](docs/configuration.md#provider-keys-file-or-infisical).
 
 OAuth is offered only for OpenRouter, whose documented PKCE flow mints an API key for the user
 (the callback is `/providers/openrouter/oauth/callback` on this server). xAI and OpenAI issue keys
