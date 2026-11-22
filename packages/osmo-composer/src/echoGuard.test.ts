@@ -20,9 +20,11 @@ describe("EchoGuard speech preservation", () => {
   it("recognizes quieter barge-in and retains its start", () => {
     const guard = new EchoGuard(RATE);
     const speech = frame(0.025);
-    const result = guard.push(speech, true, 0.05, 1000);
+    const first = guard.push(speech, true, 0.05, 1000);
+    expect(first.bargeIn).toBe(false);
+    const result = guard.push(speech, true, 0.05, 1100);
     expect(result.bargeIn).toBe(true);
-    expect(result.send).toHaveLength(1);
+    expect(result.send).toHaveLength(2);
     expect(result.send[0]).toBe(speech);
   });
 
@@ -34,8 +36,10 @@ describe("EchoGuard speech preservation", () => {
   it("passes speech over music with retained preroll", () => {
     const guard = new EchoGuard(RATE);
     const speech = frame(0.04);
-    const result = guard.push(speech, false, 0, 1000, true);
-    expect(result.send).toHaveLength(1);
+    const first = guard.push(speech, false, 0, 1000, true);
+    expect(first.send).toHaveLength(1);
+    const result = guard.push(speech, false, 0, 1100, true);
+    expect(result.send).toHaveLength(2);
     expect(result.send[0]).toBe(speech);
   });
 });
