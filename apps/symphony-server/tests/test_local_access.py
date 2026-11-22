@@ -95,16 +95,30 @@ def test_a_cross_site_page_cannot_open_the_voice_socket(tmp_path: Path) -> None:
             pass
 
 
-def test_the_spotify_token_is_for_the_apps_own_page() -> None:
+def test_the_spotify_token_is_for_the_desktop_app_only() -> None:
+    # Re-review N2: without the per-launch token any local process could forge Sec-Fetch-Site, so nothing gets it.
     with make_client(Settings()) as client:
-        # Spotify is not connected, so the app's own page gets 409; everything else is refused before that.
-        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "same-origin"}).status_code == 409
+        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "same-origin"}).status_code == 403
+        assert client.get("/api/music/spotify/token", headers={"origin": "http://127.0.0.1:8787"}).status_code == 403
         assert client.get("/api/music/spotify/token").status_code == 403
-        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "none"}).status_code == 403
-        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "cross-site"}).status_code == 403
     with make_client(Settings(app_token=TOKEN)) as client:
         assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "same-origin"}).status_code == 401
+        # Spotify is not connected, so the app (with the token) gets 409.
         assert client.get("/api/music/spotify/token", headers={"x-osmo-desktop-token": TOKEN}).status_code == 409
+
+
+def test_the_origin_must_be_the_servers_own_scheme_host_and_port(tmp_path: Path) -> None:
+    # Re-review N2: another port or scheme on a local host is another site.
+    with make_client(Settings(database_file=tmp_path / "osmo.db")) as client:
+        for origin in ("http://localhost:3000", "http://127.0.0.1:9999", "http://127.0.0.1", "https://127.0.0.1:8787", "http://localhost:8787"):
+            assert client.post("/api/automations", json=AUTOMATION, headers={"origin": origin}).status_code == 403, origin
+        with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws", headers={"origin": "http://localhost:5173"}):
+            pass
+        assert client.get("/api/automations").json()["automations"] == []
+        # The page this server served, as it reached it; the web dev server proxies under its own Host, which matches.
+        assert client.post("/api/automations", json=AUTOMATION, headers={"origin": "http://127.0.0.1:8787"}).status_code == 201
+        proxied = {"host": "localhost:5173", "origin": "http://localhost:5173"}
+        assert client.post("/api/automations", json=AUTOMATION, headers=proxied).status_code == 201
 
 
 def test_saving_a_note_does_not_skip_the_write_approval(vault: Vault) -> None:

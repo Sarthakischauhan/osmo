@@ -4,15 +4,18 @@ Three checks run before any route (HTTP and the voice WebSocket alike):
 
 - Host: the request must name an allowed host (127.0.0.1, localhost, ::1, plus OSMO_ALLOWED_HOSTS). A DNS
   rebinding page reaches the server under its own name, so it is refused here.
-- Origin: when a browser sends one (every cross-site request, every POST), its host must be allowed too; an
-  opaque `null` origin is refused.
+- Origin: when a browser sends one (every cross-site request, every POST), it must be exactly the server's own origin
+  as the request reached it: the same scheme, host and port as the (allowed) Host. Another local port (a dev server,
+  another app on localhost) is another site; an opaque `null` origin is refused.
 - Content type: a state-changing request with a body must say `application/json`. The forms and `no-cors` fetches
   another site can send without asking (text/plain, form data, an untyped Blob) never reach a route.
 - The app token: the desktop app makes a secret per launch and hands it to the server on stdin (never in an
   environment variable other processes can read, never logged). Its windows present it as an HttpOnly cookie, its
   main process as a header or a WebSocket subprotocol. With a token set, every request but the health check needs
   it, so neither a page in the agent's browser nor a script in the agent's sandbox (both can reach 127.0.0.1) can
-  use the API. Without one (the web client in development) the Host and Origin checks still apply.
+  use the API. Without one (the web client in development) the Host and Origin checks still apply, and what hands
+  out a secret or skips an approval (the Spotify token, note saves while vault_write needs approval) is refused:
+  headers such as Sec-Fetch-Site prove nothing when any local process can send them.
 """
 
 from __future__ import annotations
@@ -66,6 +69,12 @@ def host_name(authority: str) -> str:
     return (urlsplit(f"//{authority}").hostname or "").lower()
 
 
+def own_origin(scope: Scope, host: str) -> str:
+    """The origin a page served by this server has, for a request that reached it under the Host header `host`."""
+    scheme = {"ws": "http", "wss": "https"}.get(scope["scheme"], scope["scheme"])
+    return f"{scheme}://{host}".lower()
+
+
 def offered_token(headers: Headers, protocols: Iterable[str]) -> str:
     """The token a request carries: the header, the cookie, or a WebSocket subprotocol."""
     cookie = next((part.split("=", 1)[1] for part in headers.get("cookie", "").split("; ") if part.startswith(f"{TOKEN_COOKIE}=")), "")
@@ -116,10 +125,11 @@ class LocalAccess:
 
     def refusal(self, scope: Scope, headers: Headers) -> tuple[int, str] | None:
         """(status, reason) when the request may not go on; None when it may."""
-        if host_name(headers.get("host", "")) not in self.hosts:
+        host = headers.get("host", "")
+        if host_name(host) not in self.hosts:
             return 403, "unknown host"
         origin = headers.get("origin")
-        if origin is not None and (origin == "null" or host_name(urlsplit(origin).netloc) not in self.hosts):
+        if origin is not None and origin.lower() != own_origin(scope, host):
             return 403, "cross-site request"
         if scope["type"] == "http" and scope["method"] in UNSAFE_METHODS and has_body(headers) and not json_typed(headers):
             return 415, "send JSON"
@@ -152,16 +162,9 @@ def has_app_token(request: Request) -> bool:
     return isinstance(request.app.state.app_token, str)
 
 
-def require_same_origin(request: Request) -> None:
-    """For routes that hand out a secret: without an app token, only a same-origin page of Osmo's own may call them
-    (a page in the agent's browser, a script in its sandbox or another site gets 403)."""
-    if not has_app_token(request) and request.headers.get("sec-fetch-site") != "same-origin":
-        raise HTTPException(403, "this is for the Osmo app")
-
-
 def require_app(request: Request) -> None:
-    """For what the agent must not do without the user's approval (writing notes when vault_write needs it): only the
-    desktop app's windows, which hold the token, may. Without a token anything on this machine could call the route,
-    the agent's sandbox included, so it is refused."""
+    """For routes that hand out a secret (the Spotify token) or that the agent must not use without the user's approval
+    (writing notes when vault_write needs it): only the desktop app's windows, which hold the token, may. Without a
+    token anything on this machine could call the route, the agent's sandbox included, so it is refused."""
     if not has_app_token(request):
-        raise HTTPException(403, "saving notes here needs the Osmo desktop app while vault_write needs approval")
+        raise HTTPException(403, "this needs the Osmo desktop app")
