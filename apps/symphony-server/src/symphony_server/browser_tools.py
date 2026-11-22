@@ -14,6 +14,7 @@ from symphony_server.browser_page import PRESSABLE_KEYS
 from symphony_server.browser_session import WAIT_MAX_SECONDS, BrowserSession
 from symphony_server.browser_sessions import RUN_BROWSER, BrowserSessions
 from symphony_server.cdp import BrowserError
+from symphony_server.host_names import site_of
 
 
 class OpenArgs(BaseModel):
@@ -114,7 +115,7 @@ class BrowserTool(Tool, Generic[A]):
             if session.rules.decide(live) == "deny":
                 raise BrowserError(f"browsing {live} is not allowed by the user's site rules")
             decided, session.decided_host = session.decided_host, None
-            if self.name in BROWSER_ACTION_TOOLS and decided is not None and session.site_of(live) != decided:
+            if self.name in BROWSER_ACTION_TOOLS and decided is not None and site_of(live) != decided:
                 raise BrowserError(f"the page moved to {live} after this step was approved for {decided}: read the page again before acting")
             result = await self.act(session, command)
             if self.name in NAVIGATING_TOOLS:
@@ -324,7 +325,7 @@ class BrowserApprovalPolicy:
             return None
         rule = session.rules.match(session.props.url)
         # The tool checks that the page is still on this site just before it acts (BrowserTool.execute).
-        session.decided_host = session.site_of(session.props.url)
+        session.decided_host = site_of(session.props.url)
         if rule == "deny":
             # The tool itself refuses on a denied site; asking the user first would be a prompt for nothing.
             return "allow"

@@ -46,6 +46,7 @@ from symphony_server.browser_session import BrowserSession, Show
 from symphony_server.canvas import WidgetBoard, render_event
 from symphony_server.cdp import BrowserError
 from symphony_server.chrome import BrowserUnavailable
+from symphony_server.host_names import site_of
 from symphony_server.protocol import BrowserClick, BrowserKey, BrowserScroll, ServerEvent, WidgetUpdate
 from symphony_server.widgets import BrowserProps, BrowserWidget
 
@@ -185,7 +186,7 @@ class BrowserSessions:
         session = self.sessions.get(thread_id)
         if session is not None and session.usable:
             session.taken_over = user
-            host = session.site_of(session.props.url)
+            host = site_of(session.props.url)
             if user and host is not None:
                 session.user_hosts.add(host)
             session.last_used = self.clock()

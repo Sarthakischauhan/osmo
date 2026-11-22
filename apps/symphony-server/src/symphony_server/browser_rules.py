@@ -19,9 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import Literal, get_args
-from urllib.parse import urlsplit
 
-from symphony_server.host_names import normalize_host
+from symphony_server.host_names import normalize_host, site_of
 
 DomainRule = Literal["allow", "ask", "deny"]
 DOMAIN_RULES: tuple[DomainRule, ...] = get_args(DomainRule)
@@ -49,11 +48,10 @@ class DomainRules:
 
     def match(self, url: str | None) -> DomainRule | None:
         """The rule the user set for the site of `url`; None when none covers it (or it has no host, as about:blank)."""
-        try:
-            host = normalize_host(urlsplit(url).hostname or "") if url else ""
-        except ValueError:
+        host = site_of(url)
+        if host is None:
             return None
-        matches = [(len(pattern), rule) for pattern, rule in self.rules.items() if host and covers(pattern, host)]
+        matches = [(len(pattern), rule) for pattern, rule in self.rules.items() if covers(pattern, host)]
         # Equally long patterns: the stricter rule wins ("deny" > "ask" > "allow" as strings, too).
         return max(matches)[1] if matches else None
 

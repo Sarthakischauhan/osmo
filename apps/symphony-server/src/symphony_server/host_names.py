@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import idna
 
 MAX_LABEL = 63
@@ -26,3 +28,14 @@ def normalize_host(host: str) -> str:
         return idna.encode(name, uts46=True, transitional=False).decode("ascii")
     except idna.IDNAError as exc:
         raise ValueError(f"{host!r} is not a valid host name") from exc
+
+
+def site_of(url: str | None) -> str | None:
+    """The normalised host of `url`: None without one (about:blank, a data: URL) or when it is not a valid name."""
+    if not url:
+        return None
+    try:
+        host = normalize_host(urlsplit(url).hostname or "")
+    except ValueError:
+        return None
+    return host or None

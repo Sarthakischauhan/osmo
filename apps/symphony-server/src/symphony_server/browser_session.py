@@ -34,7 +34,7 @@ from symphony_server.browser_page import ENTER_KEY_CODE, READ_EXPRESSION, SELECT
 from symphony_server.browser_rules import DomainRules
 from symphony_server.cdp import BrowserError, CdpConnection
 from symphony_server.chrome import OWNER_FILE, drain, kill_group, listening_url, start_chrome
-from symphony_server.host_names import normalize_host
+from symphony_server.host_names import site_of
 from symphony_server.protocol import BrowserClick, BrowserKey, BrowserScroll, RenderedWidget, ServerEvent, WidgetRender, WidgetUpdate
 from symphony_server.widgets import BrowserProps
 
@@ -160,16 +160,6 @@ class BrowserSession:
         log.info("browser request refused: %s", reason)
         await self.cdp.call("Fetch.failRequest", {"requestId": paused.requestId, "errorReason": "BlockedByClient"}, session_id=session_id)
 
-    def site_of(self, url: str | None) -> str | None:
-        """The normalised host of `url` (None without one, as about:blank)."""
-        if not url:
-            return None
-        try:
-            host = normalize_host(urlsplit(url).hostname or "")
-        except ValueError:
-            return None
-        return host or None
-
     async def start_screencast(self) -> None:
         """Start relaying the page's frames and address to the widget."""
         self.cdp.on("Page.screencastFrame", self.on_frame)
@@ -221,7 +211,7 @@ class BrowserSession:
         """Show the main frame's new address and the rule for its site on the widget."""
         navigated = FrameNavigated.model_validate(params).frame
         if session_id == self.target and navigated.parentId is None:
-            host = self.site_of(navigated.url)
+            host = site_of(navigated.url)
             if self.taken_over and host is not None:
                 self.user_hosts.add(host)
             self.spawn(self.patch({"url": navigated.url, "rule": self.rules.decide(navigated.url)}))
