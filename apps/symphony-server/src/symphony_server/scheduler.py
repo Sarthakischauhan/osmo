@@ -7,6 +7,12 @@ picks up where it left off after a restart. Its automation run stays `started` u
 says `ok` or `error` (`Scheduler.settle`, called by AgentRuns, and `Scheduler.reconcile` at startup for runs that
 finished or were given up while the server was down). The desktop app keeps the server, and so the scheduler, alive
 from the tray when the window is closed; it never starts at login.
+
+A due run is claimed before anything starts (`CalendarStore.claim`): one transaction moves `nextRunAt` past it and
+records the run under a key unique to the automation and its due time, and only if the automation is still the
+version this pass read. So a restart never fires the same due time twice (a run claimed by a server that then
+stopped is recorded as an error at the next start, never run again), and an automation edited, disabled or deleted
+while a run was starting keeps the user's change: the finished run only notes its outcome, and never on a deleted one.
 """
 
 from __future__ import annotations
@@ -32,6 +38,9 @@ MISSED_GRACE = timedelta(minutes=10)
 SCHEDULER_MAX_SLEEP_S = 60.0
 # What an agent task's automation run says once its agent run is over.
 TASK_OUTCOMES: dict[AgentRunStatus, RunStatus] = {"completed": "ok", "failed": "error", "cancelled": "error"}
+# What a run says while it starts, and what one claimed by a server that then stopped says at the next start.
+STARTING = "starting"
+INTERRUPTED = "Osmo stopped before this run finished starting; it was not run again"
 # How much of a finished task's result its automation run keeps (the whole answer is in the task's thread).
 TASK_DETAIL_MAX = 300
 
@@ -83,14 +92,15 @@ class Scheduler:
         """Something changed (an edit, a pause): look again now rather than at the next planned time."""
         self.wakeup.set()
 
-    async def fire(self, automation: Automation, now: datetime) -> AutomationRun:
-        """Run one automation now (a due one, or Run now) and record it; never raises."""
+    async def fire(self, automation: Automation, now: datetime, claimed: AutomationRun | None = None) -> AutomationRun:
+        """Run one automation now (a due one the scheduler `claimed`, or Run now) and record it; never raises."""
+        run = claimed or self.store.add_run(automation, now, "started", STARTING)
         try:
             status, detail, run_id, thread_id = await self.perform(automation, now)
         except Exception as exc:  # an automation failing is recorded, never fatal to the scheduler
             log.warning("automation %s failed: %s", automation.id, exc)
             status, detail, run_id, thread_id = "error", str(exc) or type(exc).__name__, None, None
-        return self.store.add_run(automation, now, status, detail, run_id, thread_id)
+        return self.store.finish_run(run, status, detail, run_id, thread_id)
 
     async def perform(self, automation: Automation, now: datetime) -> tuple[RunStatus, str, str | None, str | None]:
         """What a due automation does: a background agent task on a new thread (it stays `started` until the task
@@ -122,9 +132,10 @@ class Scheduler:
 
     def reconcile(self) -> list[AutomationRun]:
         """At startup: settle the tasks that finished, or were given up, while no one was listening."""
-        settled: list[AutomationRun] = []
+        # Claimed by a server that stopped before the run was done: it is not run again (the due time is behind it).
+        settled = [self.store.finish_run(run, "error", INTERRUPTED) for run in self.store.unlinked()]
         if self.agent is None:
-            return []
+            return settled
         for run in self.store.started():
             assert run.runId is not None
             task = self.agent.get(run.runId)
@@ -142,19 +153,18 @@ class Scheduler:
             due = automation.nextRunAt
             if not automation.enabled or due is None or due > now:
                 continue
-            run: AutomationRun | None = None
-            if paused:
-                pass  # nothing runs while paused, and nothing is owed when it resumes
-            elif now - due > MISSED_GRACE:
-                run = self.store.add_run(automation, now, "skipped", f"missed at {due.isoformat()} (Osmo was not running)")
-            else:
-                run = await self.fire(automation, now)
-            if run is not None:
-                automation.lastRunAt, automation.lastStatus = run.at, run.status
-                done.append(run)
             event = self.store.event(automation.eventId) if automation.eventId else None
-            automation.nextRunAt = next_run(automation, now, event)
-            self.store.save_automation(automation)
+            planned = next_run(automation, now, event)
+            if paused:  # nothing runs while paused, and nothing is owed when it resumes
+                self.store.plan(automation, planned)
+                continue
+            missed = now - due > MISSED_GRACE
+            status: RunStatus = "skipped" if missed else "started"
+            detail = f"missed at {due.isoformat()} (Osmo was not running)" if missed else STARTING
+            # A claim not taken: the automation changed (or another pass took it) since this pass read it.
+            run = self.store.claim(automation, due, planned, now, status, detail)
+            if run is not None:
+                done.append(run if missed else await self.fire(automation, now, run))
         return done
 
     def seconds_to_next(self) -> float:
@@ -180,10 +190,14 @@ class Scheduler:
                 pass
 
     def replan(self) -> None:
-        """Recompute every automation's next run from now (after an event moved, or on resume)."""
+        """Plan every automation's next run again from now (after an event moved, or on resume). A run that is due and
+        has not fired yet is left for the next pass: replanning never drops it."""
         now = self.clock()
         for automation in self.store.automations():
+            if automation.nextRunAt is not None and automation.nextRunAt <= now:
+                continue
             event = self.store.event(automation.eventId) if automation.eventId else None
-            automation.nextRunAt = next_run(automation, now, event)
-            self.store.save_automation(automation)
+            planned = next_run(automation, now, event)
+            if planned != automation.nextRunAt:
+                self.store.plan(automation, planned)
         self.wake()

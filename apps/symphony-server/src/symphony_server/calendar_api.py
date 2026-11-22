@@ -212,10 +212,7 @@ def create_calendar_router(store: CalendarStore, scheduler: Scheduler) -> APIRou
         automation = store.automation(automation_id)
         if automation is None:
             raise missing("automation", automation_id)
-        run = await scheduler.fire(automation, scheduler.clock())
-        automation.lastRunAt, automation.lastStatus = run.at, run.status
-        store.save_automation(automation)
-        return run
+        return await scheduler.fire(automation, scheduler.clock())
 
     @router.get("/automations/runs")
     async def runs(after: int = Query(0, ge=0)) -> RunList:

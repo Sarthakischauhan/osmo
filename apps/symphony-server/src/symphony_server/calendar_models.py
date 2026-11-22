@@ -141,6 +141,9 @@ class Automation(AutomationInput):
     lastRunAt: datetime | None = None
     lastStatus: RunStatus | None = None
     nextRunAt: datetime | None = None
+    # Bumped on every write: the scheduler plans and claims a run only on the version it read (compare-and-set), so
+    # an edit or a delete made while a run was starting always wins.
+    version: int = 0
 
 
 class AutomationRun(BaseModel):

@@ -22,6 +22,10 @@ RUNS_KEPT = 500
 
 # Runs a calendar from before agent tasks were linked do not have `run_id`; it is added on open.
 TASK_INDEX = "CREATE INDEX IF NOT EXISTS automation_runs_task ON automation_runs (run_id)"
+# A scheduled run's claim: the automation and the time it was due. Unique, so one due time never fires twice.
+CLAIM_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS automation_runs_claim ON automation_runs (claim)"
+# Columns added after the first release, and what they start as on an older calendar.
+ADDED_COLUMNS = (("automation_runs", "run_id", "TEXT"), ("automation_runs", "claim", "TEXT"), ("automations", "version", "INTEGER NOT NULL DEFAULT 0"))
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS calendar_events (
     id TEXT PRIMARY KEY,
@@ -30,13 +34,15 @@ CREATE TABLE IF NOT EXISTS calendar_events (
 );
 CREATE TABLE IF NOT EXISTS automations (
     id TEXT PRIMARY KEY,
-    body TEXT NOT NULL
+    body TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS automation_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     automation_id TEXT NOT NULL,
     -- The agent run (task) an agent_task automation started, if any.
     run_id TEXT,
+    claim TEXT,
     body TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS calendar_settings (
@@ -56,10 +62,11 @@ class CalendarStore:
         self.lock = threading.Lock()
         with self.transaction() as db:
             db.executescript(SCHEMA)
-            columns = {row[1] for row in db.execute("PRAGMA table_info(automation_runs)")}
-            if "run_id" not in columns:
-                db.execute("ALTER TABLE automation_runs ADD COLUMN run_id TEXT")
+            for table, column, kind in ADDED_COLUMNS:
+                if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
             db.execute(TASK_INDEX)
+            db.execute(CLAIM_INDEX)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -129,51 +136,112 @@ class CalendarStore:
         """Store a new automation with its first run planned from `now`."""
         automation = Automation(**given.model_dump(), id=f"au-{secrets.token_hex(6)}")
         automation.nextRunAt = next_run(automation, now, self.event(automation.eventId) if automation.eventId else None)
-        self.save_automation(automation)
+        with self.transaction() as db:
+            db.execute("INSERT INTO automations (id, body, version) VALUES (?, ?, 0)", (automation.id, automation.model_dump_json()))
         return automation
 
     def update_automation(self, automation_id: str, given: AutomationInput, now: datetime) -> Automation | None:
-        """Replace an automation's settings and plan its next run from `now`; None when there is no such automation."""
+        """Replace an automation's settings and plan its next run from `now`; None when there is no such automation.
+
+        The user's edit always wins: it bumps the version, so a run that was starting cannot write its stale copy back."""
         current = self.automation(automation_id)
         if current is None:
             return None
         automation = Automation(**given.model_dump(), id=current.id, lastRunAt=current.lastRunAt, lastStatus=current.lastStatus)
         automation.nextRunAt = next_run(automation, now, self.event(automation.eventId) if automation.eventId else None)
-        self.save_automation(automation)
-        return automation
-
-    def save_automation(self, automation: Automation) -> None:
-        """Store an automation as it is."""
         with self.transaction() as db:
-            db.execute("INSERT OR REPLACE INTO automations (id, body) VALUES (?, ?)", (automation.id, automation.model_dump_json()))
+            version = self.write(db, automation, None)
+        if version is None:
+            return None
+        return automation.model_copy(update={"version": version})
+
+    @staticmethod
+    def write(db: sqlite3.Connection, automation: Automation, expected: int | None) -> int | None:
+        """Store `automation` over its row if the row is still at version `expected` (any version when None); the new
+        version, or None when the row is gone or has moved on."""
+        query = "UPDATE automations SET body = ?, version = version + 1 WHERE id = ?" + ("" if expected is None else " AND version = ?")
+        values = (automation.model_dump_json(), automation.id) + (() if expected is None else (expected,))
+        if db.execute(query, values).rowcount == 0:
+            return None
+        row = db.execute("SELECT version FROM automations WHERE id = ?", (automation.id,)).fetchone()
+        return int(row[0])
+
+    @staticmethod
+    def read(row: tuple[str, int]) -> Automation:
+        """An automation from its (body, version) row."""
+        return Automation.model_validate_json(row[0]).model_copy(update={"version": row[1]})
+
+    def plan(self, automation: Automation, planned: datetime | None) -> bool:
+        """Move the next run of `automation` to `planned`, if nobody changed it since it was read (compare-and-set)."""
+        with self.transaction() as db:
+            return self.write(db, automation.model_copy(update={"nextRunAt": planned}), automation.version) is not None
+
+    def claim(self, automation: Automation, due: datetime, planned: datetime | None, at: datetime, status: RunStatus, detail: str) -> AutomationRun | None:
+        """Take the run due at `due` before doing it: in one transaction, move the next run to `planned` (only if the
+        automation is unchanged since it was read) and record the run under a claim unique to (automation, due).
+
+        So after a crash or restart the due time is already behind it and never fires twice, and an automation edited,
+        disabled or deleted in the meantime is not run. None when the claim was not taken."""
+        claimed = automation.model_copy(update={"nextRunAt": planned, "lastRunAt": at, "lastStatus": status})
+        try:
+            with self.transaction() as db:
+                if self.write(db, claimed, automation.version) is None:
+                    return None
+                return self.insert_run(db, automation, at, status, detail, claim=f"{automation.id}@{due.isoformat()}")
+        except sqlite3.IntegrityError:
+            return None
 
     def automation(self, automation_id: str) -> Automation | None:
         """The automation `automation_id`, or None."""
         with self.transaction() as db:
-            row = db.execute("SELECT body FROM automations WHERE id = ?", (automation_id,)).fetchone()
-        return Automation.model_validate_json(row[0]) if row else None
+            row = db.execute("SELECT body, version FROM automations WHERE id = ?", (automation_id,)).fetchone()
+        return self.read(row) if row else None
 
     def automations(self) -> list[Automation]:
         """Every automation, earliest next run first."""
         with self.transaction() as db:
-            rows = db.execute("SELECT body FROM automations").fetchall()
-        return sorted((Automation.model_validate_json(row[0]) for row in rows), key=lambda a: (a.nextRunAt is None, a.nextRunAt or datetime.max.replace(tzinfo=UTC)))
+            rows = db.execute("SELECT body, version FROM automations").fetchall()
+        return sorted((self.read(row) for row in rows), key=lambda a: (a.nextRunAt is None, a.nextRunAt or datetime.max.replace(tzinfo=UTC)))
 
     def delete_automation(self, automation_id: str) -> bool:
-        """Delete an automation; False when there was none."""
+        """Delete an automation; False when there was none. A run under way finishes but writes nothing back to it."""
         with self.transaction() as db:
             gone = db.execute("DELETE FROM automations WHERE id = ?", (automation_id,)).rowcount > 0
         return gone
 
-    def add_run(self, automation: Automation, at: datetime, status: RunStatus, detail: str = "", run_id: str | None = None, thread_id: str | None = None) -> AutomationRun:
-        """Record a run of `automation`, keeping only the last RUNS_KEPT runs."""
+    def add_run(self, automation: Automation, at: datetime, status: RunStatus, detail: str = "") -> AutomationRun:
+        """Record a run of `automation` that no schedule claimed (Run now)."""
         with self.transaction() as db:
-            cursor = db.execute("INSERT INTO automation_runs (automation_id, run_id, body) VALUES (?, ?, '{}')", (automation.id, run_id))
-            assert cursor.lastrowid is not None
-            run = AutomationRun(id=cursor.lastrowid, automationId=automation.id, title=automation.title, at=at, status=status, detail=detail, runId=run_id, threadId=thread_id)
-            db.execute("UPDATE automation_runs SET body = ? WHERE id = ?", (run.model_dump_json(), run.id))
-            db.execute("DELETE FROM automation_runs WHERE id <= ?", (run.id - RUNS_KEPT,))
+            return self.insert_run(db, automation, at, status, detail, claim=None)
+
+    @staticmethod
+    def insert_run(db: sqlite3.Connection, automation: Automation, at: datetime, status: RunStatus, detail: str, claim: str | None) -> AutomationRun:
+        """Insert a run row, keeping only the last RUNS_KEPT runs."""
+        cursor = db.execute("INSERT INTO automation_runs (automation_id, claim, body) VALUES (?, ?, '{}')", (automation.id, claim))
+        assert cursor.lastrowid is not None
+        run = AutomationRun(id=cursor.lastrowid, automationId=automation.id, title=automation.title, at=at, status=status, detail=detail)
+        db.execute("UPDATE automation_runs SET body = ? WHERE id = ?", (run.model_dump_json(), run.id))
+        db.execute("DELETE FROM automation_runs WHERE id <= ?", (run.id - RUNS_KEPT,))
         return run
+
+    def finish_run(self, run: AutomationRun, status: RunStatus, detail: str, run_id: str | None = None, thread_id: str | None = None) -> AutomationRun:
+        """Record how a run went (and the agent task it started), and note it on its automation if that still exists."""
+        done = run.model_copy(update={"status": status, "detail": detail, "runId": run_id, "threadId": thread_id})
+        with self.transaction() as db:
+            db.execute("UPDATE automation_runs SET body = ?, run_id = ? WHERE id = ?", (done.model_dump_json(), run_id, run.id))
+            self.note_last(db, done, latest_only=False)
+        return done
+
+    def note_last(self, db: sqlite3.Connection, run: AutomationRun, *, latest_only: bool) -> None:
+        """Put `run` on its automation as the last run (only if it already is the last one, when `latest_only`); nothing
+        when the automation was deleted: a finished run never brings one back."""
+        row = db.execute("SELECT body, version FROM automations WHERE id = ?", (run.automationId,)).fetchone()
+        if row is None:
+            return
+        automation = self.read(row)
+        if automation.lastRunAt is not None and (automation.lastRunAt > run.at or (latest_only and automation.lastRunAt != run.at)):
+            return
+        self.write(db, automation.model_copy(update={"lastRunAt": run.at, "lastStatus": run.status}), automation.version)
 
     def runs_after(self, after: int, limit: int = 50) -> list[AutomationRun]:
         """Up to `limit` runs with an id above `after`, oldest first."""
@@ -203,11 +271,14 @@ class CalendarStore:
                 return None
             run.status, run.detail = status, detail
             db.execute("UPDATE automation_runs SET body = ? WHERE run_id = ?", (run.model_dump_json(), task_id))
-        automation = self.automation(run.automationId)
-        if automation is not None and automation.lastRunAt == run.at and automation.lastStatus == "started":
-            automation.lastStatus = status
-            self.save_automation(automation)
+            self.note_last(db, run, latest_only=True)
         return run
+
+    def unlinked(self) -> list[AutomationRun]:
+        """Runs still `started` with no agent task: claimed by a server that stopped before the run was done."""
+        with self.transaction() as db:
+            rows = db.execute("SELECT body FROM automation_runs WHERE run_id IS NULL ORDER BY id").fetchall()
+        return [run for run in (AutomationRun.model_validate_json(row[0]) for row in rows) if run.status == "started"]
 
     def last_run_id(self) -> int:
         """The id of the newest run (0 when there is none)."""
