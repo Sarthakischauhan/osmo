@@ -44,7 +44,7 @@ describe("hidden scrollbars", () => {
 
   it("is on the workspace feed", () => {
     expect(rule(".canvas.chat-root")).toMatch(/overflow-y: auto;/);
-    expect(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8")).toContain('className="canvas chat-root osmo-scroll"');
+    expect(readFileSync(new URL("../src/app/ChatFeed.tsx", import.meta.url), "utf8")).toContain('className="canvas chat-root osmo-scroll"');
   });
 
   it("is on every Tailwind scroll container, such as the thread list, menus and the command list", () => {

@@ -1,7 +1,6 @@
 import { useDesktopSupport } from "./desktopSupport";
 import { useAppearance, type Theme } from "./appearance";
-import { BrowserControlsContext, osmoWidgets } from "@osmo/osmo-widgets";
-import { WidgetProvider, type WidgetResponse } from "@sarchauhan/chat";
+import type { WidgetResponse } from "@sarchauhan/chat";
 import "@sarchauhan/chat/styles.css";
 import {
   OrbComposer,
@@ -16,31 +15,37 @@ import {
 } from "@osmo/osmo-composer";
 import "@osmo/osmo-composer/radial-picker.css";
 import { Toaster } from "@/components/ui/sonner";
-import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadSidebar } from "@/components/ThreadSidebar";
 import { AgentWorkbench } from "@/components/AgentWorkbench";
-import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
-import { AsciiHome } from "@/components/home/AsciiHome";
 import { VoiceField } from "@/components/home/VoiceField";
-import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
-import { insertAfter, threadApi } from "@/lib/threads";
+import { type ApprovalRequest, type RunView, type Runs, decideApproval, reduceRuns, visibleRuns } from "@/lib/runs";
+import { threadApi } from "@/lib/threads";
 import { toast } from "sonner";
-import { ConnectProviderDialog, type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
+import { type ProviderInfo, lockedProviderAction } from "./ConnectProvider";
 import { useServerCatalog } from "./serverCatalog";
+import { useAppView, type AppView } from "./app/views";
+import { useNow } from "./app/Clock";
+import { useThreadActions } from "./app/useThreadActions";
+import { useRunsPolling } from "./app/useRunsPolling";
+import { useKeyboardShortcuts } from "./app/useKeyboardShortcuts";
+import { useTabStatus } from "./app/useTabStatus";
+import { Topbar } from "./app/Topbar";
+import { ChatFeed } from "./app/ChatFeed";
+import { ProviderDialogs, useProviderDialogs } from "./app/ProviderDialogs";
+import { useMusicReporting } from "@/music/useMusicReporting";
 import { Cues } from "./cues";
 import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSession } from "./session";
-import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { UsageDialog } from "@/components/UsageDialog";
 import { NotesView } from "@/components/NotesView";
 import type { SidebarPlace } from "@/components/ThreadSidebar";
 import { CalendarDays, ListTodo, NotebookPen } from "lucide-react";
 import { CalendarView } from "@/components/CalendarView";
 import { MusicMini } from "@/components/MusicMini";
-import { musicPlayer, reportable } from "@/music/player";
-import { FeedTurn } from "./FeedTurn";
+import { musicPlayer } from "@/music/player";
 import { agentActivity } from "./compact";
 import { liveThought, orbBubbleVisible } from "./orbActivity";
 import { CompactAgentActivity } from "./CompactAgentActivity";
@@ -67,24 +72,6 @@ export function App() {
   );
 }
 
-/** The main pane's screens; `#notes` (etc.) in the URL opens one directly. */
-export type AppView = "chat" | "tasks" | "calendar" | "notes";
-const VIEWS: readonly AppView[] = ["chat", "tasks", "calendar", "notes"];
-
-function initialView(): AppView {
-  const hash = window.location.hash.slice(1);
-  return VIEWS.find((view) => view === hash) ?? "chat";
-}
-
-function useNow(): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
-}
-
 function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
   const desktop = useDesktopSupport();
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
@@ -95,7 +82,6 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [runs, setRuns] = useState<Runs>({});
   const approvals = useRef<ApprovalRequest[]>([]);
   const now = useNow();
-  const sidebar = useSidebar();
   const speaking = useRef(false);
   const cues = useRef<Cues | null>(null);
   cues.current ??= new Cues(() => speaking.current);
@@ -103,13 +89,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [liveUsage, setLiveUsage] = useState<UsageRecord>();
   const [usageOpen, setUsageOpen] = useState(false);
   // The main pane: the conversation, or one of Osmo's other screens (the orb stays in the dock on all of them).
-  const [view, setView] = useState<AppView>(initialView);
-  // The desktop tray's "Open calendar" changes the hash of the open page.
-  useEffect(() => {
-    const follow = () => setView(initialView());
-    window.addEventListener("hashchange", follow);
-    return () => window.removeEventListener("hashchange", follow);
-  }, []);
+  const [view, setView] = useAppView();
   const onEvent = useCallback((event: ServerEvent) => {
     dispatchFeed({ kind: "event", event });
     setRuns((previous) => reduceRuns(previous, event, Date.now()));
@@ -135,20 +115,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     onEvent,
   });
   const { end, reportMusic } = session;
-  // The server's music_status reads what the player last reported; ducking follows Osmo's voice.
-  useEffect(() => {
-    let last = musicPlayer.getSnapshot();
-    return musicPlayer.subscribe(() => {
-      const next = musicPlayer.getSnapshot();
-      if (reportable(last, next)) reportMusic(musicPlayer.state());
-      last = next;
-    });
-  }, [reportMusic]);
-  useEffect(() => musicPlayer.duck(session.state === "speaking"), [session.state]);
-  // A new call starts with what is playing now.
-  useEffect(() => {
-    if (session.connection === "connected") reportMusic(musicPlayer.state());
-  }, [session.connection, reportMusic]);
+  useMusicReporting(reportMusic, session.connection === "connected", session.state === "speaking");
   // In the Electron app the orb window starts calls too: it continues whichever thread this window has open.
   useEffect(() => {
     window.osmoDesktop?.session.openThread(threadId).catch(() => toast.error("Could not share the open thread with the orb"));
@@ -178,60 +145,13 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     },
     [end],
   );
-  const renameThread = useCallback(async (id: string, title: string) => {
-    try {
-      const renamed = await api.rename(id, title);
-      setThreads((previous) => previous.map((t) => (t.id === id ? renamed : t)));
-    } catch {
-      toast.error("Could not rename the thread");
-    }
-  }, []);
-  const forkThread = useCallback(
-    async (id: string) => {
-      try {
-        const copy = await api.fork(id);
-        setThreads((previous) => insertAfter(previous, id, copy));
-        await openThread(copy.id);
-        return copy;
-      } catch {
-        toast.error("Could not fork the thread");
-        return undefined;
-      }
-    },
-    [openThread],
-  );
-  const deleteThread = useCallback(
-    async (id: string) => {
-      try {
-        await api.remove(id);
-        setThreads((previous) => previous.filter((t) => t.id !== id));
-        if (id === threadId) await openThread(undefined);
-      } catch {
-        toast.error("Could not delete the thread");
-      }
-    },
-    [openThread, threadId],
-  );
-  const countMessages = useCallback(async (id: string) => (await api.get(id)).messages.length, []);
+  const { renameThread, forkThread, deleteThread, countMessages } = useThreadActions(threadId, setThreads, openThread);
   // The socket only echoes approval.resolved while a session is live, so record a decision the server accepted here.
   const decide = useCallback(async (approvalId: string, runId: string, approved: boolean) => {
     if (await decideApproval(approvalId, approved)) dispatchFeed({ kind: "event", event: { type: "approval.resolved", approvalId, runId, approved } });
     else toast.error("That approval is no longer pending");
   }, []);
-  // Every thread's runs (the socket only reports the open thread's): polled for the Running list.
-  useEffect(() => {
-    const poll = () =>
-      fetchRuns(Date.now() - COMPLETED_LINGER_MS).then(
-        (listed) => {
-          approvals.current = listed.approvals;
-          setRuns((previous) => mergeListed(previous, listed));
-        },
-        () => undefined,
-      );
-    void poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => window.clearInterval(timer);
-  }, []);
+  useRunsPolling(setRuns, approvals);
   const review = useCallback(
     async (run: RunView) => {
       if (run.threadId !== undefined && run.threadId !== threadId) await openThread(run.threadId);
@@ -239,25 +159,10 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     },
     [openThread, threadId],
   );
-  // ⌘K: a new thread (Home); Space: talk, or interrupt while Osmo speaks.
-  const { start, interrupt, connection } = session;
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        void openThread(undefined);
-        return;
-      }
-      const target = event.target;
-      const typing = target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(target.tagName));
-      if (event.code !== "Space" || typing || event.repeat) return;
-      event.preventDefault();
-      if (connection === "disconnected") void start();
-      else if (session.state === "speaking") interrupt();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [openThread, start, interrupt, connection, session.state]);
+  const { start, interrupt } = session;
+  const newThread = useCallback(() => void openThread(undefined), [openThread]);
+  const startCall = useCallback(() => void start(), [start]);
+  useKeyboardShortcuts({ newThread, start: startCall, interrupt, disconnected: session.connection === "disconnected", speaking: session.state === "speaking" });
   // A new `models` event from the socket replaces the registry; later HTTP refreshes may override it.
   const socketModels = useRef(session.voiceModels);
   if (session.voiceModels !== socketModels.current) {
@@ -266,9 +171,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   }
   const [{ catalog, error: catalogError }, refresh] = useServerCatalog();
   const providers = catalog?.providers ?? NO_PROVIDERS;
-  const [connecting, setConnecting] = useState<ProviderInfo>();
-  const [agentModelOpen, setAgentModelOpen] = useState(false);
-  const [returnToAgentSettings, setReturnToAgentSettings] = useState(false);
+  const dialogs = useProviderDialogs();
+  const { setConnecting, setAgentModelOpen } = dialogs;
   // The registry (with `locked` models) before any socket is open and after a connect.
   useEffect(() => {
     if (catalog !== undefined) setRegistry(catalog.models);
@@ -345,28 +249,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const mode = orbMode(session.connection, session.state, pending !== undefined);
   const amber = mode === "awaiting";
 
-  useEffect(() => {
-    const labels: Record<typeof mode, string> = {
-      connecting: "Connecting",
-      idle: "Ready",
-      listening: "Listening",
-      awaiting: "Your choice",
-      thinking: "Thinking",
-      speaking: "Speaking",
-    };
-    const opacity: Record<typeof mode, number> = { connecting: 0.4, idle: 0.6, listening: 1, awaiting: 1, thinking: 0.8, speaking: 1 };
-    const fill = theme === "light" ? "#171717" : "#ededed";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="${fill}" opacity="${opacity[mode]}"/></svg>`;
-    const icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-    const previousTitle = document.title;
-    const previousHref = icon?.href;
-    document.title = `Osmo · ${labels[mode]}`;
-    if (icon) icon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    return () => {
-      document.title = previousTitle;
-      if (icon && previousHref) icon.href = previousHref;
-    };
-  }, [mode, theme]);
+  useTabStatus(mode, theme);
   useEffect(() => cues.current?.onAmber(amber ? pending : undefined), [amber, pending]);
   const onFeedChange = useCallback((event: ChangeEvent<HTMLElement>) => {
     const target = event.target;
@@ -428,43 +311,27 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
       <SidebarInset className="app" data-home={home}>
         {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}
         {screen !== undefined ? <div className="osmo-screen">{screen}</div> : <>
-        <header className="topbar">
-          <div className="brand">
-            {sidebar.state === "collapsed" && <SidebarTrigger aria-label="Expand sidebar" className="osmo-icon-btn" />}
-            <img className="brand-mark" src="/favicon.svg" alt="" width={18} height={18} />
-            <strong>{workbenchOpen ? "Tasks" : conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}</strong>
-          </div>
-          <div className="topbar-right">
-            {session.startedAt !== undefined && <Clock since={session.startedAt} />}
-            {connected && (
-              <button type="button" className="end" onClick={session.end}>
-                <span aria-hidden>✕</span> End
-              </button>
-            )}
-          </div>
-        </header>
+        <Topbar
+          title={workbenchOpen ? "Tasks" : conversationTitle(feed.turns) ?? threads.find((t) => t.id === threadId)?.title ?? "Osmo"}
+          startedAt={session.startedAt}
+          connected={connected}
+          onEnd={session.end}
+        />
 
         {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} onOpenAutomation={openAutomation} /> : <>
-        <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
-          <BrowserControlsContext.Provider value={browserControls}>
-            <div className="osmo-scroll-host">
-              <main ref={feedScrollRef} className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
-                {feed.turns.length === 0 ? (
-                  <AsciiHome />
-                ) : (
-                  <div className="feed">
-                    {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
-                    {feed.turns.map((turn) => (
-                      <FeedTurn key={turn.key} turn={turn} step={turn.role === "approval" ? runs[turn.runId]?.steps : undefined} onDecide={decide} />
-                    ))}
-                    <div ref={bottom} />
-                  </div>
-                )}
-              </main>
-              <ScrollDirectionBar target={feedScrollRef} label="Conversation scroll" />
-            </div>
-          </BrowserControlsContext.Provider>
-        </WidgetProvider>
+        <ChatFeed
+          feed={feed}
+          runs={runs}
+          runsList={shownRuns.length > 0 ? runsList : undefined}
+          theme={theme}
+          connected={connected}
+          browserControls={browserControls}
+          respondToWidget={respondToWidget}
+          onDecide={decide}
+          onChange={onFeedChange}
+          scrollRef={feedScrollRef}
+          bottomRef={bottom}
+        />
         </>}
 
         <footer className="dock">
@@ -499,44 +366,9 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         </footer>
         </>}
       </SidebarInset>
-      <ConnectProviderDialog
-        provider={connecting}
-        onOpenChange={(open) => {
-          if (!open) {
-            setConnecting(undefined);
-            if (returnToAgentSettings) setAgentModelOpen(true);
-            setReturnToAgentSettings(false);
-          }
-        }}
-        onConnected={() => {
-          setConnecting(undefined);
-          if (returnToAgentSettings) setAgentModelOpen(true);
-          setReturnToAgentSettings(false);
-          refresh();
-        }}
-      />
-      <AgentModelDialog
-        open={agentModelOpen}
-        onOpenChange={setAgentModelOpen}
-        providers={providers}
-        onCredentialsChanged={refresh}
-        onConnectKey={(provider) => { setReturnToAgentSettings(true); setAgentModelOpen(false); setConnecting(provider); }}
-        desktop={desktop}
-      />
+      <ProviderDialogs dialogs={dialogs} providers={providers} refresh={refresh} desktop={desktop} />
       <UsageDialog open={usageOpen} onOpenChange={setUsageOpen} threadId={threadId} live={liveUsage} />
       <Toaster position="top-center" theme={theme} />
     </>
   );
-}
-
-function Clock({ since }: { since: number }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const seconds = Math.max(0, Math.floor((now - since) / 1000));
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-  return <span className="clock">{`${mm}:${ss}`}</span>;
 }
