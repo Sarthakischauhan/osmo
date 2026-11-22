@@ -38,6 +38,8 @@ describe("border radii", () => {
     ".osmo-notes-link",
     ".osmo-week-nav",
     ".osmo-browser-takeover",
+    ".osmo-music-connect",
+    ".agent-workbench-origin",
   ];
 
   it.each(buttons)("%s is 8px", (selector) => {
@@ -52,6 +54,11 @@ describe("border radii", () => {
     expect(button).not.toMatch(/rounded-(md|sm|lg|xl|full)/);
     expect(button.match(/rounded-\[var\(--radius-button\)\]/g)?.length).toBe(5);
     expect(/--radius-button:\s*8px/.test(css)).toBe(true);
+  });
+
+  it("keeps the mini player's play button round and its art 6px, as in the music-mini mockup", () => {
+    expect(radiusOf(css, ".osmo-music-play")).toBe("50%");
+    expect(radiusOf(css, ".osmo-music-art")).toBe("6px");
   });
 
   it("makes the orb in a message fully round", () => {

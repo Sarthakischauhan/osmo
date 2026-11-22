@@ -38,6 +38,8 @@ import { NotesView } from "@/components/NotesView";
 import type { SidebarPlace } from "@/components/ThreadSidebar";
 import { CalendarDays, ListTodo, NotebookPen } from "lucide-react";
 import { CalendarView } from "@/components/CalendarView";
+import { MusicMini } from "@/components/MusicMini";
+import { musicPlayer, reportable } from "@/music/player";
 import { FeedTurn } from "./FeedTurn";
 import { agentActivity } from "./compact";
 import { liveThought, orbBubbleVisible } from "./orbActivity";
@@ -117,6 +119,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     }
     cues.current?.onServerEvent(event);
     if (event.type === "usage") setLiveUsage(event.usage);
+    if (event.type === "music.command") void musicPlayer.command(event);
     // What the server applied (session start, picker, or `set_voice`), or on error what is still in effect.
     if (event.type === "voice.configured") savePick.current?.(event.selection);
   }, []);
@@ -131,7 +134,21 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     threadId,
     onEvent,
   });
-  const { end } = session;
+  const { end, reportMusic } = session;
+  // The server's music_status reads what the player last reported; ducking follows Osmo's voice.
+  useEffect(() => {
+    let last = musicPlayer.getSnapshot();
+    return musicPlayer.subscribe(() => {
+      const next = musicPlayer.getSnapshot();
+      if (reportable(last, next)) reportMusic(musicPlayer.state());
+      last = next;
+    });
+  }, [reportMusic]);
+  useEffect(() => musicPlayer.duck(session.state === "speaking"), [session.state]);
+  // A new call starts with what is playing now.
+  useEffect(() => {
+    if (session.connection === "connected") reportMusic(musicPlayer.state());
+  }, [session.connection, reportMusic]);
   // In the Electron app the orb window starts calls too: it continues whichever thread this window has open.
   useEffect(() => {
     window.osmoDesktop?.session.openThread(threadId).catch(() => toast.error("Could not share the open thread with the orb"));
@@ -406,6 +423,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onOpenSettings={() => setAgentModelOpen(true)}
         onOpenUsage={() => setUsageOpen(true)}
         places={places}
+        player={(collapsed) => <MusicMini player={musicPlayer} collapsed={collapsed} />}
       />
       <SidebarInset className="app" data-home={home}>
         {home && <VoiceField mode={mode} inputLevel={session.inputLevel} outputLevel={session.outputLevel} />}

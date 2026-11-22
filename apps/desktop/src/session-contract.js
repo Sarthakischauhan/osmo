@@ -58,6 +58,16 @@ const isText = value => typeof value === 'string' && value.length > 0;
 const isFraction = value => typeof value === 'number' && value >= 0 && value <= 1;
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const TRACK_KEYS = ['id', 'source', 'title', 'artist', 'album', 'durationMs', 'art', 'url', 'uri'];
+
+/** A track the music player reports (server protocol.Track); the server validates it again. */
+function validTrack(track) {
+  if (!plain(track) || Object.keys(track).some(key => !TRACK_KEYS.includes(key))) return false;
+  if (!isText(track.id) || !['local', 'spotify'].includes(track.source) || typeof track.title !== 'string' || typeof track.artist !== 'string') return false;
+  return ['album', 'art', 'url', 'uri'].every(key => track[key] == null || typeof track[key] === 'string')
+    && (track.durationMs == null || (Number.isInteger(track.durationMs) && track.durationMs >= 0));
+}
+
 function onlyKeys(value, keys, what) {
   if (!plain(value)) throw new Error(`Invalid ${what}`);
   if (Object.keys(value).some(key => !keys.includes(key))) throw new Error(`Unexpected field in ${what}`);
@@ -107,6 +117,13 @@ export function validateClientEvent(value) {
     case 'browser.takeover':
       onlyKeys(value, ['type', 'id', 'user'], 'browser takeover');
       if (!isText(value.id) || typeof value.user !== 'boolean') throw new Error('Invalid browser takeover');
+      break;
+    case 'music.state':
+      onlyKeys(value, ['type', 'playing', 'track', 'positionMs', 'volume', 'error'], 'music state');
+      if (typeof value.playing !== 'boolean' || !Number.isInteger(value.positionMs) || value.positionMs < 0
+          || !Number.isInteger(value.volume) || value.volume < 0 || value.volume > 100
+          || (value.error != null && (typeof value.error !== 'string' || value.error.length > 500))
+          || (value.track != null && !validTrack(value.track))) throw new Error('Invalid music state');
       break;
     default:
       throw new Error('Unsupported session event');

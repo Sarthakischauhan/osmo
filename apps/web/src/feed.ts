@@ -258,6 +258,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
         return { ...feed, turns: updated && last?.role === "assistant" ? [...cleared.slice(0, -1), updated] : cleared };
       }
     case "desktop.request":
+    case "music.command":
     case "models":
     case "voice.configured":
     case "voice.preview":

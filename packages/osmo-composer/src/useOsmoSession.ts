@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
 import { EchoGuard } from "./echoGuard";
-import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
+import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type MusicState, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
 
@@ -34,6 +34,8 @@ export interface OsmoSession {
   closeBrowser: (id: string) => void;
   /** Take the agent browser widget `id`'s browser over from the agent (`user`), or hand it back. */
   takeOverBrowser: (id: string, user: boolean) => void;
+  /** Tell the server what the app's music player is doing (no-op while disconnected). */
+  reportMusic: (state: MusicState) => void;
   /** Symphony's voice model registry (`models` event); empty until connected. */
   voiceModels: VoiceModel[];
   /** The session's model/voice/effort as Symphony last confirmed it (picker commit or `set_voice`). */
@@ -189,6 +191,10 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     runtime.current?.client.send({ type: "browser.takeover", id, user });
   }, []);
 
+  const reportMusic = useCallback((state: MusicState) => {
+    runtime.current?.client.send(state);
+  }, []);
+
   const configure = useCallback((next: VoiceSelection) => {
     runtime.current?.client.send({ type: "session.configure", ...next });
   }, []);
@@ -235,6 +241,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     sendBrowserInput,
     closeBrowser,
     takeOverBrowser,
+    reportMusic,
     voiceModels,
     selection,
     configure,

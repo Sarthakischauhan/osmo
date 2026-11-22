@@ -128,6 +128,26 @@ once so local builds are signed with a stable self-signed identity
 ([docs/desktop-signing.md](../../docs/desktop-signing.md)). Developer ID signing, notarization, and
 automatic updates are still follow-up release work.
 
+### Music and Widevine
+
+The app runs on castLabs' [Electron for Content Security](https://github.com/castlabs/electron-releases)
+(`v45.2.1+wvcus`, the `electron` dependency points at its release), which adds the Widevine CDM that
+Spotify's Web Playback SDK needs. The CDM downloads on first start; the app waits for it before opening
+the window, and only grants the protected-media permission to Spotify's player in Osmo's own window.
+
+Widevine also wants the packed app VMP-signed by castLabs EVS, which `scripts/vmp-sign.cjs` does as
+electron-builder's `afterPack` hook, after packing and before codesign. Once per machine:
+
+```sh
+python3 -m pip install --upgrade castlabs-evs
+python3 -m castlabs_evs.account signup   # or: reauth, for an existing account
+```
+
+EVS keeps its tokens in its own config, never in this repository. Linux has no VMP and skips the step;
+`OSMO_VMP_SIGN=skip` packs without it for a local test build (Widevine may then refuse Spotify), and
+`OSMO_VMP_PYTHON` picks the Python that has `castlabs-evs`. A dev run (`bun run dev`) is unsigned too:
+local files play, Spotify may not.
+
 `OSMO_DESKTOP_URL` attaches to an already-running loopback HTTP origin and disables managed server
 startup; remote origins are rejected. `OSMO_DESKTOP_PYTHON` overrides the Python used for both
 managed server startup and input. `OSMO_DESKTOP_VISION_MODEL` is read by the server, not the renderer.

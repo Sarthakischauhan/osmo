@@ -72,6 +72,39 @@ const browserKeySchema = z.object({ type: z.literal("browser.key"), key: z.strin
 export const browserInputSchema = z.discriminatedUnion("type", [browserClickSchema, browserScrollSchema, browserKeySchema]);
 export type BrowserInput = z.infer<typeof browserInputSchema>;
 
+/** Something the app's music player can play (server protocol.Track): a local file (`url`) or a Spotify track (`uri`). */
+export const trackSchema = z.object({
+  id: z.string().min(1),
+  source: z.enum(["local", "spotify"]),
+  title: z.string(),
+  artist: z.string(),
+  album: z.string().nullish(),
+  durationMs: z.number().int().nonnegative().nullish(),
+  art: z.string().nullish(),
+  url: z.string().nullish(),
+  uri: z.string().nullish(),
+});
+export type Track = z.infer<typeof trackSchema>;
+
+/** What the app's music player is doing, as it tells the server (`music_status` reads it). */
+export const musicStateSchema = z.object({
+  type: z.literal("music.state"),
+  playing: z.boolean(),
+  track: trackSchema.nullish(),
+  positionMs: z.number().int().nonnegative(),
+  volume: z.number().int().min(0).max(100),
+  error: z.string().max(500).nullish(),
+});
+export type MusicState = z.infer<typeof musicStateSchema>;
+
+export const musicCommandSchema = z.object({
+  type: z.literal("music.command"),
+  action: z.enum(["play", "pause", "resume", "next", "previous", "volume"]),
+  tracks: z.array(trackSchema).default([]),
+  volume: z.number().int().min(0).max(100).nullish(),
+});
+export type MusicCommand = z.infer<typeof musicCommandSchema>;
+
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
@@ -103,6 +136,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   browserKeySchema.extend({ id: widgetIdSchema }),
   z.object({ type: z.literal("browser.close"), id: widgetIdSchema }),
   z.object({ type: z.literal("browser.takeover"), id: widgetIdSchema, user: z.boolean() }),
+  musicStateSchema,
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
@@ -126,6 +160,8 @@ export const usageRecordSchema = z.object({
 export type UsageRecord = z.infer<typeof usageRecordSchema>;
 
 export const serverEventSchema = z.discriminatedUnion("type", [
+  // `music_play` / `music_control`: what the app's music player should do.
+  musicCommandSchema,
   z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
   z.object({

@@ -46,6 +46,8 @@ export interface ThreadSidebarProps {
   initialRenaming?: string;
   now?: number;
   footer?: ReactNode;
+  /** The music mini player, at the very bottom (GUI's music-mini mockup); told whether the sidebar is collapsed. */
+  player?: (collapsed: boolean) => ReactNode;
   /** Open the settings screen. */
   onOpenSettings?: () => void;
   /** Open the usage and cost dialog. */
@@ -63,7 +65,7 @@ export interface SidebarPlace {
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenUsage, places = [] }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenUsage, places = [], player }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -180,6 +182,7 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
         </SidebarFooter>
       )}
       {footer && <SidebarFooter className="osmo-desktop-footer">{footer}</SidebarFooter>}
+      {player && <SidebarFooter className="osmo-player-footer">{player(collapsed)}</SidebarFooter>}
       <SidebarRail />
       <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
         <AlertDialogContent className="osmo-delete-dialog">
