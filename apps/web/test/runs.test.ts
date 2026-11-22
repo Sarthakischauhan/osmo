@@ -1,6 +1,6 @@
 import type { AgentRunStatus, ServerEvent } from "@osmo/osmo-composer";
 import { describe, expect, it } from "vitest";
-import { COMPLETED_LINGER_MS, type Runs, elapsed, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "../src/lib/runs";
+import { COMPLETED_LINGER_MS, type Runs, elapsed, fetchRuns, mergeListed, reduceRuns, startTask, stopTask, visibleRuns } from "../src/lib/runs";
 
 function play(events: ServerEvent[], start = 0): Runs {
   return events.reduce<Runs>((runs, event, i) => reduceRuns(runs, event, start + i * 1000), {});
@@ -41,6 +41,26 @@ describe("agent runs", () => {
 
   it("formats elapsed time as mm:ss", () => {
     expect(elapsed(0, 724_000)).toBe("12:04");
+  });
+});
+
+describe("task requests", () => {
+  it("submits and validates a task", async () => {
+    const result = await startTask("t1", "Research", async (url, init) => {
+      expect(url).toBe("/api/runs/start/task");
+      expect(JSON.parse(String(init?.body))).toEqual({ threadId: "t1", task: "Research" });
+      return Response.json({ runId: "r1", threadId: "t1", task: "Research", status: "running", createdAt: 1, updatedAt: 1 });
+    });
+    expect(result.runId).toBe("r1");
+  });
+
+  it("surfaces server errors and encodes run IDs when stopping", async () => {
+    await expect(startTask("t1", "Research", async () => Response.json({ detail: "No model" }, { status: 400 }))).rejects.toThrow("No model");
+    await stopTask("run/1", async (url, init) => {
+      expect(url).toBe("/api/runs/run%2F1/stop");
+      expect(init?.method).toBe("POST");
+      return new Response(null, { status: 204 });
+    });
   });
 });
 

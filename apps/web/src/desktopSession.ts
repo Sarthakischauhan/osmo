@@ -76,8 +76,11 @@ export function createDesktopSession(bridge: SessionBridge): (options: OsmoSessi
     const sendWidgetAction = useCallback((id: string, action: string, value?: string) => report(bridge.send({ type: "widget.action", id, action, value })), [report]);
     const sendBrowserInput = useCallback((id: string, input: Parameters<OsmoSession["sendBrowserInput"]>[1]) => report(bridge.send({ ...input, id })), [report]);
     const closeBrowser = useCallback((id: string) => report(bridge.send({ type: "browser.close", id })), [report]);
+    const takeOverBrowser = useCallback((id: string, user: boolean) => report(bridge.send({ type: "browser.takeover", id, user })), [report]);
     const configure = useCallback((selection: Parameters<OsmoSession["configure"]>[0]) => report(bridge.send({ type: "session.configure", ...selection })), [report]);
-    // The call's audio plays in main's audio renderer: voice previews and the output level are read off an in-page
+    // Main forwards it only while a session is live; a player change with no call has nobody to tell.
+    const reportMusic = useCallback((state: Parameters<OsmoSession["reportMusic"]>[0]) => { void bridge.send(state).catch(() => undefined); }, []);
+    // The call's audio plays in main's audio renderer: voice previews and I/O levels are read off an in-page
     // player in the browser and do not cross the contract.
     const silent = useCallback(() => undefined, []);
     const level = useCallback(() => 0, []);
@@ -95,6 +98,8 @@ export function createDesktopSession(bridge: SessionBridge): (options: OsmoSessi
         sendWidgetAction,
         sendBrowserInput,
         closeBrowser,
+        takeOverBrowser,
+        reportMusic,
         voiceModels: snapshot.models,
         selection: snapshot.selection,
         configure,
@@ -102,8 +107,9 @@ export function createDesktopSession(bridge: SessionBridge): (options: OsmoSessi
         stopPreview: silent,
         previewing: undefined,
         outputLevel: level,
+        inputLevel: level,
       }),
-      [snapshot, failure, start, end, interrupt, sendWidgetAction, sendBrowserInput, closeBrowser, configure, silent, level],
+      [snapshot, failure, start, end, interrupt, sendWidgetAction, sendBrowserInput, closeBrowser, takeOverBrowser, reportMusic, configure, silent, level],
     );
   };
 }

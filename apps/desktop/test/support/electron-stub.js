@@ -8,6 +8,12 @@ export const fake = {
   appListeners: new Map(),
   dialogs: [],
   quits: 0,
+  trays: [],
+  notifications: [],
+  loginItems: [],
+  componentsReady: 0,
+  // Cookies set on the default session, each with how many windows existed when it was set.
+  cookies: [],
 };
 
 class Emitter {
@@ -19,7 +25,9 @@ class Emitter {
 const defaultSession = {
   setPermissionCheckHandler(handler) { this.check = handler; },
   setPermissionRequestHandler(handler) { this.request = handler; },
+  cookies: { set: async cookie => { fake.cookies.push({ cookie, windowsBefore: fake.windows.length }); } },
 };
+export const session = { defaultSession };
 
 class WebContents extends Emitter {
   constructor() {
@@ -66,7 +74,9 @@ export const app = {
   on(name, listener) { fake.appListeners.set(name, [...(fake.appListeners.get(name) ?? []), listener]); },
   emit(name, ...args) { for (const listener of fake.appListeners.get(name) ?? []) listener(...args); },
   quit() { fake.quits++; },
+  setLoginItemSettings(settings) { fake.loginItems.push(settings); },
 };
+export const components = { whenReady: async () => { fake.componentsReady++; return []; } };
 export const globalShortcut = {
   register(accelerator, callback) { fake.shortcuts.set(accelerator, callback); return true; },
   unregisterAll() { fake.shortcuts.clear(); },
@@ -77,6 +87,18 @@ export const dialog = { showMessageBox: async (...args) => { fake.dialogs.push(a
 export const Menu = { buildFromTemplate: template => template, setApplicationMenu() {} };
 export const desktopCapturer = { getSources: async () => [] };
 export const shell = { openExternal: async () => {} };
-export const nativeImage = { createFromPath: () => ({}) };
+const image = { isEmpty: () => false, resize() { return image; } };
+export const nativeImage = { createFromPath: () => image };
+export class Tray {
+  constructor(icon) { this.icon = icon; this.menu = undefined; this.destroyed = false; fake.trays.push(this); }
+  setContextMenu(menu) { this.menu = menu; }
+  setToolTip(tip) { this.tip = tip; }
+  destroy() { this.destroyed = true; }
+}
+export class Notification {
+  static isSupported() { return true; }
+  constructor(options) { this.options = options; }
+  show() { fake.notifications.push(this.options); }
+}
 // The microphone is already allowed, as macOS answers once the user has.
 export const systemPreferences = { getMediaAccessStatus: () => 'granted', askForMediaAccess: async () => true };

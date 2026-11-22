@@ -32,9 +32,12 @@ from symphony_server.widgets import (
 
 # Sink event carrying a `widget.render` or `widget.update` wire event.
 OSMO_WIDGET = "osmo.widget"
+# Sink event carrying a fenced markdown code block to append to the assistant message.
+OSMO_CODE = "osmo.code"
 # Widgets remembered for taps and updates (LRU across all sessions).
 WIDGETS_MAX = 512
 IMAGE_PROMPT_MAX = 2000
+CODE_MAX = 20_000
 
 
 class WidgetBoard:
@@ -44,9 +47,19 @@ class WidgetBoard:
     def __init__(self, max_widgets: int = WIDGETS_MAX) -> None:
         self.max_widgets = max_widgets
         self.widgets: OrderedDict[str, Widget] = OrderedDict()
+        # Widgets the user already answered: a widget takes one answer, so a replayed or forged tap is dropped.
+        self.answered: set[str] = set()
 
     def get(self, widget_id: str) -> Widget | None:
+        """The widget shown as `widget_id`, if it is still remembered."""
         return self.widgets.get(widget_id)
+
+    def answer(self, widget_id: str) -> bool:
+        """Record the user's answer to `widget_id`; False when it was already answered (or is unknown)."""
+        if widget_id not in self.widgets or widget_id in self.answered:
+            return False
+        self.answered.add(widget_id)
+        return True
 
     def add(self, widget: Widget) -> str:
         # A fresh uuid per render: unique within and across sessions, so an update can only
@@ -56,10 +69,12 @@ class WidgetBoard:
         return widget_id
 
     def put(self, widget_id: str, widget: Widget) -> None:
+        """Remember `widget` as `widget_id`, forgetting the oldest past `max_widgets`."""
         self.widgets[widget_id] = widget
         self.widgets.move_to_end(widget_id)
         while len(self.widgets) > self.max_widgets:
-            self.widgets.popitem(last=False)
+            forgotten, _ = self.widgets.popitem(last=False)
+            self.answered.discard(forgotten)
 
 
 def render_event(board: WidgetBoard, widget: Widget) -> WidgetRender:
@@ -154,3 +169,31 @@ class CreateImageTool(Tool):
         title = str(args.get("title") or prompt)[:120]
         source = f"data:{media_type};base64,{base64.b64encode(image).decode('ascii')}"
         return await show(self.board, sink, CardWidget(type="card", props=CardProps(title=title, body="", image=source)))
+
+
+class WriteCodeTool(Tool):
+    """Writes a syntax-highlighted code snippet directly into the assistant message without a widget."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="write_code",
+            description="Show a code snippet directly in the conversation message (not a widget). Do not read the code out loud.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The source code to display."},
+                    "language": {"type": "string", "description": "Language tag, e.g. 'go', 'python', 'typescript', 'rust'."},
+                },
+                "required": ["code"],
+            },
+        )
+
+    async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        code = str(args.get("code", "")).strip("\n")[:CODE_MAX]
+        if not code.strip():
+            return json.dumps({"shown": None, "error": "code must not be empty"})
+        lang = "".join(ch for ch in str(args.get("language") or "").strip().lower() if ch.isalnum() or ch in ("-", "+", "_"))[:24]
+        block = f"```{lang}\n{code}\n```"
+        await sink.emit(OSMO_CODE, {"markdown": block})
+        return json.dumps({"shown": f"{lang or 'code'} snippet ({len(code.splitlines())} lines)"})
+

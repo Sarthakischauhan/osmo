@@ -63,9 +63,10 @@ export function step(frame: OrbFrameState, mode: OrbMode, rawLevel: number, dt: 
     breathe: mix(p.breathe, target.breathe, k),
     glow: mix(p.glow, target.glow, k),
   };
-  const level = mode === "speaking" ? rawLevel : 0;
-  // Fast attack, slow release, like a VU meter.
-  frame.level = mix(frame.level, level, level > frame.level ? Math.min(1, dt * 18) : Math.min(1, dt * 5));
+  // Speech drives the blob in every state: the user's voice while listening, the assistant's
+  // while speaking. Fast attack, slower release, like a VU meter.
+  const level = rawLevel;
+  frame.level = mix(frame.level, level, level > frame.level ? Math.min(1, dt * 22) : Math.min(1, dt * 6));
   if (!still) frame.time += dt * (frame.preset.speed + frame.level * 2.5);
 }
 

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { type ProviderInfo, lockedProviderAction } from "../src/ConnectProvider";
 
 const PROVIDERS: ProviderInfo[] = [
-  { id: "xai", label: "xAI", authKinds: ["api_key"], connected: true },
-  { id: "openai", label: "OpenAI", authKinds: ["api_key"], connected: false },
-  { id: "openrouter", label: "OpenRouter", authKinds: ["api_key", "oauth"], connected: true },
+  { id: "xai", label: "xAI", authKinds: ["api_key"], connected: true, capabilities: ["Voice"] },
+  { id: "openai", label: "OpenAI", authKinds: ["api_key"], connected: false, capabilities: ["Vision"] },
+  { id: "openrouter", label: "OpenRouter", authKinds: ["api_key", "oauth"], connected: true, capabilities: ["Text models"] },
 ];
 
 describe("tapping a locked provider chip", () => {

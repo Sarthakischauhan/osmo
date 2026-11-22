@@ -6,6 +6,9 @@ storage, and tells the thread's observer (the open voice bridge, if any) what ha
 wire events for the browser, and `Notice`s for the voice model, each tagged with when it
 should be spoken: `interrupt` (failed, needs approval, done) or `silent` (added to the conversation
 without a response). A run's phase is never spoken: it goes to the widget and to `agent_status`.
+
+Runs are durable (upstream/durable.py): when the server comes back after stopping mid-run,
+`recover` picks up each run the backend resumed and follows it from its next event.
 """
 
 from __future__ import annotations
@@ -15,16 +18,16 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from core_harness import ControlPlaneEvent, EventSink, Tool
-from core_server import InProcessRunBackend, RunCapacityError, RunContext, RunRequest, RunSubmission
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from core_server import RunCapacityError, RunContext, RunRequest, RunSubmission
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 
-from symphony_server.browser import THREAD_ID, BrowserSessions
+from symphony_server.browser_sessions import THREAD_ID, BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
@@ -34,17 +37,21 @@ from symphony_server.approvals import (
     ApprovalResolvedPayload,
 )
 from symphony_server.canvas import OSMO_WIDGET
+from symphony_server.agent_model import AGENT_MODEL_SETTING
 from symphony_server.model_access import ModelAccess
 from symphony_server.protocol import (
     AgentUpdate,
     ApprovalRequest,
     ApprovalResolved,
     ServerEvent,
+    UsageEvent,
     widget_event_adapter,
 )
 from symphony_server.providers import provider_label
-from symphony_server.storage import AgentRunRecord, AgentRunStatus, Storage
+from symphony_server.storage import DEFAULT_THREAD_TITLE, AgentRunRecord, AgentRunStatus, Storage
 from symphony_server.turn_events import RunFailedPayload, ToolStartedPayload, activity_label
+from symphony_server.upstream.durable import RUN_RESUMED, DurableRunBackend
+from symphony_server.usage import AgentUsagePayload, agent_usage
 from symphony_server.voices import provider_of
 
 log = logging.getLogger("symphony.agents")
@@ -53,6 +60,8 @@ NoticeTag = Literal["interrupt", "silent"]
 # A finished run's answer, as told to the voice model (it summarizes it out loud).
 RESULT_TOLD_MAX = 4000
 TASK_MAX = 4000
+RESUMED_PHASE = "Resumed after Osmo restarted"
+INTERRUPTED = "Interrupted when Osmo restarted. Start it again if you still want it."
 
 RUN_AGENT_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -90,8 +99,11 @@ class CompletedPayload(BaseModel):
 class AgentRuns:
     """Every agent run of this server, by run id; observers by thread id."""
 
-    def __init__(self, backend: InProcessRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None) -> None:
+    def __init__(self, backend: DurableRunBackend, storage: Storage, broker: ApprovalBroker, access: ModelAccess, model_id: str, browsers: BrowserSessions, *, desktops: dict[str, DesktopSession] | None = None, auto_model: bool = False) -> None:
         self.backend, self.storage, self.broker, self.access, self.model_id = backend, storage, broker, access, model_id
+        self.auto_model = auto_model
+        # The model chosen in the app (agent_model.py); it wins over OSMO_AGENT_MODEL and automatic selection.
+        self.chosen_model: str | None = storage.setting(AGENT_MODEL_SETTING)
         self.desktops = desktops if desktops is not None else {}
         self.browsers = browsers
         # A thread's browser session shows its widget on the thread (whoever observes it).
@@ -104,6 +116,31 @@ class AgentRuns:
         self.asking: dict[str, ApprovalRequest] = {}
         # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
         self.phases: dict[str, str] = {}
+        # Told about every run that finishes (the calendar settles the automation that started it).
+        self.finished: list[Callable[[AgentRunRecord], object]] = []
+
+    async def recover(self) -> list[str]:
+        """Follow the runs the backend resumed after a restart; the ids of those it took back."""
+        adopted: list[str] = []
+        for state in await self.backend.recover():
+            record = self.storage.get_run(state.run_id)
+            if record is None:
+                # Its thread was deleted while the server was down: nobody is waiting for it.
+                await self.backend.cancel(state.run_id)
+                continue
+            # Events up to the resume note were handled by the previous process.
+            cursor = len(state.events)
+            record = record.model_copy(update={"status": "running", "updatedAt": time.time()})
+            self.runs[record.runId] = record
+            self.sessions[record.runId] = state.context.session_id
+            self.phases[record.runId] = RESUMED_PHASE
+            self.storage.save_run(record)
+            self.browsers.hold(record.threadId)
+            self.spawn(self.follow(record.runId, after=cursor))
+            adopted.append(record.runId)
+        # Anything else stored as live (the backend gave up on it, or it predates durable runs) is not running.
+        self.storage.interrupt_unfinished(INTERRUPTED, keep=frozenset(adopted))
+        return adopted
 
     def observe(self, thread_id: str, observer: AgentObserver) -> None:
         self.observers[thread_id] = observer
@@ -112,16 +149,60 @@ class AgentRuns:
         if self.observers.get(thread_id) is observer:
             del self.observers[thread_id]
 
+    def choose_model(self, model_id: str | None) -> None:
+        """Run agents on `model_id` from now on; None goes back to OSMO_AGENT_MODEL or automatic selection."""
+        self.storage.save_setting(AGENT_MODEL_SETTING, model_id)
+        self.chosen_model = model_id
+
+    async def select_model(self) -> str:
+        """The model chosen in the app; else a usable subscription or key model unless the operator
+        configured one explicitly."""
+        if self.chosen_model:
+            return self.chosen_model
+        model_id = self.model_id
+        if self.auto_model and self.access.subscriptions is not None:
+            # Stable priority avoids switching models based on connection timing. An explicit
+            # OSMO_AGENT_MODEL always wins over automatic subscription selection.
+            from core_ai.providers.defaults import DEFAULT_MODELS
+
+            for candidate, namespace in (("xai", "grok"), ("openai", "openai"), ("anthropic", "anthropic")):
+                if self.access.subscriptions.store.token(candidate) is not None and await self.access.prepare(candidate):
+                    if candidate in self.access.tokens:
+                        return DEFAULT_MODELS[namespace]
+            # A voice API key may be the only connected provider. Do not require an xAI
+            # key when OpenAI, Gemini, Anthropic or Vercel can run the agent instead.
+            if model_id == self.model_id:
+                for candidate, namespace in (("xai", "grok"), ("openai", "openai"), ("anthropic", "anthropic"), ("gemini", "gemini"), ("vercel", "vercel")):
+                    if not (self.access.credentials.secret(candidate) and await self.access.prepare(candidate)):
+                        continue
+                    picked = await self.key_model(candidate, namespace, DEFAULT_MODELS[namespace])
+                    if picked is not None:
+                        model_id = picked
+                        break
+        return model_id
+
+    async def key_model(self, provider: str, namespace: str, catalog_default: str) -> str | None:
+        """The model `provider`'s API key runs agents on: the configured default when it is this
+        provider's, else core_ai's; None when the key lists text models and has neither (an xAI
+        key limited to voice lists none), so selection moves on to the next provider."""
+        candidates = [self.model_id] if provider_of(self.model_id) == provider else []
+        candidates.append(catalog_default)
+        available = await self.access.key_text_models(provider)
+        if available is None:
+            return candidates[0]
+        return next((model for model in candidates if model.split(":", 1)[1] in available), None)
+
     async def start(self, thread_id: str, task: str, *, desktop: DesktopSession | None = None) -> AgentRunRecord | str:
-        """Submit `task` as a run for `thread_id`; the record, or why it could not start."""
-        provider = provider_of(self.model_id)
+        """Submit `task` for `thread_id`; the record, or why it could not start."""
+        model_id = await self.select_model()
+        provider = provider_of(model_id)
         if provider is None or not await self.access.prepare(provider):
-            label = provider_label(provider) if provider is not None else self.model_id
-            return f"the agent model ({self.model_id}) needs {label} connected"
+            label = provider_label(provider) if provider is not None else model_id
+            return f"the agent model ({model_id}) needs {label} connected"
         session_id = f"agent-{secrets.token_hex(8)}"
         if desktop is not None:
             self.desktops[session_id] = desktop
-        request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=self.model_id)
+        request = RunRequest(message=task[:TASK_MAX], session_id=session_id, model_id=model_id)
         try:
             state = await self.backend.submit(RunSubmission(RunContext(session_id=session_id, metadata={THREAD_ID: thread_id}), request))
         except RunCapacityError as exc:
@@ -138,6 +219,12 @@ class AgentRuns:
         self.browsers.hold(thread_id)
         self.spawn(self.follow(record.runId))
         return record
+
+    async def start_task(self, title: str, task: str) -> AgentRunRecord | str:
+        """Start `task` on a new thread called `title`, as if typed into Tasks (automations start theirs this way)."""
+        thread = self.storage.create_thread(title[:100])
+        self.storage.add_message(thread.id, "user", task)
+        return await self.start(thread.id, task)
 
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
         task: asyncio.Task[None] = asyncio.create_task(work)
@@ -159,7 +246,9 @@ class AgentRuns:
     def recent(self, since: float) -> list[AgentRunRecord]:
         """This server's live runs, and those that finished at or after `since` (epoch seconds)."""
         live = ("running", "waiting_approval")
-        picked = [run for run in self.runs.values() if run.status in live or run.updatedAt >= since]
+        stored = {run.runId: run for thread in self.storage.list_threads() for run in self.storage.runs(thread.id)}
+        stored.update(self.runs)
+        picked = [run for run in stored.values() if run.status in live or run.updatedAt >= since]
         return sorted(picked, key=lambda run: (run.createdAt, run.runId))
 
     async def shutdown(self) -> None:
@@ -169,10 +258,21 @@ class AgentRuns:
 
     # ------------------------------------------------------------ run events
 
-    async def follow(self, run_id: str) -> None:
+    async def follow(self, run_id: str, *, after: int = 0) -> None:
         try:
-            async for _, event in self.backend.events(run_id):
+            async for _, event in self.backend.events(run_id, after=after):
                 await self.on_event(run_id, event)
+            if self.runs[run_id].status in ("running", "waiting_approval"):
+                raise RuntimeError("Agent event stream ended before the run finished")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Failed to follow agent run %s", run_id)
+            record = self.runs[run_id]
+            if record.status in ("running", "waiting_approval"):
+                message = "The agent stopped unexpectedly. Please try again."
+                await self.update(record, "failed", result=message)
+                await self.notify(record, Notice(run_id, "interrupt", f"[agent {run_id}] failed: {message}"))
         finally:
             await self.browsers.release(self.runs[run_id].threadId)
 
@@ -186,12 +286,22 @@ class AgentRuns:
             started = ToolStartedPayload.model_validate(event.payload)
             phase = activity_label(started.tool_name, started.arguments)
             await self.update(record, "running", phase=phase)
+        elif kind == RUN_RESUMED:
+            await self.update(record, "running", phase=RESUMED_PHASE)
+        elif kind == "reasoning_delta":
+            delta = str(event.payload.get("delta") or "")
+            if delta:
+                await self.show(record.threadId, AgentUpdate(runId=record.runId, task=record.task, status=record.status, reasoning=delta))
+        elif kind == "usage":
+            usage = agent_usage(record.threadId, run_id, AgentUsagePayload.model_validate(event.payload))
+            self.storage.add_usage(usage)
+            await self.show(record.threadId, UsageEvent(usage=usage))
         elif kind == OSMO_WIDGET:
             await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
             asked = ApprovalPayload.model_validate(event.payload)
             await self.update(record, "waiting_approval", phase=asked.summary)
-            request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments)
+            request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments, digest=asked.digest)
             self.asking[run_id] = request
             await self.show(record.threadId, request)
             text = f"[agent {run_id}] needs approval to: {asked.summary}. Ask the user to tap Approve or Deny on screen."
@@ -224,6 +334,12 @@ class AgentRuns:
         if status != "waiting_approval":
             self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
+        if status in ("completed", "failed", "cancelled"):
+            for listener in self.finished:
+                try:
+                    listener(changed)
+                except Exception:  # a listener's bug must not lose the run's own update
+                    log.exception("a run listener failed for %s", changed.runId)
         await self.show(changed.threadId, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
 
     async def show(self, thread_id: str, event: ServerEvent) -> None:
@@ -241,16 +357,43 @@ class AgentRuns:
 class RunList(BaseModel):
     runs: list[AgentRunRecord]
     approvals: list[ApprovalRequest]
+    phases: dict[str, str] = Field(default_factory=dict)
+
+
+class StartAgentRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    threadId: str = Field(min_length=1)
+    task: str = Field(min_length=1, max_length=TASK_MAX, pattern=r"\S")
 
 
 def create_run_router(runs: AgentRuns) -> APIRouter:
-    """`GET /api/runs`: every thread's background runs, for the home screen's Running list."""
+    """List and submit real Symphony background runs."""
     router = APIRouter(prefix="/api/runs")
 
     @router.get("")
     async def list_runs(since: float = Query(0.0, description="Also list runs that finished at or after this time (epoch seconds).")) -> RunList:
         listed = runs.recent(since)
-        return RunList(runs=listed, approvals=[runs.asking[run.runId] for run in listed if run.runId in runs.asking])
+        return RunList(runs=listed, approvals=[runs.asking[run.runId] for run in listed if run.runId in runs.asking], phases={run.runId: runs.phases[run.runId] for run in listed if run.runId in runs.phases})
+
+    @router.post("/start/task", status_code=201)
+    async def start_run(body: StartAgentRun) -> AgentRunRecord:
+        thread = runs.storage.get_thread(body.threadId)
+        if thread is None:
+            raise HTTPException(404, "Thread not found")
+        result = await runs.start(body.threadId, body.task.strip())
+        if isinstance(result, str):
+            raise HTTPException(400, result)
+        runs.storage.add_message(body.threadId, "user", body.task.strip())
+        if thread.title == DEFAULT_THREAD_TITLE:
+            runs.storage.rename_thread(body.threadId, body.task.strip()[:100])
+        return result
+
+    @router.post("/{run_id}/stop")
+    async def stop_run(run_id: str) -> AgentRunRecord:
+        record = await runs.cancel(run_id)
+        if record is None:
+            raise HTTPException(404, "Run not found")
+        return record
 
     return router
 
@@ -277,7 +420,7 @@ class RunAgentTool(Tool):
         super().__init__(
             name="run_agent",
             description=(
-                "Start a background agent for multi-step work (research, comparisons, drafting, pictures). "
+                "Start a background agent for multi-step work (research, comparisons, drafting, pictures, and coding on a repository up to opening a pull request). "
                 "Returns a run_id at once; keep talking. You will be told when it needs approval, fails or is done."
             ),
             parameters=RUN_AGENT_PARAMETERS,

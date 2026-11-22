@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -124,8 +127,11 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert session["turn_detection"] == {"type": "server_vad"}
         names = {tool["name"] for tool in session["tools"]}
         assert names == {
-            "render_widget", "update_widget", "set_voice",
+            "render_widget", "update_widget", "write_code", "set_voice",
             "run_agent", "agent_status", "cancel_agent",
+            "vault_search", "vault_read", "vault_write",
+            "calendar_events", "calendar_add_event", "automation_create",
+            "music_play", "music_control", "music_status",
         }
         assert all(tool["type"] == "function" for tool in session["tools"])
 
@@ -166,6 +172,54 @@ def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: Te
         answer(grok, "Sunny, 72.", "r2")
         assert next_event(ws, "transcript.delta").items() >= {"role": "assistant", "text": "Sunny, 72."}.items()
         wait_listening(ws)
+
+
+def test_grok_string_status_details_does_not_discard_tool_calls(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "show me")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.function_call_arguments.done", "response_id": "r1", "call_id": "c1", "name": "render_widget", "arguments": json.dumps(WEATHER_CARD)})
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed", "status_details": "unimplemented"}})
+        rendered = next_event(ws, "widget.render")["widget"]
+        assert rendered["type"] == "card"
+        assert tool_output(grok)["id"] == rendered["id"]
+
+
+def test_write_code_emits_fenced_markdown_without_creating_a_widget(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "show me a go server")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send(
+            {
+                "type": "response.function_call_arguments.done",
+                "response_id": "r1",
+                "call_id": "c1",
+                "name": "write_code",
+                "arguments": json.dumps({"language": "go", "code": 'package main\nfunc main() {}'}),
+            }
+        )
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+        delta = next_event(ws, "transcript.delta")
+        while delta.get("role") != "assistant" or "```go" not in delta.get("text", ""):
+            delta = next_event(ws, "transcript.delta")
+        assert "package main" in delta["text"]
+        assert tool_output(grok)["shown"] == "go snippet (2 lines)"
+
+
+def test_realtime_reasoning_deltas_are_streamed_to_the_browser(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "think about this")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.reasoning_summary_text.delta", "response_id": "r1", "delta": "Considering options..."})
+        grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "Here is my answer."})
+        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+        reasoning_event = next_event(ws, "transcript.delta")
+        while reasoning_event.get("reasoning") != "Considering options...":
+            reasoning_event = next_event(ws, "transcript.delta")
+        assert reasoning_event["role"] == "assistant"
 
 
 def test_a_model_switch_replays_the_thread(client: TestClient, grok: FakeGrok) -> None:
@@ -217,6 +271,20 @@ def test_widget_action_becomes_a_user_turn(client: TestClient, grok: FakeGrok) -
         widget_id = render(ws, grok, DINNER, "c3")
         ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
         assert asked(grok) == f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"
+
+
+def test_a_widget_takes_one_answer(client: TestClient, grok: FakeGrok) -> None:
+    """Review S4: a repeated (or frame-forged) tap on an answered widget is not another user turn."""
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        first = render(ws, grok, DINNER, "c3")
+        second = render(ws, grok, DINNER, "c4")
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "ramen"}))
+        assert asked(grok) == f"[Tapped on screen] options widget {first}: select -> option 2, Ramen counter"
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "tacos"}))
+        ws.send_text(json.dumps({"type": "widget.action", "id": second, "action": "select", "value": "ramen"}))
+        # The next turn the model hears is the second widget's: the repeat on the first was dropped.
+        assert asked(grok) == f"[Tapped on screen] options widget {second}: select -> option 2, Ramen counter"
 
 
 def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeGrok) -> None:
@@ -298,6 +366,24 @@ def test_barge_in_cancels_the_turn_and_drops_its_late_audio(client: TestClient, 
         assert b"\x20\x00" * 4 not in seen
 
 
+def test_barge_in_recovers_when_cancelled_response_never_finishes(client: TestClient, grok: FakeGrok) -> None:
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        say(grok, "first question")
+        grok.send({"type": "response.created", "response": {"id": "r1"}})
+        grok.send({"type": "response.output_audio_transcript.delta", "response_id": "r1", "delta": "First"})
+        assert heard(ws)["text"] == "first question"
+        assert next_event(ws, "transcript.delta")["text"] == "First"
+        grok.send({"type": "input_audio_buffer.speech_started"})
+        assert next_event(ws, "state")["detail"] == "barge-in"
+        grok.next_of("response.cancel")
+        # Some providers never send response.done for the cancelled response.
+        say(grok, "next question")
+        answer(grok, "Next answer", "r2")
+        assert heard(ws)["text"] == "next question"
+        assert next_event(ws, "transcript.delta")["text"] == "Next answer"
+
+
 def test_interrupt_cancels_the_active_response(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
@@ -364,3 +450,25 @@ def test_core_server_routes_are_mounted(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok) -> None:
+    with make_client(Settings(xai_base_url=grok.base_url, app_token="desktop-secret")) as client:
+        anonymous = client.get("/api/health", headers={"X-Osmo-Desktop-Token": "wrong"})
+        trusted = client.get("/", headers={"X-Osmo-Desktop-Token": "desktop-secret"})
+    assert "x-osmo-desktop-token" not in anonymous.headers
+    assert trusted.headers["x-osmo-desktop-token"] == "desktop-secret"
+    assert trusted.headers["cache-control"] == "no-store"
+
+
+def test_a_malformed_client_event_is_logged_without_what_was_typed(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    with client.websocket_connect("/ws") as ws:
+        # A browser.key without its `code`: pydantic's error would carry the whole event, the typed key included.
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "keyCode": 65}))
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "code": "KeyA", "keyCode": -1}))
+    deadline = time.monotonic() + 2
+    while caplog.text.count("bad client event") < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert caplog.text.count("bad client event") == 2
+    assert "hunter2-secret" not in caplog.text and "'input'" not in caplog.text

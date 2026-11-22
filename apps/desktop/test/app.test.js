@@ -8,11 +8,16 @@ import { SWITCH_ACCELERATOR } from '../src/window-mode.js';
 // src/app.js against a stand-in for Electron: the windows, the session in main, and what each window may ask of it.
 const ORIGIN = 'http://127.0.0.1:18787';
 process.env.OSMO_DESKTOP_URL = ORIGIN;
+// A server the user runs with this token, as `OSMO_DESKTOP_TOKEN=... make server` would.
+const TOKEN = 'launch-secret';
+process.env.OSMO_DESKTOP_TOKEN = TOKEN;
+const requests = [];
+globalThis.fetch = async (url, init) => { requests.push({ url, init }); return { ok: true, json: async () => ({ automations: [], runs: [] }) }; };
 register('./support/electron-hooks.js', import.meta.url);
 
 class FakeSocket {
   static all = [];
-  constructor(url) { this.url = url; this.readyState = 0; this.sent = []; FakeSocket.all.push(this); }
+  constructor(url, protocols) { this.url = url; this.protocols = protocols; this.readyState = 0; this.sent = []; FakeSocket.all.push(this); }
   send(data) { this.sent.push(data); }
   close() { this.readyState = 3; this.closed = true; queueMicrotask(() => this.onclose?.({})); }
   open() { this.readyState = 1; this.onopen?.({}); }
@@ -93,6 +98,7 @@ test('each window may use only its own channels', async () => {
   await assert.rejects(async () => call(orb(), CHANNELS.openThread, 't1'), /Untrusted/);
   await assert.rejects(async () => call(orb(), CHANNELS.audioFrame, new ArrayBuffer(8)), /Untrusted/);
   await assert.rejects(async () => call(workspace(), CHANNELS.audioStarted, {}), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.audioBargeIn), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.start, {}), /Untrusted/);
   await assert.rejects(async () => call(audioWindow(), CHANNELS.send, { type: 'browser.close', id: 'b' }), /Untrusted/);
   await assert.rejects(async () => fake.handlers.get(CHANNELS.audioReady)({ sender: orb().webContents, senderFrame: {} }), /Untrusted/);
@@ -138,6 +144,17 @@ test('a call from the orb continues the workspace\'s open thread, with the mic a
   assert.deepEqual(asked(audioWindow(), CHANNELS.audioPlay), [speech]);
   socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
   assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
+  // The audio renderer's echo guard heard the user over Osmo: main interrupts the answer at once, and does not flush,
+  // so the renderer keeps dropping that answer's late audio until the server's barge-in flushes it.
+  await call(audioWindow(), CHANNELS.audioBargeIn);
+  assert.deepEqual(socket.json().at(-1), { type: 'interrupt' });
+  assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
+  socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
+  assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 2);
+  // The workspace's music player: its state reaches the audio renderer's echo guard as well as the server.
+  await call(workspace(), CHANNELS.send, { type: 'music.state', playing: true, track: null, positionMs: 0, volume: 50, error: null });
+  assert.deepEqual(asked(audioWindow(), CHANNELS.audioMusic).at(-1), true);
+  assert.equal(socket.json().at(-1).type, 'music.state');
 
   // Switching windows changes who is showing, not the call.
   const flushes = asked(audioWindow(), CHANNELS.audioFlush).length;
@@ -187,4 +204,46 @@ test('quitting lets the workspace close', () => {
   let prevented = 0;
   workspace().emit('close', { preventDefault: () => prevented++ });
   assert.equal(prevented, 0);
+});
+
+test('dragging the orb moves its window, keeps it on screen, and the hover box opens from where it now is', async () => {
+  const start = { ...orb().bounds };
+  assert.deepEqual(await call(orb(), CHANNELS.move, { dx: -100, dy: -50 }), { side: 'below', orbLeft: 0 });
+  assert.deepEqual(orb().bounds, { ...start, x: start.x - 100, y: start.y - 50 });
+  await call(orb(), CHANNELS.move, { dx: 9000, dy: 9000 });
+  const area = { x: 0, y: 0, width: 1600, height: 900 };
+  assert.equal(orb().bounds.x + orb().bounds.width, area.x + area.width);
+  assert.equal(orb().bounds.y + orb().bounds.height, area.y + area.height);
+  // The box is open while it moves: the window keeps its room, flipped above at the bottom of the screen.
+  assert.equal((await call(orb(), CHANNELS.box, 200)).side, 'above');
+  await call(orb(), CHANNELS.move, { dx: -9000, dy: -9000 });
+  assert.deepEqual(orb().bounds, { x: area.x, y: area.y, width: 360, height: 112 + 200 });
+  await call(orb(), CHANNELS.box, 0);
+  await assert.rejects(async () => call(workspace(), CHANNELS.move, { dx: 1, dy: 1 }), /Untrusted/);
+  await assert.rejects(async () => call(orb(), CHANNELS.move, { dx: 'far', dy: 1 }), /Invalid/);
+});
+
+test('a tray item keeps automations visible with the window closed, and Osmo never adds itself to the login items', () => {
+  assert.equal(fake.trays.length, 1);
+  const labels = fake.trays[0].menu.map(item => item.label);
+  assert.ok(labels.includes('Open Osmo') && labels.includes('Quit Osmo'));
+  assert.deepEqual(fake.loginItems, []);
+});
+
+test('Widevine (castLabs ECS components) is waited for once at startup', () => {
+  assert.equal(fake.componentsReady, 1);
+});
+
+test('the windows carry the token as an HttpOnly cookie set before any of them loads', () => {
+  assert.deepEqual(fake.cookies, [{ cookie: { url: ORIGIN, name: 'osmo_token', value: TOKEN, httpOnly: true, sameSite: 'strict' }, windowsBefore: 0 }]);
+});
+
+test('main presents the token on every voice socket it opened and every tray request', () => {
+  assert.ok(FakeSocket.all.length > 0);
+  for (const socket of FakeSocket.all) assert.deepEqual(socket.protocols, ['osmo', `osmo-token.${TOKEN}`]);
+  assert.ok(requests.length > 0);
+  for (const { url, init } of requests) {
+    assert.ok(url.startsWith(ORIGIN));
+    assert.equal(init?.headers?.['X-Osmo-Desktop-Token'], TOKEN);
+  }
 });

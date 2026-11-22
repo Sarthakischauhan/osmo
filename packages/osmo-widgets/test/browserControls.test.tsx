@@ -23,10 +23,13 @@ function shown(controls: BrowserControls | undefined, status: "live" | "ended", 
 
 describe("the agent browser in the widget registry", () => {
   it("hands the user's input and its close button to the app, with the widget's id", () => {
-    const controls = { input: vi.fn(), close: vi.fn() };
+    const controls = { input: vi.fn(), close: vi.fn(), takeOver: vi.fn() };
     shown(controls, "live");
     fireEvent.click(screen.getByRole("button", { name: "Close browser" }));
     expect(controls.close).toHaveBeenCalledWith("w-browser");
+    fireEvent.click(screen.getByRole("button", { name: "Take over" }));
+    expect(controls.takeOver).toHaveBeenCalledWith("w-browser", true);
+    fireEvent.click(screen.getByRole("button", { name: "Close fullscreen" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Open fullscreen" }));
     const page = screen.getByRole("dialog").querySelector<HTMLElement>(".osmo-frame-viewport");
@@ -38,12 +41,14 @@ describe("the agent browser in the widget registry", () => {
   it("is a view only without an app to send to", () => {
     shown(undefined, "live");
     expect(screen.queryByRole("button", { name: "Close browser" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open fullscreen" }));
     expect(screen.getByRole("dialog").querySelector(".osmo-frame-viewport")?.getAttribute("tabindex")).toBeNull();
   });
 
   it("is a view only while the app is not connected", () => {
-    shown({ input: vi.fn(), close: vi.fn() }, "live", true);
+    shown({ input: vi.fn(), close: vi.fn(), takeOver: vi.fn() }, "live", true);
     expect(screen.queryByRole("button", { name: "Close browser" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Take over" })).toBeNull();
   });
 });

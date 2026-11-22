@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { HtmlWidget, withCsp } from "../src/html";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { HtmlWidget, withKit } from "../src/html";
+import { OSMO_UI_CSS } from "../src/kit/osmoUi";
 
 afterEach(cleanup);
 
@@ -27,7 +30,11 @@ describe("HtmlWidget", () => {
     }
     const frame = onlyFrame();
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
-    expect(frame.getAttribute("srcdoc")).toContain(`connect-src 'none'`);
+    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    for (const directive of ["default-src 'none'", "connect-src 'none'", "img-src data: blob:", "form-action 'none'", "base-uri 'none'"]) {
+      expect(srcdoc).toContain(directive);
+    }
+    expect(srcdoc).toContain("window.osmo");
     expect(frame.getAttribute("title")).toBe("Tip calculator");
   });
 
@@ -89,10 +96,139 @@ describe("HtmlWidget", () => {
   });
 });
 
-describe("withCsp", () => {
-  it("injects the CSP inside head, after a doctype, or at the start", () => {
-    expect(withCsp("<html><head></head></html>")).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy"/);
-    expect(withCsp("<!doctype html><p>x</p>")).toMatch(/^<!doctype html><meta/);
-    expect(withCsp("<p>x</p>")).toMatch(/^<meta/);
+describe("withKit", () => {
+  it("puts the CSP, kit and bridge first: right after a doctype, or at the start", () => {
+    expect(withKit("<html><head></head></html>", "dark")).toMatch(/^<meta http-equiv="Content-Security-Policy"/);
+    expect(withKit("<!doctype html><p>x</p>", "dark")).toMatch(/^<!doctype html><meta/);
+    expect(withKit("<p>x</p>", "dark")).toMatch(/^<meta/);
+    const kit = withKit("<p>x</p>", "light");
+    expect(kit.indexOf("<style>")).toBeLessThan(kit.indexOf("<p>x</p>"));
+    expect(kit.indexOf("<script>")).toBeLessThan(kit.indexOf("<p>x</p>"));
+    expect(kit).toContain('dataset.theme = "light"');
+  });
+
+  // Review B1: a CSP meta outside <head> is ignored, and a script parsed before the meta runs unrestricted.
+  const leak = '<script>fetch("http://127.0.0.1:8799/leak")</script>';
+  it.each([
+    ["a <header> and no <head>", `<!doctype html><body><header>Today</header>${leak}</body>`],
+    ["a script before <head>", `${leak}<html><head></head><body>hi</body></html>`],
+    ["an ordinary document", `<!doctype html><html><head><title>x</title></head><body>${leak}</body></html>`],
+  ])("puts the CSP in the head before any widget script, for %s", (_case, html) => {
+    const doc = new DOMParser().parseFromString(withKit(html, "dark"), "text/html");
+    const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    expect(csp?.parentElement).toBe(doc.head);
+    expect(doc.head.firstElementChild).toBe(csp);
+    for (const script of Array.from(doc.querySelectorAll("script"))) {
+      expect(csp?.compareDocumentPosition(script) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+  });
+
+  it("defines every class the render_widget description tells the model about", () => {
+    const widgets = readFileSync(join(__dirname, "../../../apps/symphony-server/src/symphony_server/widgets.py"), "utf8");
+    const listed = /instead of inline CSS: "\s*"([^"]+)"\s*"([^"]+)"/.exec(widgets);
+    expect(listed).not.toBeNull();
+    const names = `${listed?.[1]} ${listed?.[2]}`.replace(/\([^)]*\)/g, "").split(/[,.\s]+/).filter(Boolean);
+    expect(names.length).toBeGreaterThan(14);
+    for (const name of names) expect(OSMO_UI_CSS).toMatch(new RegExp(`\\.${name}\\b`));
+  });
+
+  it("uses 8px radius buttons", () => {
+    expect(OSMO_UI_CSS).toContain("--radius-md: 8px");
+    expect(/\.button \{[^}]*border-radius: var\(--radius-md\)/.exec(OSMO_UI_CSS)).not.toBeNull();
+  });
+});
+
+describe("click bridge", () => {
+  const actions = [{ id: "approve", label: "Approve" }];
+  const post = (source: MessageEventSource | null, data: unknown) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data, source }));
+    });
+  // jsdom has no user activation: each test says whether the user just clicked.
+  const activation = (isActive: boolean) => Object.defineProperty(navigator, "userActivation", { value: { isActive, hasBeenActive: isActive }, configurable: true });
+  // The user clicked into the widget's own frame (a real focus on its element), so its activation is theirs.
+  const focusFrame = () => act(() => onlyFrame().focus());
+  beforeEach(() => activation(true));
+  afterEach(() => activation(false));
+
+  it("reports a declared action from its own frame, with the value", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    focusFrame();
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve", value: "yes" });
+    expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, "yes");
+  });
+
+  it("drops undeclared ids, malformed messages and messages from any other window", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    const own = onlyFrame().contentWindow;
+    post(own, { osmo: "action", id: "delete" });
+    post(own, { osmo: "action", id: "approve", extra: 1 });
+    post(own, { osmo: "action", id: "approve", value: "x".repeat(2001) });
+    post(window, { osmo: "action", id: "approve" });
+    post(null, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  // Review S4: a widget script must not answer for the user, and a widget answers once.
+  it("ignores a message the frame posts without a user click", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    focusFrame();
+    activation(false);
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("takes one answer per widget", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={[...actions, { id: "hold", label: "Hold" }]} onAction={onAction} />);
+    focusFrame();
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    post(onlyFrame().contentWindow, { osmo: "action", id: "hold" });
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the frame into fullscreen", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open fullscreen" }));
+    focusFrame();
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, undefined);
+  });
+
+  // Re-review N1: the user's activation must come from a gesture on this widget's own frame.
+  it("ignores a message posted while the user is typing or clicking in Osmo itself, outside the frame", () => {
+    const onAction = vi.fn();
+    render(
+      <>
+        <input aria-label="composer" />
+        <HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />
+      </>,
+    );
+    act(() => screen.getByRole("textbox", { name: "composer" }).focus());
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("does not count focus events a script fakes, nor a frame the user has since left", () => {
+    const onAction = vi.fn();
+    render(
+      <>
+        <input aria-label="composer" />
+        <HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />
+      </>,
+    );
+    act(() => {
+      onlyFrame().dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      window.dispatchEvent(new FocusEvent("blur"));
+    });
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    focusFrame();
+    act(() => screen.getByRole("textbox", { name: "composer" }).focus());
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

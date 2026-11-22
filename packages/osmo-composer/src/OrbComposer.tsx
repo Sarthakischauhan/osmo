@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { GlassOrb } from "./GlassOrb";
 import { orbMode } from "./orbVisual";
 import type { OsmoState } from "./protocol";
@@ -26,14 +26,16 @@ export interface OrbComposerProps {
   picker?: Omit<RadialPickerProps, "orb" | "orbSize" | "onOrbActivate" | "orbLabel">;
   /** Why the picker's models could not be loaded (shown while the app retries). */
   pickerError?: string;
+  /** Optional hover/focus content anchored to the orb. */
+  activity?: ReactNode;
 }
 
 /**
  * The orb: the only input surface. Tap to connect, tap while speaking to
  * interrupt. Shaped as a chat SDK composer so it can drop into that slot later.
  */
-export function OrbComposer({ session, awaitingChoice = false, className, style, picker, pickerError }: OrbComposerProps) {
-  const { connection, state, detail, error, outputLevel } = session;
+export function OrbComposer({ session, awaitingChoice = false, className, style, picker, pickerError, activity }: OrbComposerProps) {
+  const { connection, state, detail, error, outputLevel, inputLevel } = session;
   const shown: OsmoState = connection === "connected" ? state : "idle";
   const mode = orbMode(connection, shown, awaitingChoice);
   const caption =
@@ -46,10 +48,11 @@ export function OrbComposer({ session, awaitingChoice = false, className, style,
     else if (shown === "speaking") session.interrupt();
   };
   const label = shown === "speaking" ? "Interrupt" : connection === "disconnected" ? "Start talking" : "Orb";
-  const orb = <GlassOrb mode={mode} outputLevel={outputLevel} />;
+  const orb = <GlassOrb mode={mode} outputLevel={outputLevel} inputLevel={inputLevel} />;
 
   return (
     <div className={`orb-composer ${className ?? ""}`} style={style} data-state={shown} data-mode={mode} data-connection={connection}>
+      {activity && <div className="orb-activity">{activity}</div>}
       {picker ? (
         <RadialPicker {...picker} orb={orb} orbSize={64} onOrbActivate={onTap} orbLabel={label} />
       ) : (

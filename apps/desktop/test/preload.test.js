@@ -43,9 +43,11 @@ test('each session call goes out on its contract channel', async () => {
   await api.session.openThread('t1');
   await api.orb.showFull();
   await api.orb.setBox(120);
+  await api.orb.move(5, -3);
   assert.deepEqual(invoked, [
     [CHANNELS.snapshot], [CHANNELS.start, { voice: 'eve' }], [CHANNELS.end], [CHANNELS.interrupt],
     [CHANNELS.send, { type: 'browser.close', id: 'b' }], [CHANNELS.openThread, 't1'], [CHANNELS.showFull], [CHANNELS.box, 120],
+    [CHANNELS.move, { dx: 5, dy: -3 }],
   ]);
 });
 
@@ -65,7 +67,7 @@ test('events and status arrive on the contract channels, and each subscription c
 test('the audio renderer gets its own object, and nothing of the session or the windows', () => {
   const { api, exposed } = load('audio-preload.cjs', 'osmoAudio');
   assert.deepEqual(Object.keys(exposed), ['osmoAudio']);
-  assert.deepEqual(Object.keys(api).sort(), ['frame', 'onFlush', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
+  assert.deepEqual(Object.keys(api).sort(), ['bargeIn', 'frame', 'onFlush', 'onMusic', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
 });
 
 test('what the audio renderer sends goes out on the contract channels', async () => {
@@ -75,7 +77,8 @@ test('what the audio renderer sends goes out on the contract channels', async ()
   await api.started({});
   await api.started({ error: 'Permission denied' });
   await api.frame(frame);
-  assert.deepEqual(invoked, [[CHANNELS.audioReady], [CHANNELS.audioStarted, {}], [CHANNELS.audioStarted, { error: 'Permission denied' }], [CHANNELS.audioFrame, frame]]);
+  await api.bargeIn();
+  assert.deepEqual(invoked, [[CHANNELS.audioReady], [CHANNELS.audioStarted, {}], [CHANNELS.audioStarted, { error: 'Permission denied' }], [CHANNELS.audioFrame, frame], [CHANNELS.audioBargeIn]]);
 });
 
 test('what main asks of the audio renderer arrives on the contract channels, and each subscription can be dropped', () => {
@@ -86,12 +89,14 @@ test('what main asks of the audio renderer arrives on the contract channels, and
     api.onStop(() => seen.push('stop')),
     api.onPlay(pcm => seen.push(['play', pcm.byteLength])),
     api.onFlush(() => seen.push('flush')),
+    api.onMusic(playing => seen.push(['music', playing])),
   ];
   listening.get(CHANNELS.audioStart)({}, undefined);
   listening.get(CHANNELS.audioPlay)({}, new ArrayBuffer(960));
   listening.get(CHANNELS.audioFlush)({}, undefined);
+  listening.get(CHANNELS.audioMusic)({}, true);
   listening.get(CHANNELS.audioStop)({}, undefined);
-  assert.deepEqual(seen, ['start', ['play', 960], 'flush', 'stop']);
+  assert.deepEqual(seen, ['start', ['play', 960], 'flush', ['music', true], 'stop']);
   for (const drop of drops) drop();
   assert.equal(listening.size, 0);
 });

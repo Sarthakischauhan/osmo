@@ -15,6 +15,7 @@ export const CHANNELS = Object.freeze({
   send: 'session:send',
   showFull: 'window:show-full',
   box: 'orb:box',
+  move: 'orb:move',
   openThread: 'workspace:thread',
   // main -> windows (send)
   event: 'session:event',
@@ -23,11 +24,14 @@ export const CHANNELS = Object.freeze({
   audioReady: 'audio:ready',
   audioStarted: 'audio:started',
   audioFrame: 'audio:frame',
+  audioBargeIn: 'audio:barge-in',
   // main -> audio renderer (send)
   audioStart: 'audio:start',
   audioStop: 'audio:stop',
   audioPlay: 'audio:play',
   audioFlush: 'audio:flush',
+  // Whether the workspace's music player is playing (its echo guard keeps music from opening turns).
+  audioMusic: 'audio:music',
 });
 
 /**
@@ -55,6 +59,16 @@ const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 const isText = value => typeof value === 'string' && value.length > 0;
 const isFraction = value => typeof value === 'number' && value >= 0 && value <= 1;
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const TRACK_KEYS = ['id', 'source', 'title', 'artist', 'album', 'durationMs', 'art', 'url', 'uri'];
+
+/** A track the music player reports (server protocol.Track); the server validates it again. */
+function validTrack(track) {
+  if (!plain(track) || Object.keys(track).some(key => !TRACK_KEYS.includes(key))) return false;
+  if (!isText(track.id) || !['local', 'spotify'].includes(track.source) || typeof track.title !== 'string' || typeof track.artist !== 'string') return false;
+  return ['album', 'art', 'url', 'uri'].every(key => track[key] == null || typeof track[key] === 'string')
+    && (track.durationMs == null || (Number.isInteger(track.durationMs) && track.durationMs >= 0));
+}
 
 function onlyKeys(value, keys, what) {
   if (!plain(value)) throw new Error(`Invalid ${what}`);
@@ -102,10 +116,30 @@ export function validateClientEvent(value) {
       onlyKeys(value, ['type', 'id'], 'browser close');
       if (!isText(value.id)) throw new Error('Invalid browser close');
       break;
+    case 'browser.takeover':
+      onlyKeys(value, ['type', 'id', 'user'], 'browser takeover');
+      if (!isText(value.id) || typeof value.user !== 'boolean') throw new Error('Invalid browser takeover');
+      break;
+    case 'music.state':
+      onlyKeys(value, ['type', 'playing', 'track', 'positionMs', 'volume', 'error'], 'music state');
+      if (typeof value.playing !== 'boolean' || !Number.isInteger(value.positionMs) || value.positionMs < 0
+          || !Number.isInteger(value.volume) || value.volume < 0 || value.volume > 100
+          || (value.error != null && (typeof value.error !== 'string' || value.error.length > 500))
+          || (value.track != null && !validTrack(value.track))) throw new Error('Invalid music state');
+      break;
     default:
       throw new Error('Unsupported session event');
   }
   return value;
+}
+
+/** A drag of the orb: how far the pointer moved on screen since the last step, px. */
+export function validateOrbMove(value) {
+  onlyKeys(value, ['dx', 'dy'], 'orb move');
+  for (const key of ['dx', 'dy']) {
+    if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || Math.abs(value[key]) > 10000) throw new Error(`Invalid ${key}`);
+  }
+  return { dx: value.dx, dy: value.dy };
 }
 
 /** The orb window's hover box: how tall its content is (0 = closed), at most `BOX_MAX_HEIGHT`. */

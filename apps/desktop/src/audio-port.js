@@ -8,7 +8,7 @@ export const AUDIO_NOT_READY = 'The audio renderer is not running yet. Try again
 const CAPTURE_STOPPED = 'Microphone capture stopped before it started';
 
 /**
- * @param {(channel: string, payload?: ArrayBuffer | Uint8Array) => void} send to the audio renderer
+ * @param {(channel: string, payload?: ArrayBuffer | Uint8Array | boolean) => void} send to the audio renderer
  */
 export function createAudioPort(send) {
   let ready = false;
@@ -42,6 +42,7 @@ export function createAudioPort(send) {
       },
       play: pcm16 => send(CHANNELS.audioPlay, pcm16),
       flush: () => send(CHANNELS.audioFlush),
+      music: playing => send(CHANNELS.audioMusic, playing),
     },
     /** The audio renderer's page is up and listening. */
     ready() { ready = true; },

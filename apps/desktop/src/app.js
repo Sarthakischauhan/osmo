@@ -1,14 +1,16 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, components, session as electronSession, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAudioPort } from './audio-port.js';
-import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
-import { pythonExecutable, startServer } from './server.js';
-import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateStart } from './session-contract.js';
+import { allowMediaKeys, allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
+import { pythonExecutable, socketProtocols, startServer, tokenCookie, withToken } from './server.js';
+import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
+import { createAutomationTray } from './tray.js';
 import { SWITCH_ACCELERATOR, createWindowSwitch } from './window-mode.js';
-import { boxLayout, defaultOrbBounds } from './window-state.js';
+import { boxLayout, defaultOrbBounds, moveOrb } from './window-state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = localAppUrl(process.env.OSMO_DESKTOP_URL);
@@ -26,6 +28,7 @@ export function runApp() {
   let floating;
   let audioWindow;
   let orbBounds;
+  let boxHeight = 0;
   let switcher;
   let quitting = false;
   let enabled = false;
@@ -33,6 +36,9 @@ export function runApp() {
   let busy = false;
   let worker;
   let backend;
+  // This launch's secret for the server (see server.js): kept in memory, never logged or written anywhere.
+  let token;
+  let tray;
 
   const status = () => ({ enabled, platform: process.platform, stopShortcut: STOP_SHORTCUT });
   const live = contents => contents && !contents.isDestroyed();
@@ -54,7 +60,8 @@ export function runApp() {
   };
   const session = createSessionController({
     url: `${origin.replace(/^http/, 'ws')}/ws`,
-    createSocket: url => new WebSocket(url),
+    // The token is known once the server is up; the socket opens only after that.
+    createSocket: url => new WebSocket(url, socketProtocols(token)),
     audio: port,
     desktop: { execute: value => execute(value) },
     onEvent: event => broadcast(CHANNELS.event, event),
@@ -170,13 +177,27 @@ export function runApp() {
   ipcMain.handle(CHANNELS.audioReady, event => { authorize(event, audioWindow); audio.ready(); });
   ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
   ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
-  // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got.
+  // The audio renderer's echo guard heard the user talk over Osmo; it already stopped playback.
+  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.bargedIn(); });
+  // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got;
+  // a drag moves the orb, and the window (with any open box) follows it.
+  const place = () => {
+    const layout = boxLayout(orbBounds, screen.getDisplayMatching(orbBounds).workArea, boxHeight);
+    floating.setBounds(layout.bounds);
+    return { side: layout.side, orbLeft: layout.orbLeft };
+  };
   ipcMain.handle(CHANNELS.showFull, event => { authorize(event, floating); switcher.toFull(); });
   ipcMain.handle(CHANNELS.box, (event, height) => {
     authorize(event, floating);
-    const layout = boxLayout(orbBounds, screen.getDisplayMatching(orbBounds).workArea, validateBoxHeight(height));
-    floating.setBounds(layout.bounds);
-    return { side: layout.side, orbLeft: layout.orbLeft };
+    boxHeight = validateBoxHeight(height);
+    return place();
+  });
+  ipcMain.handle(CHANNELS.move, (event, value) => {
+    authorize(event, floating);
+    const { dx, dy } = validateOrbMove(value);
+    const target = { ...orbBounds, x: orbBounds.x + dx, y: orbBounds.y + dy };
+    orbBounds = moveOrb(orbBounds, screen.getDisplayMatching(target).workArea, dx, dy);
+    return place();
   });
 
   /** The page's own rules for each window: it may not navigate away or open windows. */
@@ -203,11 +224,13 @@ export function runApp() {
       webPreferences: { ...webPreferences, preload: path.join(here, 'audio-preload.cjs'), autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
     });
     const contents = audioWindow.webContents;
-    // Every window shares the default session: its handlers allow the audio renderer's microphone and nothing else.
-    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
-      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin));
-    contents.session.setPermissionRequestHandler((wc, permission, callback, details) =>
-      callback(allowMicrophone(wc, contents, permission, '', details, origin)));
+    // Every window shares the default session: its handlers allow the audio renderer's microphone, Widevine for the
+    // workspace's music player, and nothing else.
+    const allow = (wc, permission, requestingOrigin, details) =>
+      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin)
+      || allowMediaKeys(wc, workspace?.webContents, permission, requestingOrigin, details, origin);
+    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => allow(wc, permission, requestingOrigin, details));
+    contents.session.setPermissionRequestHandler((wc, permission, callback, details) => callback(allow(wc, permission, '', details)));
     secure(audioWindow, { revokeOnNavigation: false });
     // A crashed audio page ends the call rather than leaving a session that cannot hear or speak.
     contents.on('render-process-gone', () => { audio.lost(); session.end(); audioWindow.reload(); });
@@ -252,14 +275,22 @@ export function runApp() {
   else {
     app.on('second-instance', () => switcher?.toFull());
     app.whenReady().then(async () => {
+      // castLabs ECS installs Widevine as a component; Spotify in the music player needs it. Local files play without it,
+      // so a failed install is logged, not fatal.
+      try { await components.whenReady(); }
+      catch (error) { console.warn('Widevine is unavailable; Spotify playback will not work:', String(error)); }
       if (!process.env.OSMO_DESKTOP_URL) {
-        try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin }); }
+        try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin, token: process.env.OSMO_DESKTOP_TOKEN || randomBytes(32).toString('hex') }); }
         catch (error) {
           await dialog.showMessageBox({ type: 'error', message: 'Osmo could not start', detail: String(error) });
           app.quit();
           return;
         }
       }
+      // A server the user runs (OSMO_DESKTOP_URL) has the token only if they gave both the same OSMO_DESKTOP_TOKEN.
+      token = backend?.token ?? process.env.OSMO_DESKTOP_TOKEN;
+      // Before any window loads: every request the windows make carries it, and no page script can read it.
+      if (token) await electronSession.defaultSession.cookies.set(tokenCookie(origin, token));
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { label: 'Osmo', submenu: [{ label: 'Stop computer support', accelerator: STOP_SHORTCUT, click: revoke }, { role: 'quit' }] },
         { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
@@ -276,9 +307,24 @@ export function runApp() {
         void dialog.showMessageBox(workspace, { type: 'warning', message: 'The orb shortcut is unavailable', detail: 'Minimize the window to show the orb, and double-click the orb to come back.' });
       }
       app.on('activate', () => switcher.toFull());
+      // Automations run in the server for as long as the app runs; the tray shows them with the window closed.
+      // Osmo does not add itself to the login items: it runs only after the user opens it.
+      tray = createAutomationTray({
+        request: async (route, init) => {
+          const response = await fetch(`${origin}${route}`, withToken(init, token));
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        },
+        createTray: () => new Tray(appIcon.isEmpty() ? appIcon : appIcon.resize({ width: 16, height: 16 })),
+        buildMenu: template => Menu.buildFromTemplate(template),
+        notify: ({ title, body }) => { if (Notification.isSupported()) new Notification({ title, body, silent: true }).show(); },
+        open: () => switcher.toFull(),
+        openCalendar: () => { switcher.toFull(); void workspace?.loadURL(`${origin}/#calendar`); },
+        quit: () => app.quit(),
+      });
     });
     app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-    app.on('before-quit', () => { quitting = true; revoke(); session.end(); backend?.stop(); });
+    app.on('before-quit', () => { quitting = true; revoke(); session.end(); tray?.stop(); backend?.stop(); });
     app.on('will-quit', () => globalShortcut.unregisterAll());
   }
 }

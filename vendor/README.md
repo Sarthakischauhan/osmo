@@ -9,8 +9,8 @@ not published to PyPI yet.
 | --- | --- |
 | Source repo | https://github.com/Sarthakischauhan/symphony |
 | Source path | `core_server/` |
-| Commit | [`a335957c53009d6c4f82e8176a9abf975b736979`](https://github.com/Sarthakischauhan/symphony/tree/a335957c53009d6c4f82e8176a9abf975b736979/core_server) |
-| Version | `core-server` 0.4.0 |
+| Commit | [`9fb6c8bf2faac74b41bf1b52eb68e6e52946cc31`](https://github.com/Sarthakischauhan/symphony/tree/9fb6c8bf2faac74b41bf1b52eb68e6e52946cc31/core_server) |
+| Version | `core-server` 0.0.1 |
 | License | MIT (`vendor/core_server/LICENSE`, same owner) |
 
 Rules:

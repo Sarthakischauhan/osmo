@@ -72,6 +72,39 @@ const browserKeySchema = z.object({ type: z.literal("browser.key"), key: z.strin
 export const browserInputSchema = z.discriminatedUnion("type", [browserClickSchema, browserScrollSchema, browserKeySchema]);
 export type BrowserInput = z.infer<typeof browserInputSchema>;
 
+/** Something the app's music player can play (server protocol.Track): a local file (`url`) or a Spotify track (`uri`). */
+export const trackSchema = z.object({
+  id: z.string().min(1),
+  source: z.enum(["local", "spotify"]),
+  title: z.string(),
+  artist: z.string(),
+  album: z.string().nullish(),
+  durationMs: z.number().int().nonnegative().nullish(),
+  art: z.string().nullish(),
+  url: z.string().nullish(),
+  uri: z.string().nullish(),
+});
+export type Track = z.infer<typeof trackSchema>;
+
+/** What the app's music player is doing, as it tells the server (`music_status` reads it). */
+export const musicStateSchema = z.object({
+  type: z.literal("music.state"),
+  playing: z.boolean(),
+  track: trackSchema.nullish(),
+  positionMs: z.number().int().nonnegative(),
+  volume: z.number().int().min(0).max(100),
+  error: z.string().max(500).nullish(),
+});
+export type MusicState = z.infer<typeof musicStateSchema>;
+
+export const musicCommandSchema = z.object({
+  type: z.literal("music.command"),
+  action: z.enum(["play", "pause", "resume", "next", "previous", "volume"]),
+  tracks: z.array(trackSchema).default([]),
+  volume: z.number().int().min(0).max(100).nullish(),
+});
+export type MusicCommand = z.infer<typeof musicCommandSchema>;
+
 export const clientEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("session.start"),
@@ -102,10 +135,33 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   browserScrollSchema.extend({ id: widgetIdSchema }),
   browserKeySchema.extend({ id: widgetIdSchema }),
   z.object({ type: z.literal("browser.close"), id: widgetIdSchema }),
+  z.object({ type: z.literal("browser.takeover"), id: widgetIdSchema, user: z.boolean() }),
+  musicStateSchema,
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
+/**
+ * One model response's tokens and price (server usage.py). `cachedTokens` and `costUsd` are absent
+ * when the provider did not report them or the model has no catalog price: shown as n/a, never guessed.
+ */
+export const usageRecordSchema = z.object({
+  threadId: z.string(),
+  runId: z.string().nullish(),
+  source: z.enum(["voice", "agent"]),
+  model: z.string(),
+  inputTokens: z.number().int().nonnegative(),
+  cachedTokens: z.number().int().nonnegative().nullish(),
+  outputTokens: z.number().int().nonnegative(),
+  reasoningTokens: z.number().int().nonnegative().default(0),
+  costUsd: z.number().nonnegative().nullish(),
+  estimated: z.boolean().default(false),
+  createdAt: z.number(),
+});
+export type UsageRecord = z.infer<typeof usageRecordSchema>;
+
 export const serverEventSchema = z.discriminatedUnion("type", [
+  // `music_play` / `music_control`: what the app's music player should do.
+  musicCommandSchema,
   z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
   z.object({
@@ -116,6 +172,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     // the whole text. An utterance's empty delta opens its bubble when speech stops.
     itemId: z.string().optional(),
     final: z.boolean().optional(),
+    reasoning: z.string().optional(),
   }),
   // The spec's payload is (id, type, props); it is nested under `widget`
   // because `type` is already the event discriminator.
@@ -145,6 +202,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     task: z.string(),
     status: agentRunStatusSchema,
     phase: z.string().nullish(),
+    reasoning: z.string().nullish(),
     result: z.string().nullish(),
   }),
   // An agent run waits for the user: answer with `POST /api/approvals/{approvalId}`.
@@ -154,9 +212,13 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     runId: z.string(),
     tool: z.string(),
     summary: z.string(),
+    // All of the step's arguments (JSON), never cut, and their SHA-256 (absent from servers before it was sent).
     arguments: z.string(),
+    digest: z.string().optional(),
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string(), runId: z.string(), approved: z.boolean() }),
+  // A voice response or agent turn on this thread used tokens; the usage dialog ticks.
+  z.object({ type: z.literal("usage"), usage: usageRecordSchema }),
   // Answer to a `voice.preview` request: base64 PCM16 (24 kHz mono, ~2 s) or an error.
   z.object({
     type: z.literal("voice.preview"),

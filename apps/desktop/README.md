@@ -18,8 +18,13 @@ OSMO_DESKTOP_VISION_MODEL=openai:gpt-4.1 bun run desktop
 ```
 
 The app starts a loopback Python server, serves the built web UI, and stops its server on quit.
-If a server already runs at `127.0.0.1:8787`, it is reused and left running on quit. Configure that
-server with `OSMO_TOOLS=osmo,search,image,desktop` and `OSMO_DESKTOP_VISION_MODEL` yourself.
+It generates a secret token per launch and hands it to that process on stdin (never in its environment,
+never logged). A server already running on the port is reused only when it echoes that same token; another
+healthy local server is not trusted with native access. The server then answers only requests carrying the
+token: the windows get it as an HttpOnly, SameSite=Strict session cookie set before they load, main's voice
+socket as a WebSocket subprotocol and its tray requests as the `X-Osmo-Desktop-Token` header. So neither a web
+page, a page in the agent's browser nor a script the agent runs can call the API. With `OSMO_DESKTOP_URL` the
+app uses `OSMO_DESKTOP_TOKEN` if you set it for both.
 Connect the voice and vision providers through the existing Providers UI. No keys go into Electron.
 `openai:gpt-4.1` is an example image-capable text model; any compatible connected core_ai model can
 be selected. A realtime voice model is not a vision model.
@@ -127,6 +132,26 @@ PyAutoGUI dependencies are included. The packaged app uses that runtime unless
 once so local builds are signed with a stable self-signed identity
 ([docs/desktop-signing.md](../../docs/desktop-signing.md)). Developer ID signing, notarization, and
 automatic updates are still follow-up release work.
+
+### Music and Widevine
+
+The app runs on castLabs' [Electron for Content Security](https://github.com/castlabs/electron-releases)
+(`v45.2.1+wvcus`, the `electron` dependency points at its release), which adds the Widevine CDM that
+Spotify's Web Playback SDK needs. The CDM downloads on first start; the app waits for it before opening
+the window, and only grants the protected-media permission to Spotify's player in Osmo's own window.
+
+Widevine also wants the packed app VMP-signed by castLabs EVS, which `scripts/vmp-sign.cjs` does as
+electron-builder's `afterPack` hook, after packing and before codesign. Once per machine:
+
+```sh
+python3 -m pip install --upgrade castlabs-evs
+python3 -m castlabs_evs.account signup   # or: reauth, for an existing account
+```
+
+EVS keeps its tokens in its own config, never in this repository. Linux has no VMP and skips the step;
+`OSMO_VMP_SIGN=skip` packs without it for a local test build (Widevine may then refuse Spotify), and
+`OSMO_VMP_PYTHON` picks the Python that has `castlabs-evs`. A dev run (`bun run dev`) is unsigned too:
+local files play, Spotify may not.
 
 `OSMO_DESKTOP_URL` attaches to an already-running loopback HTTP origin and disables managed server
 startup; remote origins are rejected. `OSMO_DESKTOP_PYTHON` overrides the Python used for both

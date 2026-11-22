@@ -6,8 +6,8 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "core-server",
-    "symphony-core==0.0.4",
-    "symphony-harness",
+    "symphony-core==0.0.7",
+    "symphony-harness==0.0.7",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=13.0",
@@ -17,6 +17,17 @@ dependencies = [
     "cryptography>=43",
     "infisicalsdk>=1.0.17",
     "langfuse==5.0.4",
+    # Note vaults: the file watcher that keeps the search index fresh.
+    "watchfiles>=1.0",
+    # The local calendar: RRULE expansion and .ics import/export; tzdata gives zoneinfo its zones where the OS has none.
+    "python-dateutil>=2.9",
+    "icalendar>=6.1",
+    "tzdata>=2024.1",
+    # Tags and cover art of the user's music files.
+    "mutagen>=1.47",
+    # Host names as Chrome encodes them (IDNA2008, UTS #46), for the browser's site rules and network guard.
+    # 3.7 is the first release without the quadratic-time encode (CVE-2024-3651).
+    "idna>=3.7,<4",
 ]
 
 [project.scripts]
@@ -28,6 +39,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "mypy>=1.13",
+    "types-python-dateutil>=2.9",
 ]
 
 [build-system]
@@ -47,20 +59,18 @@ untyped_calls_exclude = ["core_ai.registry"]
 
 # infisicalsdk ships no type information (no py.typed); the store types the slice it uses as Protocols.
 [[tool.mypy.overrides]]
-module = ["infisical_sdk", "infisical_sdk.*"]
+module = ["infisical_sdk", "infisical_sdk.*", "mutagen", "mutagen.*"]
 ignore_missing_imports = true
 
 
-# symphony-core (imported as core_ai) is the PyPI release pinned in dependencies. core-server and
-# symphony-harness list symphony-core too, and uv takes their `{ workspace = true }` source for it from the
-# symphony checkout they come from, which would lock it to that git rev; the override makes every
-# requirement for it the PyPI release. `uv sync` resolves symphony-harness at the symphony rev
-# requirements.txt pins (its 0.0.1 on PyPI is not that code). core-server comes from the same rev (its
-# core_server is byte-identical to the vendored a335957 copy), because the vendored pyproject's
-# `{ workspace = true }` sources only resolve inside symphony's workspace.
+# symphony-core (imported as core_ai) and symphony-harness are the PyPI 0.0.7 releases pinned in
+# dependencies. core-server lists both too, and uv takes their `{ workspace = true }` sources from the
+# symphony checkout it comes from, which would lock them to that git rev; the override makes every
+# requirement for them the PyPI release. core-server comes from the symphony rev whose core_server is
+# byte-identical to the vendored copy, because the vendored pyproject's `{ workspace = true }` sources
+# only resolve inside symphony's workspace.
 [tool.uv]
-override-dependencies = ["symphony-core==0.0.4"]
+override-dependencies = ["symphony-core==0.0.7", "symphony-harness==0.0.7"]
 
 [tool.uv.sources]
-core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_server" }
-symphony-harness = { git = "https://github.com/Sarthakischauhan/symphony", rev = "c69034780524a6093ee598bbeba67aba8c66226b", subdirectory = "core_harness" }
+core-server = { git = "https://github.com/Sarthakischauhan/symphony", rev = "9fb6c8bf2faac74b41bf1b52eb68e6e52946cc31", subdirectory = "core_server" }

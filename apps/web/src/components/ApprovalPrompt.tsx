@@ -8,6 +8,9 @@ export interface ApprovalPromptProps {
 }
 
 const TIME = { hour: "numeric", minute: "2-digit" } as const;
+// Arguments up to this long show in full on the card; longer ones fold behind their size and digest, and expand.
+export const ARGUMENTS_INLINE_MAX = 240;
+const DIGEST_SHOWN = 12;
 
 /** A background agent's risky step, in the feed: Approve / Deny, then one line once answered. */
 export function ApprovalPrompt({ turn, step, onDecide }: ApprovalPromptProps) {
@@ -22,9 +25,18 @@ export function ApprovalPrompt({ turn, step, onDecide }: ApprovalPromptProps) {
   return (
     <div id={`approval-${turn.approvalId}`} className="osmo-approval" role="group" aria-live="polite" aria-label="Approval needed">
       <p className="osmo-approval-title">{step === undefined || step === 0 ? `Approve ${turn.summary.toLowerCase()}?` : `Approve step ${step}?`}</p>
-      <p className="osmo-approval-call">
-        {turn.tool} {turn.arguments}
-      </p>
+      {turn.arguments.length <= ARGUMENTS_INLINE_MAX ? (
+        <p className="osmo-approval-call">
+          {turn.tool} {turn.arguments}
+        </p>
+      ) : (
+        <details className="osmo-approval-call">
+          <summary>
+            {turn.tool} · {turn.arguments.length} characters{turn.digest ? ` · sha256 ${turn.digest.slice(0, DIGEST_SHOWN)}` : ""} · show all
+          </summary>
+          <pre className="osmo-approval-arguments">{turn.arguments}</pre>
+        </details>
+      )}
       <div className="osmo-approval-actions">
         <button type="button" className="osmo-btn osmo-btn-primary" onClick={() => onDecide(true)}>
           Approve

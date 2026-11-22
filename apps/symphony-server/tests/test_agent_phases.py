@@ -12,7 +12,7 @@ from test_browser import HoldingAgent
 from test_session import call, next_event, say, tool_output
 
 from symphony_server.agents import AgentRuns, Notice
-from symphony_server.browser import BrowserSessions
+from symphony_server.browser_sessions import BrowserSessions
 from symphony_server.canvas import WidgetBoard
 from symphony_server.protocol import AgentUpdate, ServerEvent
 from symphony_server.storage import AgentRunRecord, SQLiteStorage
@@ -41,6 +41,19 @@ def runs_with_observer() -> tuple[AgentRuns, Observer]:
     observer = Observer()
     runs.observe("t1", observer)
     return runs, observer
+
+
+async def test_unexpected_agent_stream_end_marks_run_failed() -> None:
+    class EmptyBackend:
+        async def events(self, run_id: str):  # type: ignore[no-untyped-def]
+            if False:
+                yield run_id
+
+    runs, observer = runs_with_observer()
+    runs.backend = cast(Any, EmptyBackend())
+    await runs.follow("r1")
+    assert runs.runs["r1"].status == "failed"
+    assert observer.told and "stopped unexpectedly" in observer.told[0].text
 
 
 async def test_a_tool_start_updates_the_widget_and_tells_the_voice_model_nothing() -> None:

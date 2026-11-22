@@ -1,99 +1,87 @@
 <p align="center">
-  <img src="docs/osmo-orb.svg" alt="Osmo orb" width="200" />
+  <img src="docs/osmo-orb.svg" alt="Osmo" width="180" />
 </p>
 
-# Osmo
+<h1 align="center">Osmo</h1>
 
-**A voice-first AI assistant that can talk, show its work, and help you act.**
+<p align="center"><strong>Think out loud. Put ideas to work.</strong></p>
 
-Talk to Osmo naturally. It can respond out loud, bring results into an interactive canvas, and hand longer tasks to a background agent while you keep the conversation going. Use it in the browser, or run the desktop app for an always-on-top orb and opt-in computer support.
+<p align="center">A voice-first AI assistant for your conversations, research, notes, and everyday tasks.<br />Talk naturally, see results on an interactive canvas, and keep going while Osmo works in the background.</p>
 
-The idea is a **Muse**: an assistant you can think with and work alongside—not just a text box you send prompts to.
+<p align="center">
+  <a href="docs/getting-started.md"><strong>Get started</strong></a> ·
+  <a href="apps/desktop/README.md">Desktop app</a> ·
+  <a href="docs/configuration.md">Configuration</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
-[Run locally](#run-locally) · [Desktop setup](apps/desktop/README.md) · [Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md)
+## An assistant to think with—and work alongside
 
-## What you can do
+Osmo is building toward a **Muse**: an assistant that feels like part of your workspace, not another prompt box. Start with a conversation. Turn it into research, a note, a scheduled task, or a change to your code. Hear the answer when that is enough; open the canvas when you need to see and interact with the work.
 
-- **Have a live voice conversation.** Speak, hear responses, and interrupt Osmo when you want to take the conversation somewhere else.
-- **See more than a transcript.** Interactive widgets put results and actions alongside the conversation, rather than leaving everything in spoken answers.
-- **Keep talking while work runs.** A background agent handles web search and, when enabled, browser tasks. Follow its progress, approve requested actions, or cancel the run.
-- **Work with a visible browser.** The optional browser widget streams the agent's page and lets you take over by clicking, scrolling, and typing in fullscreen.
-- **Get help on your desktop.** With explicit opt-in, the Electron app can inspect your primary screen and use mouse, keyboard, and scroll tools.
-- **Return to a thread.** Create, reopen, rename, fork, and delete conversations. Configure a SQLite file to keep history across server restarts.
+### Speak naturally. Keep your train of thought.
 
-**Current scope:** live voice uses xAI's Realtime API. Other connected providers can serve supported agent, image, and vision models; they are not interchangeable voice backends. Desktop support requires OS permissions and a connected vision model. See the [desktop guide](apps/desktop/README.md) for platform and packaging limits.
+Have a live voice conversation and interrupt when you want to change direction. Osmo pairs spoken answers with transcripts and interactive widgets, so useful results do not disappear when the audio ends.
 
-## Run locally
+### Delegate the work, not the conversation.
 
-You need [Bun](https://bun.sh/), [uv](https://docs.astral.sh/uv/), and an xAI API key for live voice. The install target creates a Python 3.12 environment through uv.
+Send research and browser tasks to a background agent while you keep talking. Follow progress in Tasks, review actions that need approval, or take over the browser yourself. Recoverable runs resume after a server restart rather than silently losing their place.
 
-```sh
-git clone https://github.com/Sarthakischauhan/osmo.git
-cd osmo
-make install
-```
+### Bring your day into the same workspace.
 
-Start the server and web client in separate terminals:
+Search and edit local Markdown notes. Keep events in a calendar and schedule automations that start a task, send a notification, or append to a note. Play local music—or connect Spotify in the desktop app—with playback that quiets down while Osmo speaks.
 
-```sh
-# Terminal 1
-make dev-server
-```
+### Go from a request to a pull request.
 
-```sh
-# Terminal 2
-make dev-web
-```
+On macOS, the coding agent can work in its own repository workspace, make changes, and propose a pull request for your approval. Describe the change you want without leaving the conversation.
 
-Open **http://localhost:5173**, connect xAI in the app's **Providers** panel, and start a voice session with the orb. Keys are stored server-side; setting `XAI_API_KEY` in your shell does not connect the provider.
+### Stay close, without taking over your screen.
 
-The server listens on `127.0.0.1:8787`. The web development server proxies requests to it.
+Use Osmo in the browser or as a desktop app with a compact, always-on-top orb. When you explicitly enable computer support, it can inspect your primary screen and help with mouse and keyboard actions. You stay in control of when that access starts and stops.
 
-### Desktop
+## Try a conversation
 
-The Electron app uses the same voice experience, with a compact orb window and optional computer support. Start with the [desktop setup guide](apps/desktop/README.md) for dependencies, launch commands, permissions, and stop controls.
+> “Research this topic while we talk through the options.”
+>
+> “Find my notes about the launch and help me draft the next steps.”
+>
+> “Open a PR on owner/repo that fixes the typo in the README.”
+>
+> “Look at my screen and help me find the browser settings.”
 
-### Configuration and safety
+Available actions depend on the providers and optional tools you connect. Computer support requires native consent and a vision model; coding tools currently require macOS. Spotify playback requires Premium and desktop setup.
 
-- **Credentials:** the default secret store is a local Fernet-encrypted file. Infisical is also supported.
-- **Persistence:** set `OSMO_DATABASE_FILE` to a SQLite file path to retain threads and runs across restarts. Without it, the database is in memory.
-- **Browser tools:** opt in with `OSMO_TOOLS` and `OSMO_BROWSER_PATH`. Agent clicks and typing require approval by default.
-- **Computer support:** requires native consent. It can send real input to your desktop; it does not enforce a separate approval dialog for every action. Review the [controls and limits](apps/desktop/README.md#use) before enabling it.
-
-See [configuration](docs/configuration.md) for provider storage, Infisical setup, model selection, browser lifecycle, approvals, and tracing.
-
-## How it fits together
-
-Osmo is the assistant experience built around two reusable projects:
-
-| Layer | Role |
-| --- | --- |
-| [Symphony](https://github.com/Sarthakischauhan/symphony) | Agent execution, tool orchestration, and structured events. |
-| [Chat SDK](https://github.com/Sarthakischauhan/chat-sdk) | Conversation rendering and protocol-driven interactive UI. |
-| Osmo | Voice capture and playback, the orb, widgets, and the web and desktop apps. |
-
-The client captures speech and streams it to Osmo's Python server. The server connects to xAI Realtime for voice, coordinates tool calls and background agents, and sends audio, transcripts, activity, and widget events back to the client.
+## One workspace, several ways to work
 
 ```mermaid
 flowchart LR
-  Client[Osmo web or desktop] <-->|Audio and session events| Server[Osmo Python server]
-  Server <-->|Live voice| Voice[xAI Realtime]
-  Server <-->|Agent runs and tools| Symphony[Symphony]
-  Client --- SDK[Chat SDK and Osmo widgets]
+  You[Your voice] --> Osmo[Osmo]
+  Osmo <--> Canvas[Conversation and interactive canvas]
+  Osmo <--> Tasks[Research, browser and coding tasks]
+  Osmo <--> Day[Notes, calendar and automations]
+  Osmo <--> Desktop[Opt-in computer support]
 ```
 
-The boundary is deliberate: agent execution stays on the server; the client turns structured events into a conversation you can hear, see, and interact with. The current voice connection is xAI-specific, while the agent and UI layers remain separate.
+## Get started
 
-## Development
+Osmo currently runs from source. You will need **Bun**, **uv**, and a provider connection; an **xAI API key** is the default path for live voice.
 
-After `make install`:
+**[Run Osmo locally →](docs/getting-started.md)**
 
-```sh
-make typecheck     # TypeScript checks
-make test          # Frontend tests
-make build         # Production web build
-make server-check  # Python type checks
-make server-test   # Python tests
-```
+Install dependencies, start the web app and server, and connect your provider.
 
-Tests use mocked providers and do not require API keys. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and architecture notes.
+**[Set up the desktop app →](apps/desktop/README.md)**
+
+Launch the orb, configure computer support, and review OS permissions and packaging limits.
+
+## Built on Symphony and Chat SDK
+
+[Symphony](https://github.com/Sarthakischauhan/symphony) powers agent execution and tools. [Chat SDK](https://github.com/Sarthakischauhan/chat-sdk) brings the conversation and interactive UI together. Osmo makes them a voice-first workspace.
+
+For the implementation rather than the tour:
+
+- [Architecture](docs/architecture.md) — packages, session flow, and execution boundaries.
+- [Configuration](docs/configuration.md) — providers, storage, tools, approvals, and integrations.
+- [Contributing](CONTRIBUTING.md) — development setup and checks.
+
+**Before enabling tools:** browser actions, coding tasks, and computer support can affect real websites, repositories, and your desktop. Review [approvals and browser controls](docs/configuration.md#approvals-and-status) and [desktop controls and limits](apps/desktop/README.md#use). Approval prompts do not undo actions already taken.
