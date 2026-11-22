@@ -37,7 +37,7 @@ export interface EchoGuardOptions {
 }
 
 /** Favor preserving quiet speech over aggressive echo suppression; provider VAD still decides turn boundaries. */
-export const ECHO_GUARD: EchoGuardOptions = { floor: 0.012, ratio: 0.35, blocks: 2, blockMs: 50, tailMs: 0, preroll: 5, musicFloor: 0.035, musicHangMs: 1000 };
+export const ECHO_GUARD: EchoGuardOptions = { floor: 0.012, ratio: 0.35, blocks: 3, blockMs: 50, tailMs: 0, preroll: 5, musicFloor: 0.045, musicHangMs: 1000 };
 
 /** Root mean square of samples (0..1). */
 export function rms(samples: Float32Array, start = 0, end = samples.length): number {
