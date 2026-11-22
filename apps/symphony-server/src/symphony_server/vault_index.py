@@ -22,7 +22,7 @@ from typing import Any
 from pydantic import BaseModel
 from watchfiles import Change, awatch
 
-from symphony_server.vault_paths import NOFOLLOW, NOTE_BYTES_MAX, NOTE_SUFFIX, SKIPPED_DIRS, Vault, VaultError, WriteMode, ends_without_newline, relative_name, resolve_note
+from symphony_server.vault_paths import NOTE_BYTES_MAX, NOTE_SUFFIX, SKIPPED_DIRS, Vault, VaultError, WriteMode, ends_without_newline, open_note, relative_name, resolve_note
 
 
 SEARCH_LIMIT_MAX = 25
@@ -184,9 +184,8 @@ class VaultIndex:
     def index_file(self, vault: Vault, relative: str) -> None:
         """(Re)index one note; drops it when it is gone or no longer a note inside the vault."""
         try:
-            path = resolve_note(vault.root, relative)
-            stat = path.stat()
-            with path.open("rb") as handle:
+            with os.fdopen(open_note(vault.root, relative, os.O_RDONLY), "rb") as handle:
+                stat = os.fstat(handle.fileno())
                 text = handle.read(NOTE_BYTES_MAX).decode("utf-8", errors="replace")
         except (VaultError, OSError):
             self.drop(vault, relative)
@@ -269,42 +268,41 @@ class VaultIndex:
         return [row[0] for row in rows]
 
     def read(self, relative: str, vault: str | None = None) -> Note:
-        """The note `relative` of a vault, read through `resolve_note`; VaultError when it cannot be."""
+        """The note `relative` of a vault, read through `open_note`; VaultError when it cannot be."""
         chosen = self.vault(vault)
         path = resolve_note(chosen.root, relative)
         try:
-            if path.stat().st_size > NOTE_BYTES_MAX:
-                raise VaultError(f"{relative!r} is larger than {NOTE_BYTES_MAX // 1000} kB")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            with os.fdopen(open_note(chosen.root, relative, os.O_RDONLY), "rb") as handle:
+                status = os.fstat(handle.fileno())
+                if status.st_size > NOTE_BYTES_MAX:
+                    raise VaultError(f"{relative!r} is larger than {NOTE_BYTES_MAX // 1000} kB")
+                text = handle.read().decode("utf-8", errors="replace")
         except FileNotFoundError as exc:
             raise VaultError(f"no note {relative!r} in vault {chosen.name!r}") from exc
         clean = relative_name(chosen.root, path)
-        return Note(vault=chosen.name, path=clean, title=note_title(clean, text), text=text, modified=path.stat().st_mtime, backlinks=self.backlinks(chosen, clean))
+        return Note(vault=chosen.name, path=clean, title=note_title(clean, text), text=text, modified=status.st_mtime, backlinks=self.backlinks(chosen, clean))
 
     def write(self, relative: str, text: str, mode: WriteMode, vault: str | None = None) -> Note:
-        """Create, replace or append to a note. The final path component is opened with O_NOFOLLOW."""
+        """Create, replace or append to a note, opened through `open_note` (no symlink anywhere, no hard link)."""
         chosen = self.vault(vault)
         if len(text.encode("utf-8")) > NOTE_BYTES_MAX:
             raise VaultError(f"a note may be at most {NOTE_BYTES_MAX // 1000} kB")
         path = resolve_note(chosen.root, relative)
-        flags = os.O_WRONLY | os.O_CREAT | NOFOLLOW
+        flags = os.O_RDWR | os.O_CREAT
         if mode == "create":
             flags |= os.O_EXCL
         elif mode == "replace":
             flags |= os.O_TRUNC
         else:
             flags |= os.O_APPEND
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # The folders were just made inside the vault: check again that nothing on the way is a symlink out.
-        resolve_note(chosen.root, relative)
         try:
-            fd = os.open(path, flags, 0o644)
+            fd = open_note(chosen.root, relative, flags)
         except FileExistsError as exc:
             raise VaultError(f"{relative!r} already exists; replace or append to it instead") from exc
         except OSError as exc:
             raise VaultError(f"could not write {relative!r}: {exc.strerror}") from exc
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            if mode == "append" and ends_without_newline(path) and not text.startswith("\n"):
+            if mode == "append" and ends_without_newline(fd) and not text.startswith("\n"):
                 handle.write("\n")
             handle.write(text)
         clean = relative_name(chosen.root, path)
