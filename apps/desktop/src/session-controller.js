@@ -16,6 +16,7 @@ const OPEN = 1;
  * @property {() => void} stop
  * @property {(pcm16: ArrayBuffer | Uint8Array) => void} play
  * @property {() => void} flush drop everything queued for playback
+ * @property {(playing: boolean) => void} music whether the music player is playing (the echo guard weighs it)
  */
 
 /** @returns {import('./session-contract.js').SessionSnapshot} */
@@ -149,8 +150,19 @@ export function createSessionController({ url, createSocket, audio, desktop, onE
       sendJson(socket, { type: 'interrupt' });
     },
 
+    /**
+     * The audio renderer's echo guard heard the user over Osmo and already cut playback: interrupt the answer, but
+     * do not flush, so the renderer keeps dropping that answer's audio until the server's barge-in flushes it.
+     */
+    bargedIn() {
+      if (!socket) return;
+      sendJson(socket, { type: 'interrupt' });
+    },
+
     /** An already validated event from a renderer, passed on to Symphony. */
     send(event) {
+      // The music player's state reaches the echo guard with or without a call (the next call starts with it).
+      if (event.type === 'music.state') audio.music(event.playing);
       if (!socket) return;
       if (event.type === 'widget.action') audio.flush();
       sendJson(socket, event);

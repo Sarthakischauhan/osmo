@@ -178,7 +178,7 @@ export function runApp() {
   ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
   ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
   // The audio renderer's echo guard heard the user talk over Osmo; it already stopped playback.
-  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.interrupt(); });
+  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.bargedIn(); });
   // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got;
   // a drag moves the orb, and the window (with any open box) follows it.
   const place = () => {

@@ -15,6 +15,8 @@ export interface AudioBridge {
   onPlay(callback: (pcm16: ArrayBuffer) => void): () => void;
   /** Drop everything queued for playback (barge-in). */
   onFlush(callback: () => void): () => void;
+  /** The workspace's music player started or stopped playing. */
+  onMusic(callback: (playing: boolean) => void): () => void;
 }
 
 declare global { interface Window { osmoAudio?: AudioBridge } }

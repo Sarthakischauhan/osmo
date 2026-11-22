@@ -12,6 +12,8 @@ export interface AudioRuntime {
   stop(): void;
   enqueue(pcm16: ArrayBuffer): void;
   flush(): void;
+  /** Whether the workspace's music player is playing (the echo guard keeps it out of the server's VAD). */
+  music(playing: boolean): void;
 }
 
 /** The page's audio, on one 24 kHz context: playing and capturing share it so echo cancellation hears what it plays. */
@@ -20,14 +22,16 @@ export function browserRuntime(): AudioRuntime {
   const mic = new MicCapture(context);
   const player = new PcmPlayer(context, () => undefined);
   const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
+  let music = false;
   return {
     async start(onFrame, onBargeIn) {
       await context.resume();
       await mic.start((frame) => {
-        const step = guard.push(frame, player.playing, player.rms(), performance.now());
+        const step = guard.push(frame, player.playing, player.rms(), performance.now(), music);
         if (step.bargeIn) {
-          // Cut Osmo off here and now, before main and the server hear about it.
-          player.flush();
+          // Cut Osmo off here and now, before main and the server hear about it; the rest of that answer still on its
+          // way is dropped until main passes on the server's barge-in (a flush).
+          player.cut();
           onBargeIn();
         }
         for (const held of step.send) onFrame(held);
@@ -40,6 +44,9 @@ export function browserRuntime(): AudioRuntime {
     },
     enqueue: (pcm16) => player.enqueue(pcm16),
     flush: () => player.flush(),
+    music: (playing) => {
+      music = playing;
+    },
   };
 }
 
@@ -49,6 +56,8 @@ export function browserRuntime(): AudioRuntime {
  */
 export function runAudioRenderer(bridge: AudioBridge, open: () => AudioRuntime): void {
   let runtime: AudioRuntime | undefined;
+  // The music player's last word, kept for the next call's runtime.
+  let music = false;
 
   const release = () => {
     const current = runtime;
@@ -60,6 +69,8 @@ export function runAudioRenderer(bridge: AudioBridge, open: () => AudioRuntime):
     release();
     const current = open();
     runtime = current;
+    // A runtime starts with no music; tell it only when there is.
+    if (music) current.music(true);
     try {
       await current.start(bridge.frame, bridge.bargeIn);
     } catch (cause) {
@@ -76,5 +87,9 @@ export function runAudioRenderer(bridge: AudioBridge, open: () => AudioRuntime):
   bridge.onStop(release);
   bridge.onPlay((pcm16) => runtime?.enqueue(pcm16));
   bridge.onFlush(() => runtime?.flush());
+  bridge.onMusic((playing) => {
+    music = playing;
+    runtime?.music(playing);
+  });
   bridge.ready();
 }

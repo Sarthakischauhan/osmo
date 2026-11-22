@@ -144,10 +144,17 @@ test('a call from the orb continues the workspace\'s open thread, with the mic a
   assert.deepEqual(asked(audioWindow(), CHANNELS.audioPlay), [speech]);
   socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
   assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
-  // The audio renderer's echo guard heard the user over Osmo: main interrupts the answer at once.
+  // The audio renderer's echo guard heard the user over Osmo: main interrupts the answer at once, and does not flush,
+  // so the renderer keeps dropping that answer's late audio until the server's barge-in flushes it.
   await call(audioWindow(), CHANNELS.audioBargeIn);
   assert.deepEqual(socket.json().at(-1), { type: 'interrupt' });
+  assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 1);
+  socket.message(JSON.stringify({ type: 'state', state: 'listening', detail: 'barge-in' }));
   assert.equal(asked(audioWindow(), CHANNELS.audioFlush).length, earlier.flushes + 2);
+  // The workspace's music player: its state reaches the audio renderer's echo guard as well as the server.
+  await call(workspace(), CHANNELS.send, { type: 'music.state', playing: true, track: null, positionMs: 0, volume: 50, error: null });
+  assert.deepEqual(asked(audioWindow(), CHANNELS.audioMusic).at(-1), true);
+  assert.equal(socket.json().at(-1).type, 'music.state');
 
   // Switching windows changes who is showing, not the call.
   const flushes = asked(audioWindow(), CHANNELS.audioFlush).length;

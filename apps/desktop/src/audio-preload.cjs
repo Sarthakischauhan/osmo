@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('osmoAudio', {
   onStop: callback => listen('audio:stop', callback),
   onPlay: callback => listen('audio:play', callback),
   onFlush: callback => listen('audio:flush', callback),
+  onMusic: callback => listen('audio:music', callback),
 });

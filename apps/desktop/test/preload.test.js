@@ -67,7 +67,7 @@ test('events and status arrive on the contract channels, and each subscription c
 test('the audio renderer gets its own object, and nothing of the session or the windows', () => {
   const { api, exposed } = load('audio-preload.cjs', 'osmoAudio');
   assert.deepEqual(Object.keys(exposed), ['osmoAudio']);
-  assert.deepEqual(Object.keys(api).sort(), ['bargeIn', 'frame', 'onFlush', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
+  assert.deepEqual(Object.keys(api).sort(), ['bargeIn', 'frame', 'onFlush', 'onMusic', 'onPlay', 'onStart', 'onStop', 'ready', 'started']);
 });
 
 test('what the audio renderer sends goes out on the contract channels', async () => {
@@ -89,12 +89,14 @@ test('what main asks of the audio renderer arrives on the contract channels, and
     api.onStop(() => seen.push('stop')),
     api.onPlay(pcm => seen.push(['play', pcm.byteLength])),
     api.onFlush(() => seen.push('flush')),
+    api.onMusic(playing => seen.push(['music', playing])),
   ];
   listening.get(CHANNELS.audioStart)({}, undefined);
   listening.get(CHANNELS.audioPlay)({}, new ArrayBuffer(960));
   listening.get(CHANNELS.audioFlush)({}, undefined);
+  listening.get(CHANNELS.audioMusic)({}, true);
   listening.get(CHANNELS.audioStop)({}, undefined);
-  assert.deepEqual(seen, ['start', ['play', 960], 'flush', 'stop']);
+  assert.deepEqual(seen, ['start', ['play', 960], 'flush', ['music', true], 'stop']);
   for (const drop of drops) drop();
   assert.equal(listening.size, 0);
 });
