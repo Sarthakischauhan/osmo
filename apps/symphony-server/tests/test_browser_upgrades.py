@@ -28,7 +28,7 @@ from test_browser import (
     use,
     user_sends,
 )
-from test_session import call, say, tool_output
+from test_session import answer, call, say, tool_output
 
 from symphony_server.approvals import APPROVAL_REQUIRED, APPROVAL_RESOLVED, ApprovalAddon, ApprovalBroker
 from symphony_server.browser_rules import DomainRules
@@ -342,6 +342,7 @@ def test_an_allowed_site_skips_the_approval_prompt_in_a_real_run(grok: FakeGrok,
 
 def again(grok: FakeGrok, run_id: str, call_id: str, response_id: str) -> str:
     """The voice model, told run `run_id` is done, starts another agent run on the thread; its id."""
+    answer(grok, "Working on it.", f"ack-{call_id}")
     told(grok, f"[agent {run_id}] done")
     say(grok, "Carry on.")
     call(grok, "run_agent", {"task": "carry on"}, call_id, response_id)
