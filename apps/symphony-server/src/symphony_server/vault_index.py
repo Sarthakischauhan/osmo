@@ -12,18 +12,17 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import sqlite3
 import threading
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel
 from watchfiles import Change, awatch
 
+from symphony_server.shared_db import DbClosed, SharedDb
 from symphony_server.vault_paths import NOTE_BYTES_MAX, NOTE_SUFFIX, SKIPPED_DIRS, Vault, VaultError, WriteMode, ends_without_newline, open_note, relative_name, resolve_note
-
 
 SEARCH_LIMIT_MAX = 25
 WIKI_LINK = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
@@ -107,23 +106,15 @@ class VaultIndex:
 
     def __init__(self, vaults: Iterable[Vault], index_file: Path | None = None) -> None:
         self.vaults = {vault.name: vault for vault in vaults}
-        if index_file is not None:
-            index_file.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(index_file) if index_file else ":memory:", check_same_thread=False)
-        self.lock = threading.Lock()
+        self.db = SharedDb(index_file)
         # Set once the first sync after start is done: lists and searches wait for it rather than show half a vault.
         self.ready = asyncio.Event()
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.executescript(SCHEMA)
 
-    @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """The database under the index's lock, committed on success and rolled back on error."""
-        with self.lock, self.db:
-            yield self.db
-
     def close(self) -> None:
-        """Close the database."""
+        """Stop a sync or watcher reindex still running, wait for it (shared_db.STOP_WAIT_S at most), then close the
+        database; reindexing after that writes nothing."""
         self.db.close()
 
     def vault(self, name: str | None) -> Vault:
@@ -160,25 +151,39 @@ class VaultIndex:
                 yield path
 
     def sync(self) -> int:
-        """Bring the index up to date with the disk (by mtime and size); how many notes were (re)indexed or dropped."""
+        """Bring the index up to date with the disk (by mtime and size); how many notes were (re)indexed or dropped.
+
+        Stops early, having written nothing more, when the index is closing or closed."""
         changed = 0
-        for vault in self.vaults.values():
-            if not vault.root.is_dir():
-                continue
-            root = vault.root.resolve()
-            with self.transaction() as db:
+        with self.db.job() as stop:
+            for vault in self.vaults.values():
+                if stop.is_set() or not vault.root.is_dir():
+                    continue
+                changed += self.sync_vault(vault, stop)
+        return changed
+
+    def sync_vault(self, vault: Vault, stop: threading.Event) -> int:
+        """`sync` for one vault, until `stop` is set; how many notes changed."""
+        changed = 0
+        root = vault.root.resolve()
+        try:
+            with self.db.transaction() as db:
                 known = {row[0]: (row[1], row[2]) for row in db.execute("SELECT path, mtime, size FROM notes WHERE vault = ?", (vault.name,))}
-            seen: set[str] = set()
-            for path in self.note_files(vault):
-                relative = relative_name(root, path)
-                seen.add(relative)
-                stat = path.stat()
-                if known.get(relative) != (stat.st_mtime, stat.st_size):
-                    self.index_file(vault, relative)
-                    changed += 1
-            for gone in set(known) - seen:
-                self.drop(vault, gone)
+        except DbClosed:
+            return 0
+        seen: set[str] = set()
+        for path in self.note_files(vault):
+            if stop.is_set():
+                return changed
+            relative = relative_name(root, path)
+            seen.add(relative)
+            stat = path.stat()
+            if known.get(relative) != (stat.st_mtime, stat.st_size):
+                self.index_file(vault, relative)
                 changed += 1
+        for gone in set(known) - seen:
+            self.drop(vault, gone)
+            changed += 1
         return changed
 
     def index_file(self, vault: Vault, relative: str) -> None:
@@ -191,7 +196,8 @@ class VaultIndex:
             self.drop(vault, relative)
             return
         title = note_title(relative, text)
-        with self.transaction() as db:
+        # Once the index is closed (the server is stopping), reindexing writes nothing.
+        with suppress(DbClosed), self.db.transaction() as db:
             db.execute("DELETE FROM notes_fts WHERE vault = ? AND path = ?", (vault.name, relative))
             db.execute("DELETE FROM links WHERE vault = ? AND source = ?", (vault.name, relative))
             db.execute(
@@ -202,25 +208,29 @@ class VaultIndex:
             db.executemany("INSERT INTO links (vault, source, target) VALUES (?, ?, ?)", [(vault.name, relative, link) for link in note_links(text)])
 
     def drop(self, vault: Vault, relative: str) -> None:
-        """Remove a note from the index."""
-        with self.transaction() as db:
+        """Remove a note from the index; nothing once the index is closed."""
+        with suppress(DbClosed), self.db.transaction() as db:
             db.execute("DELETE FROM notes WHERE vault = ? AND path = ?", (vault.name, relative))
             db.execute("DELETE FROM notes_fts WHERE vault = ? AND path = ?", (vault.name, relative))
             db.execute("DELETE FROM links WHERE vault = ? AND source = ?", (vault.name, relative))
 
     def apply(self, changes: Iterable[tuple[Change, str]]) -> int:
-        """Reindex the notes a watcher batch touched (absolute paths); paths outside every vault are ignored."""
+        """Reindex the notes a watcher batch touched (absolute paths); paths outside every vault are ignored. Stops early
+        when the index is closing."""
         applied = 0
-        for _, changed in changes:
-            path = Path(changed)
-            for vault in self.vaults.values():
-                root = vault.root.resolve()
-                if not path.is_relative_to(root):
-                    continue
-                relative = path.relative_to(root).as_posix()
-                if relative.lower().endswith(NOTE_SUFFIX):
-                    self.index_file(vault, relative)
-                    applied += 1
+        with self.db.job() as stop:
+            for _, changed in changes:
+                if stop.is_set():
+                    break
+                path = Path(changed)
+                for vault in self.vaults.values():
+                    root = vault.root.resolve()
+                    if not path.is_relative_to(root):
+                        continue
+                    relative = path.relative_to(root).as_posix()
+                    if relative.lower().endswith(NOTE_SUFFIX):
+                        self.index_file(vault, relative)
+                        applied += 1
         return applied
 
     async def watch(self, stop: asyncio.Event | None = None) -> None:
@@ -246,21 +256,21 @@ class VaultIndex:
             "WHERE notes_fts MATCH ?" + (" AND vault = ?" if vault else "") + " ORDER BY bm25(notes_fts, 0, 0, 5.0, 1.0) LIMIT ?"
         )
         params: tuple[Any, ...] = (match, vault, limit) if vault else (match, limit)
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute(sql, params).fetchall()
         return [NoteHit(vault=row[0], path=row[1], title=row[2], snippet=row[3]) for row in rows]
 
     def entries(self, vault: str | None = None) -> list[NoteEntry]:
         """Every indexed note of a vault, by path."""
         name = self.vault(vault).name
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT path, title, mtime, size FROM notes WHERE vault = ? ORDER BY path", (name,)).fetchall()
         return [NoteEntry(vault=name, path=row[0], title=row[1], modified=row[2], size=row[3]) for row in rows]
 
     def backlinks(self, vault: Vault, relative: str) -> list[str]:
         """The notes that link to `relative` by its name."""
         stem = PurePosixPath(relative).stem
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute(
                 "SELECT DISTINCT source FROM links WHERE vault = ? AND (target = ? OR target = ?) AND source != ? ORDER BY source",
                 (vault.name, stem, relative.removesuffix(NOTE_SUFFIX), relative),

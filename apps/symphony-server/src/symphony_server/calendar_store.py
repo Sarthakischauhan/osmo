@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +15,7 @@ from icalendar import vRecur
 from symphony_server.calendar_ics import ics_event
 from symphony_server.calendar_models import Automation, AutomationInput, AutomationRun, CalendarEvent, EventInput, Occurrence, RunStatus, zone
 from symphony_server.recurrence import OCCURRENCES_MAX, expand, next_run
+from symphony_server.shared_db import DbClosed, SharedDb
 
 RUNS_KEPT = 500
 
@@ -56,11 +55,8 @@ class CalendarStore:
     """Events, automations, their runs and the pause switch, in SQLite (thread-safe; the API runs it in workers)."""
 
     def __init__(self, path: Path | None) -> None:
-        if path is not None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path) if path else ":memory:", check_same_thread=False)
-        self.lock = threading.Lock()
-        with self.transaction() as db:
+        self.db = SharedDb(path)
+        with self.db.transaction() as db:
             db.executescript(SCHEMA)
             for table, column, kind in ADDED_COLUMNS:
                 if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
@@ -68,14 +64,9 @@ class CalendarStore:
             db.execute(TASK_INDEX)
             db.execute(CLAIM_INDEX)
 
-    @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """The database under the store's lock, committed on success and rolled back on error."""
-        with self.lock, self.db:
-            yield self.db
-
     def close(self) -> None:
-        """Close the database."""
+        """Stop an .ics import still running, wait for it (shared_db.STOP_WAIT_S at most), then close the database;
+        any call after that raises DbClosed instead of touching it."""
         self.db.close()
 
     # ------------------------------------------------------------ events
@@ -83,7 +74,7 @@ class CalendarStore:
     def add_event(self, given: EventInput, uid: str | None = None) -> CalendarEvent:
         """Store a new event (a new UID unless an import gives one)."""
         event = CalendarEvent(**given.model_dump(), id=f"ev-{secrets.token_hex(6)}", uid=uid or f"{secrets.token_hex(12)}@osmo")
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.execute("INSERT INTO calendar_events (id, uid, body) VALUES (?, ?, ?)", (event.id, event.uid, event.model_dump_json()))
         return event
 
@@ -93,31 +84,31 @@ class CalendarStore:
         if current is None:
             return None
         event = CalendarEvent(**given.model_dump(), id=current.id, uid=current.uid)
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.execute("UPDATE calendar_events SET body = ? WHERE id = ?", (event.model_dump_json(), event.id))
         return event
 
     def event(self, event_id: str) -> CalendarEvent | None:
         """The event `event_id`, or None."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT body FROM calendar_events WHERE id = ?", (event_id,)).fetchone()
         return CalendarEvent.model_validate_json(row[0]) if row else None
 
     def event_by_uid(self, uid: str) -> CalendarEvent | None:
         """The event with iCalendar UID `uid`, or None."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT body FROM calendar_events WHERE uid = ?", (uid,)).fetchone()
         return CalendarEvent.model_validate_json(row[0]) if row else None
 
     def events(self) -> list[CalendarEvent]:
         """Every event."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT body FROM calendar_events").fetchall()
         return [CalendarEvent.model_validate_json(row[0]) for row in rows]
 
     def delete_event(self, event_id: str) -> bool:
         """Delete an event; False when there was none."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             gone = db.execute("DELETE FROM calendar_events WHERE id = ?", (event_id,)).rowcount > 0
         return gone
 
@@ -136,7 +127,7 @@ class CalendarStore:
         """Store a new automation with its first run planned from `now`."""
         automation = Automation(**given.model_dump(), id=f"au-{secrets.token_hex(6)}")
         automation.nextRunAt = next_run(automation, now, self.event(automation.eventId) if automation.eventId else None)
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.execute("INSERT INTO automations (id, body, version) VALUES (?, ?, 0)", (automation.id, automation.model_dump_json()))
         return automation
 
@@ -149,7 +140,7 @@ class CalendarStore:
             return None
         automation = Automation(**given.model_dump(), id=current.id, lastRunAt=current.lastRunAt, lastStatus=current.lastStatus)
         automation.nextRunAt = next_run(automation, now, self.event(automation.eventId) if automation.eventId else None)
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             version = self.write(db, automation, None)
         if version is None:
             return None
@@ -173,7 +164,7 @@ class CalendarStore:
 
     def plan(self, automation: Automation, planned: datetime | None) -> bool:
         """Move the next run of `automation` to `planned`, if nobody changed it since it was read (compare-and-set)."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             return self.write(db, automation.model_copy(update={"nextRunAt": planned}), automation.version) is not None
 
     def claim(self, automation: Automation, due: datetime, planned: datetime | None, at: datetime, status: RunStatus, detail: str) -> AutomationRun | None:
@@ -184,7 +175,7 @@ class CalendarStore:
         disabled or deleted in the meantime is not run. None when the claim was not taken."""
         claimed = automation.model_copy(update={"nextRunAt": planned, "lastRunAt": at, "lastStatus": status})
         try:
-            with self.transaction() as db:
+            with self.db.transaction() as db:
                 if self.write(db, claimed, automation.version) is None:
                     return None
                 return self.insert_run(db, automation, at, status, detail, claim=f"{automation.id}@{due.isoformat()}")
@@ -193,25 +184,25 @@ class CalendarStore:
 
     def automation(self, automation_id: str) -> Automation | None:
         """The automation `automation_id`, or None."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT body, version FROM automations WHERE id = ?", (automation_id,)).fetchone()
         return self.read(row) if row else None
 
     def automations(self) -> list[Automation]:
         """Every automation, earliest next run first."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT body, version FROM automations").fetchall()
         return sorted((self.read(row) for row in rows), key=lambda a: (a.nextRunAt is None, a.nextRunAt or datetime.max.replace(tzinfo=UTC)))
 
     def delete_automation(self, automation_id: str) -> bool:
         """Delete an automation; False when there was none. A run under way finishes but writes nothing back to it."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             gone = db.execute("DELETE FROM automations WHERE id = ?", (automation_id,)).rowcount > 0
         return gone
 
     def add_run(self, automation: Automation, at: datetime, status: RunStatus, detail: str = "") -> AutomationRun:
         """Record a run of `automation` that no schedule claimed (Run now)."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             return self.insert_run(db, automation, at, status, detail, claim=None)
 
     @staticmethod
@@ -227,7 +218,7 @@ class CalendarStore:
     def finish_run(self, run: AutomationRun, status: RunStatus, detail: str, run_id: str | None = None, thread_id: str | None = None) -> AutomationRun:
         """Record how a run went (and the agent task it started), and note it on its automation if that still exists."""
         done = run.model_copy(update={"status": status, "detail": detail, "runId": run_id, "threadId": thread_id})
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.execute("UPDATE automation_runs SET body = ?, run_id = ? WHERE id = ?", (done.model_dump_json(), run_id, run.id))
             self.note_last(db, done, latest_only=False)
         return done
@@ -245,13 +236,13 @@ class CalendarStore:
 
     def runs_after(self, after: int, limit: int = 50) -> list[AutomationRun]:
         """Up to `limit` runs with an id above `after`, oldest first."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT body FROM automation_runs WHERE id > ? ORDER BY id LIMIT ?", (after, limit)).fetchall()
         return [AutomationRun.model_validate_json(row[0]) for row in rows]
 
     def task_runs(self, limit: int = RUNS_KEPT) -> list[AutomationRun]:
         """The latest automation runs that started an agent task, newest first."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT body FROM automation_runs WHERE run_id IS NOT NULL ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [AutomationRun.model_validate_json(row[0]) for row in rows]
 
@@ -262,7 +253,7 @@ class CalendarStore:
     def settle(self, task_id: str, status: RunStatus, detail: str) -> AutomationRun | None:
         """Record how the agent task `task_id` ended on its automation run (and on the automation, if it is its
         latest run); None when no automation started that task or it was already settled."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT body FROM automation_runs WHERE run_id = ?", (task_id,)).fetchone()
             if row is None:
                 return None
@@ -276,44 +267,48 @@ class CalendarStore:
 
     def unlinked(self) -> list[AutomationRun]:
         """Runs still `started` with no agent task: claimed by a server that stopped before the run was done."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             rows = db.execute("SELECT body FROM automation_runs WHERE run_id IS NULL ORDER BY id").fetchall()
         return [run for run in (AutomationRun.model_validate_json(row[0]) for row in rows) if run.status == "started"]
 
     def last_run_id(self) -> int:
         """The id of the newest run (0 when there is none)."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT COALESCE(MAX(id), 0) FROM automation_runs").fetchone()
         return int(row[0])
 
     @property
     def paused(self) -> bool:
         """Whether every automation is paused."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             row = db.execute("SELECT value FROM calendar_settings WHERE key = 'paused'").fetchone()
         return bool(row and row[0] == "1")
 
     def set_paused(self, paused: bool) -> None:
         """Pause or resume every automation."""
-        with self.transaction() as db:
+        with self.db.transaction() as db:
             db.execute("INSERT OR REPLACE INTO calendar_settings (key, value) VALUES ('paused', ?)", ("1" if paused else "0",))
 
     # ------------------------------------------------------------ .ics
 
     def import_ics(self, data: bytes) -> int:
-        """Add (or update, by UID) every VEVENT of an .ics file; how many were taken."""
+        """Add (or update, by UID) every VEVENT of an .ics file; how many were taken. Stops early, writing nothing
+        more, when the store is closing or closed."""
         taken = 0
-        for component in ICalendar.from_ical(data).walk("VEVENT"):
-            parsed = ics_event(component)
-            if parsed is None:
-                continue
-            given, uid = parsed
-            existing = self.event_by_uid(uid)
-            if existing is not None:
-                self.update_event(existing.id, given)
-            else:
-                self.add_event(given, uid)
-            taken += 1
+        with self.db.job() as stop, suppress(DbClosed):
+            for component in ICalendar.from_ical(data).walk("VEVENT"):
+                parsed = ics_event(component)
+                if stop.is_set():
+                    break
+                if parsed is None:
+                    continue
+                given, uid = parsed
+                existing = self.event_by_uid(uid)
+                if existing is not None:
+                    self.update_event(existing.id, given)
+                else:
+                    self.add_event(given, uid)
+                taken += 1
         return taken
 
     def export_ics(self) -> bytes:
