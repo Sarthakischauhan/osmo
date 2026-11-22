@@ -117,6 +117,8 @@ class VoiceBridge:
         self.state_detail: str | None = None
         self.turns = VoiceTurns(self, browser, self.transcript, self.calls)
         self.tasks: set[asyncio.Task[None]] = set()
+        # Background completions never preempt an active user turn. Drain these at turn_over.
+        self.pending_notices: list[str] = []
 
     async def run(self) -> None:
         """Serve the browser socket until it closes, then stop everything the session started."""
@@ -318,6 +320,7 @@ class VoiceBridge:
         self.turns.idle.set()
         # Transcripts still owed will not come now; keep the answers anyway.
         self.transcript.flush_held()
+        self.pending_notices.clear()
         if voice is not None:
             await voice.aclose()
 
@@ -353,18 +356,33 @@ class VoiceBridge:
         await self.emit(event)
 
     async def tell(self, notice: Notice) -> None:
-        """Relay an agent notice: `interrupt` now (cutting off any answer), `silent` into the
-        conversation only."""
-        self.transcript.record("agent", notice.text)
-        voice = self.voice
-        if voice is None:
+        """Queue delivery to voice while busy; the run manager has already persisted the notice.
+
+        Background completion/approval must not cancel the current user turn or collide
+        with realtime voice response generation.
+        """
+        if self.voice is None:
             return
-        if notice.tag == "interrupt" and not self.turns.idle.is_set():
-            await self.turns.cut_off(voice)
-            await self.emit(StateEvent(state=self.state, detail=BARGE_IN))
-        await voice.add_message("user", notice.text)
-        if notice.tag != "silent":
+        self.pending_notices.append(notice.text)
+        if self.turns.idle.is_set():
+            await self.flush_notices()
+
+    async def flush_notices(self) -> bool:
+        """Inject notifications when voice is idle, prompting at most one new response."""
+        voice = self.voice
+        if voice is None or not self.turns.idle.is_set() or not self.pending_notices:
+            return False
+        notices = self.pending_notices[:]
+        self.pending_notices.clear()
+        try:
+            for text in notices:
+                await voice.add_message("user", text)
             await self.turns.ask(voice)
+        except Exception:
+            self.pending_notices[:0] = notices
+            log.exception("failed to relay background notices to voice")
+            return False
+        return True
 
     async def preview(self, request: VoicePreviewRequest) -> None:
         """Play a voice preview in the browser."""
