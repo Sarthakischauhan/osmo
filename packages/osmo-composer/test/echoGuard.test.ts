@@ -38,8 +38,8 @@ describe("echo guard", () => {
     for (let t = 0; t < 3000; t += 100) {
       expect(guard.push(frame(0.1), true, 0.28, t)).toEqual({ send: [], bargeIn: false });
     }
-    // Playback ended; during the tail the leftover echo is still held, then frames flow again.
-    expect(guard.push(frame(0.01), false, 0, 3100).send).toEqual([]);
+    // After playback ends, never hold the first words of a new user utterance.
+    expect(guard.push(frame(0.01), false, 0, 3100).send).toHaveLength(1);
     const after = frame(0.01);
     expect(guard.push(after, false, 0, 3500).send).toEqual([after]);
   });
@@ -75,14 +75,13 @@ describe("echo guard", () => {
     expect(step.send).toHaveLength(2);
   });
 
-  it("speech in the tail after Osmo stopped is sent without a barge-in (there is nothing to cut)", () => {
+  it("forwards the first speech frame after playback ends without gating or barge-in", () => {
     const guard = new EchoGuard(RATE);
     guard.push(frame(0.01), true, 0.1, 0);
-    expect(guard.push(frame(0.4), false, 0, 100).send).toEqual([]);
-    const step = guard.push(frame(0.4), false, 0, 200);
+    const first = frame(0.4);
+    const step = guard.push(first, false, 0, 100);
     expect(step.bargeIn).toBe(false);
-    // The pre-roll: the quiet frame before the speech too, so its start is never clipped.
-    expect(step.send).toHaveLength(3);
+    expect(step.send).toEqual([first]);
   });
 
   it("keeps music from the mini player away from the server's VAD, but lets the user talk over it", () => {
