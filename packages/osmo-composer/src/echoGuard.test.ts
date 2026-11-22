@@ -35,7 +35,7 @@ describe("EchoGuard speech preservation", () => {
 
   it("passes speech over music with retained preroll", () => {
     const guard = new EchoGuard(RATE);
-    const speech = frame(0.04);
+    const speech = frame(0.08);
     const first = guard.push(speech, false, 0, 1000, true);
     expect(first.send).toHaveLength(1);
     const result = guard.push(speech, false, 0, 1100, true);
