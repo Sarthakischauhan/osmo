@@ -118,7 +118,7 @@ class VoiceBridge:
         self.turns = VoiceTurns(self, browser, self.transcript, self.calls)
         self.tasks: set[asyncio.Task[None]] = set()
         # Background completions never preempt an active user turn. Drain these at turn_over.
-        self.pending_notices: list[str] = []
+        self.pending_notices: list[Notice] = []
 
     async def run(self) -> None:
         """Serve the browser socket until it closes, then stop everything the session started."""
@@ -363,7 +363,7 @@ class VoiceBridge:
         """
         if self.voice is None:
             return
-        self.pending_notices.append(notice.text)
+        self.pending_notices.append(notice)
         if self.turns.idle.is_set():
             await self.flush_notices()
 
@@ -375,9 +375,10 @@ class VoiceBridge:
         notices = self.pending_notices[:]
         self.pending_notices.clear()
         try:
-            for text in notices:
-                await voice.add_message("user", text)
-            await self.turns.ask(voice)
+            for notice in notices:
+                await voice.add_message("user", notice.text)
+            if any(notice.tag == "interrupt" for notice in notices):
+                await self.turns.ask(voice)
         except Exception:
             self.pending_notices[:0] = notices
             log.exception("failed to relay background notices to voice")
