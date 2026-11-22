@@ -48,7 +48,7 @@ def tool_names(categories: str | None) -> set[str]:
     calendar = CalendarStore(None)
     client = httpx.AsyncClient()
     music = music_tools(LocalLibrary(()), SpotifyAccount(None, access.credentials, client), MusicNow())
-    tools = osmo_tools(settings, client, access, board, BrowserSessions(None, board), VaultIndex(()), calendar, Scheduler(calendar), music)
+    tools = osmo_tools(settings, client, access, board, BrowserSessions(None, board), VaultIndex(()), calendar, Scheduler(calendar, VaultIndex(()), "UTC"), music)
     return {tool.name for tool in tools}
 
 

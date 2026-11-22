@@ -9,6 +9,7 @@ import {
   GRID_LAST_HOUR,
   HOUR_PX,
   type Occurrence,
+  type TaskLink,
   type Tick,
   addDays,
   calendarApi,
@@ -25,6 +26,10 @@ export interface CalendarViewProps {
   api?: CalendarApi;
   /** "Now" for the grid (screenshots and tests); the clock otherwise. */
   now?: Date;
+  /** An automation to show first (Tasks opens the calendar on the automation that started a task). */
+  focus?: string;
+  /** Open the conversation of a task an automation started. */
+  onOpenTask?: (threadId: string) => void;
 }
 
 type Selection = { kind: "event"; occurrence: Occurrence } | { kind: "automation"; id: string } | { kind: "new-event" } | { kind: "new-automation"; eventId?: string };
@@ -42,7 +47,7 @@ function hourLabel(hour: number): string {
 }
 
 /** The week grid from GUI's calendar-week mockup, with the selected event's or automation's detail on the right. */
-export function CalendarView({ api: given, now: fixedNow }: CalendarViewProps) {
+export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: CalendarViewProps) {
   const api = useMemo(() => given ?? calendarApi(), [given]);
   const [now, setNow] = useState(() => fixedNow ?? new Date());
   const [start, setStart] = useState(() => weekStart(fixedNow ?? new Date()));
@@ -50,7 +55,11 @@ export function CalendarView({ api: given, now: fixedNow }: CalendarViewProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [ticks, setTicks] = useState<Tick[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
-  const [selected, setSelected] = useState<Selection>();
+  const [tasks, setTasks] = useState<TaskLink[]>([]);
+  const [selected, setSelected] = useState<Selection | undefined>(() => (focus ? { kind: "automation", id: focus } : undefined));
+  useEffect(() => {
+    if (focus) setSelected({ kind: "automation", id: focus });
+  }, [focus]);
   const [error, setError] = useState<string>();
   const end = addDays(start, 7);
 
@@ -62,11 +71,12 @@ export function CalendarView({ api: given, now: fixedNow }: CalendarViewProps) {
 
   const load = useCallback(async () => {
     try {
-      const [week, listed] = await Promise.all([api.week(start, addDays(start, 7)), api.automations()]);
+      const [week, listed, linked] = await Promise.all([api.week(start, addDays(start, 7)), api.automations(), api.tasks()]);
       setOccurrences(week.occurrences);
       setEvents(week.events);
       setTicks(week.ticks);
       setAutomations(listed);
+      setTasks(linked);
       setError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -187,6 +197,8 @@ export function CalendarView({ api: given, now: fixedNow }: CalendarViewProps) {
             <AutomationDetail
               automation={shownAutomation}
               withTitle={selected.kind === "automation"}
+              tasks={tasks.filter((task) => task.automationId === shownAutomation.id).slice(0, 3)}
+              onOpenTask={onOpenTask}
               onRunNow={() => void act(() => api.runNow(shownAutomation.id))}
               onToggle={() => void act(() => api.updateAutomation(shownAutomation.id, { ...toInput(shownAutomation), enabled: !shownAutomation.enabled }))}
             />
@@ -202,7 +214,7 @@ export function CalendarView({ api: given, now: fixedNow }: CalendarViewProps) {
           {selected?.kind === "new-automation" && (
             <NewAutomation eventId={selected.eventId} now={now} onCreate={(input) => act(() => api.addAutomation(input)).then(() => setSelected(undefined))} />
           )}
-          <p className="osmo-tray-note">Automations run from the tray, also with the window closed. Osmo never starts at login.</p>
+          <p className="osmo-tray-note">Automations run from the tray, also with the window closed; agent tasks show in Tasks. Osmo never starts at login.</p>
         </aside>
       </div>
     </div>
@@ -225,7 +237,17 @@ function EventDetail({ occurrence, event }: { occurrence: Occurrence; event: Cal
   );
 }
 
-function AutomationDetail({ automation, withTitle, onRunNow, onToggle }: { automation: Automation; withTitle: boolean; onRunNow: () => void; onToggle: () => void }) {
+const TASK_STATUS: Record<TaskLink["status"], string> = { started: "working", ok: "ok", error: "error", skipped: "skipped" };
+const tone = (status: TaskLink["status"]) => (status === "error" ? "red" : status === "skipped" ? "amber" : status === "started" ? "gray" : "green");
+
+function AutomationDetail({ automation, withTitle, tasks, onOpenTask, onRunNow, onToggle }: {
+  automation: Automation;
+  withTitle: boolean;
+  tasks: TaskLink[];
+  onOpenTask?: (threadId: string) => void;
+  onRunNow: () => void;
+  onToggle: () => void;
+}) {
   return (
     <>
       {withTitle && (
@@ -256,6 +278,22 @@ function AutomationDetail({ automation, withTitle, onRunNow, onToggle }: { autom
           <dt>Next run</dt><dd className="mono">{automation.enabled ? when(automation.nextRunAt) : "Paused"}</dd>
         </dl>
       </section>
+      {tasks.length > 0 && (
+        <section className="osmo-detail-section">
+          <div className="osmo-detail-label">Tasks</div>
+          <ul className="osmo-detail-tasks">
+            {tasks.map((task) => (
+              <li key={task.runId}>
+                <span className="osmo-badge" data-tone={tone(task.status)}>{TASK_STATUS[task.status]}</span>
+                <span className="mono">{when(task.at)}</span>
+                {task.threadId && onOpenTask && (
+                  <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => task.threadId && onOpenTask(task.threadId)}>Open</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <div className="osmo-calendar-actions">
         <button type="button" className="osmo-btn osmo-btn-primary osmo-btn-sm" onClick={onRunNow}>Run now</button>
         <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={onToggle}>{automation.enabled ? "Pause" : "Resume"}</button>

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,22 +14,24 @@ import pytest
 from core_harness import EventSink
 from pydantic import ValidationError
 
-from conftest import make_client
+from conftest import FakeGrok, make_client
 from symphony_server.canvas import OSMO_WIDGET, WidgetBoard
 from symphony_server.local_calendar import (
     MISSED_GRACE,
-    Automation,
     AutomationCreateTool,
     AutomationInput,
     CalendarEventsTool,
     CalendarStore,
     EventInput,
-    RunStatus,
     Scheduler,
     expand,
     next_run,
+    task_links,
 )
 from symphony_server.settings import DEFAULT_APPROVAL_TOOLS, Settings
+from symphony_server.storage import AgentRunRecord, AgentRunStatus
+from symphony_server.vault import Note, WriteMode
+from test_agents import ScriptedAgent, Step, agent_client
 
 LA = ZoneInfo("America/Los_Angeles")
 
@@ -87,64 +91,139 @@ def test_automation_inputs_need_what_their_trigger_and_action_use() -> None:
         AutomationInput(title="x", trigger="time", at=la(2026, 1, 1), action="note_append", prompt="p")
 
 
-class Recorder:
-    def __init__(self, status: RunStatus = "ok") -> None:
-        self.fired: list[str] = []
-        self.status = status
+class FakeAgent:
+    """The durable background agent as automations see it: tasks it was given, and their records."""
 
-    async def __call__(self, automation: Automation) -> tuple[RunStatus, str, str | None, str | None]:
-        self.fired.append(automation.title)
-        if self.status == "error":
-            raise RuntimeError("model offline")
-        return self.status, "done", None, None
+    def __init__(self, refuse: str | None = None) -> None:
+        self.tasks: list[tuple[str, str]] = []
+        self.records: dict[str, AgentRunRecord] = {}
+        self.refuse = refuse
+
+    async def start_task(self, title: str, task: str) -> AgentRunRecord | str:
+        self.tasks.append((title, task))
+        if self.refuse is not None:
+            return self.refuse
+        record = AgentRunRecord(runId=f"run-{len(self.tasks)}", threadId=f"th-{len(self.tasks)}", task=task, status="running", createdAt=0.0, updatedAt=0.0)
+        self.records[record.runId] = record
+        return record
+
+    def get(self, run_id: str) -> AgentRunRecord | None:
+        return self.records.get(run_id)
+
+    def finish(self, run_id: str, status: AgentRunStatus, result: str | None = None) -> AgentRunRecord:
+        self.records[run_id] = self.records[run_id].model_copy(update={"status": status, "result": result})
+        return self.records[run_id]
 
 
-def scheduled(now: datetime, recorder: Recorder) -> tuple[CalendarStore, Scheduler, Clock]:
+class FakeNotes:
+    def __init__(self) -> None:
+        self.appended: list[tuple[str, str]] = []
+
+    def write(self, relative: str, text: str, mode: WriteMode, vault: str | None = None) -> Note:
+        assert mode == "append" and vault is None
+        self.appended.append((relative, text))
+        return Note(vault="Notes", path=relative, title=relative, text=text, modified=0.0)
+
+
+def scheduled(now: datetime, agent: FakeAgent | None = None) -> tuple[CalendarStore, Scheduler, Clock]:
     store, clock = CalendarStore(None), Clock(now)
-    return store, Scheduler(store, recorder, clock), clock
+    scheduler = Scheduler(store, FakeNotes(), "America/Los_Angeles", clock)
+    scheduler.agent = agent or FakeAgent()
+    return store, scheduler, clock
 
 
 def test_the_scheduler_runs_what_is_due_once_and_plans_the_next_run() -> None:
-    recorder = Recorder()
-    store, scheduler, clock = scheduled(la(2026, 11, 21, 7, 59), recorder)
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7, 59))
     brief = store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), rrule="FREQ=DAILY", timezone="America/Los_Angeles", action="notify", prompt="Good morning"), clock())
-    assert asyncio.run(scheduler.tick()) == [] and recorder.fired == []
+    assert asyncio.run(scheduler.tick()) == []
     clock.now = la(2026, 11, 21, 8, 0, 5)
     [run] = asyncio.run(scheduler.tick())
-    assert (run.title, run.status) == ("Brief", "ok")
+    assert (run.title, run.status, run.detail) == ("Brief", "ok", "Good morning")
     assert asyncio.run(scheduler.tick()) == []
     saved = store.automation(brief.id)
     assert saved is not None and saved.nextRunAt == la(2026, 11, 22, 8) and saved.lastStatus == "ok"
-    assert recorder.fired == ["Brief"]
+
+
+def test_an_agent_task_runs_on_the_background_agent_and_settles_when_its_run_ends() -> None:
+    agent = FakeAgent()
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 14, 59), agent)
+    event = store.add_event(weekly_notes())
+    notes = store.add_automation(AutomationInput(title="Weekly notes", trigger="event_end", eventId=event.id, action="agent_task", prompt="Summarize this week."), clock())
+    clock.now = la(2026, 11, 21, 15, 0, 1)
+    [run] = asyncio.run(scheduler.tick())
+    # The task is the prompt plus where it comes from, on a thread named after the automation.
+    [(title, task)] = agent.tasks
+    assert title == "Weekly notes" and task.startswith("Summarize this week.")
+    assert "\u201cWeekly notes\u201d, run on Sat Nov 21 at 3:00 PM, at the end of the calendar event \u201cWeekly notes\u201d" in task
+    assert (run.status, run.runId, run.threadId) == ("started", "run-1", "th-1")
+    started = store.automation(notes.id)
+    assert scheduler.running == 1 and started is not None and started.lastStatus == "started"
+    # A run that is not over changes nothing; a finished one settles the automation run and the automation.
+    assert scheduler.settle(agent.records["run-1"]) is None
+    settled = scheduler.settle(agent.finish("run-1", "completed", "Wrote Weekly/2026-11-21.md"))
+    assert settled is not None and (settled.status, settled.detail) == ("ok", "Wrote Weekly/2026-11-21.md")
+    saved = store.automation(notes.id)
+    assert saved is not None and saved.lastStatus == "ok" and scheduler.running == 0
+    # Settling twice, or an agent run no automation started, does nothing.
+    assert scheduler.settle(agent.records["run-1"]) is None
+    assert scheduler.settle(AgentRunRecord(runId="other", threadId="t", task="x", status="failed", createdAt=0, updatedAt=0)) is None
+    [link] = task_links(store)
+    assert (link.runId, link.threadId, link.automationId, link.eventId, link.eventTitle, link.status, link.trigger) == ("run-1", "th-1", notes.id, event.id, "Weekly notes", "ok", "event_end")
+
+
+def test_reconcile_settles_tasks_that_ended_while_the_server_was_down() -> None:
+    agent = FakeAgent()
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), agent)
+    store.add_automation(AutomationInput(title="A", trigger="time", at=la(2026, 11, 21, 8), action="agent_task", prompt="a"), clock())
+    store.add_automation(AutomationInput(title="B", trigger="time", at=la(2026, 11, 21, 8), action="agent_task", prompt="b"), clock())
+    store.add_automation(AutomationInput(title="C", trigger="time", at=la(2026, 11, 21, 8), action="agent_task", prompt="c"), clock())
+    clock.now = la(2026, 11, 21, 8, 0, 1)
+    asyncio.run(scheduler.tick())
+    by_title = {run.title: run.runId for run in store.started()}
+    assert set(by_title) == {"A", "B", "C"}
+    agent.finish(by_title["A"], "failed", "Interrupted when Osmo restarted.")
+    del agent.records[by_title["B"]]  # its thread was deleted
+    settled = sorted((run.title, run.status, run.detail) for run in scheduler.reconcile())
+    assert settled == [("A", "error", "Interrupted when Osmo restarted."), ("B", "error", "the task is gone")]
+    assert [run.title for run in store.started()] == ["C"]  # still running (resumed by the durable backend)
+
+
+def test_an_automation_appends_to_a_note_with_a_local_time_stamp() -> None:
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7))
+    store.add_automation(AutomationInput(title="Journal", trigger="time", at=la(2026, 11, 21, 8), action="note_append", notePath="Journal/2026.md", prompt="How was today?"), clock())
+    clock.now = la(2026, 11, 21, 8, 0, 1)
+    [run] = asyncio.run(scheduler.tick())
+    assert (run.status, run.detail) == ("ok", "appended to Journal/2026.md")
+    assert isinstance(scheduler.notes, FakeNotes) and scheduler.notes.appended == [("Journal/2026.md", "\n## 2026-11-21 08:00\n\nHow was today?\n")]
 
 
 def test_a_run_missed_while_osmo_was_closed_is_skipped_not_run_late() -> None:
-    recorder = Recorder()
-    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), recorder)
-    store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), rrule="FREQ=DAILY", timezone="America/Los_Angeles", action="notify", prompt="p"), clock())
+    agent = FakeAgent()
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), agent)
+    store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), rrule="FREQ=DAILY", timezone="America/Los_Angeles", action="agent_task", prompt="p"), clock())
     clock.now = la(2026, 11, 21, 8) + MISSED_GRACE + timedelta(seconds=1)
     [run] = asyncio.run(scheduler.tick())
     assert run.status == "skipped" and "missed" in run.detail
-    assert recorder.fired == []
+    assert agent.tasks == []
 
 
 def test_paused_automations_do_not_run_and_owe_nothing_on_resume() -> None:
-    recorder = Recorder()
-    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), recorder)
-    brief = store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), rrule="FREQ=DAILY", timezone="America/Los_Angeles", action="notify", prompt="p"), clock())
+    agent = FakeAgent()
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), agent)
+    brief = store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), rrule="FREQ=DAILY", timezone="America/Los_Angeles", action="agent_task", prompt="p"), clock())
     store.set_paused(True)
     clock.now = la(2026, 11, 21, 8, 1)
     assert asyncio.run(scheduler.tick()) == []
     store.set_paused(False)
     saved = store.automation(brief.id)
     assert saved is not None and saved.nextRunAt == la(2026, 11, 22, 8)
-    assert recorder.fired == []
+    assert agent.tasks == []
 
 
 def test_a_failing_automation_is_recorded_and_the_rest_still_run() -> None:
-    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), Recorder("error"))
-    store.add_automation(AutomationInput(title="A", trigger="time", at=la(2026, 11, 21, 8), action="notify", prompt="p"), clock())
-    store.add_automation(AutomationInput(title="B", trigger="time", at=la(2026, 11, 21, 8), action="notify", prompt="p"), clock())
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7), FakeAgent(refuse="model offline"))
+    store.add_automation(AutomationInput(title="A", trigger="time", at=la(2026, 11, 21, 8), action="agent_task", prompt="p"), clock())
+    store.add_automation(AutomationInput(title="B", trigger="time", at=la(2026, 11, 21, 8), action="agent_task", prompt="p"), clock())
     clock.now = la(2026, 11, 21, 8, 0, 1)
     runs = asyncio.run(scheduler.tick())
     assert [(r.title, r.status, r.detail) for r in sorted(runs, key=lambda r: r.title)] == [("A", "error", "model offline"), ("B", "error", "model offline")]
@@ -152,10 +231,19 @@ def test_a_failing_automation_is_recorded_and_the_rest_still_run() -> None:
 
 
 def test_the_scheduler_sleeps_until_the_next_run_capped_at_a_minute() -> None:
-    store, scheduler, clock = scheduled(la(2026, 11, 21, 7, 59, 50), Recorder())
+    store, scheduler, clock = scheduled(la(2026, 11, 21, 7, 59, 50))
     assert scheduler.seconds_to_next() == 60.0
     store.add_automation(AutomationInput(title="Brief", trigger="time", at=la(2026, 11, 21, 8), action="notify", prompt="p"), clock())
     assert scheduler.seconds_to_next() == 10.0
+
+
+def test_a_calendar_from_before_task_links_opens_and_gains_them(tmp_path: Path) -> None:
+    old = sqlite3.connect(tmp_path / "osmo.db")
+    old.execute("CREATE TABLE automation_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, automation_id TEXT NOT NULL, body TEXT NOT NULL)")
+    old.commit()
+    old.close()
+    store = CalendarStore(tmp_path / "osmo.db")
+    assert store.task_runs() == [] and store.started() == []
 
 
 def test_ics_round_trips_by_uid(tmp_path: Path) -> None:
@@ -188,7 +276,7 @@ def test_the_events_tool_lists_and_shows_an_agenda() -> None:
 def test_automation_create_reads_local_times_and_waits_for_approval_by_default() -> None:
     assert "automation_create" in DEFAULT_APPROVAL_TOOLS and "calendar_add_event" not in DEFAULT_APPROVAL_TOOLS
     store = CalendarStore(None)
-    scheduler = Scheduler(store, Recorder(), Clock(la(2026, 11, 21, 7)))
+    scheduler = Scheduler(store, FakeNotes(), "America/Los_Angeles", Clock(la(2026, 11, 21, 7)))
     tool = AutomationCreateTool(store, scheduler, "America/Los_Angeles")
     made = json.loads(asyncio.run(tool.execute(sink=EventSink(), args={"title": "Brief", "trigger": "time", "at": "2026-11-22T08:00", "rrule": "FREQ=DAILY", "action": "agent_task", "prompt": "Brief me"})))
     assert made["next"] == "2026-11-22T08:00:00-08:00"
@@ -220,3 +308,25 @@ def test_the_api_lists_occurrences_runs_now_pauses_and_reports_status(tmp_path: 
         assert client.post("/api/automations", json={"title": "x", "trigger": "event_end", "eventId": "ev-nope", "action": "notify", "prompt": "p"}).status_code == 404
         ics = client.get("/api/calendar/export.ics")
         assert ics.headers["content-type"].startswith("text/calendar") and b"Weekly notes" in ics.content
+
+
+def test_run_now_starts_a_durable_task_that_tasks_and_the_calendar_both_link(grok: FakeGrok) -> None:
+    with agent_client(grok, ScriptedAgent([Step(text="Wrote Weekly/2026-11-21.md.")])) as client:
+        made = client.post("/api/automations", json={"title": "Weekly notes", "trigger": "time", "at": "2030-01-05T15:00:00-08:00", "timezone": "America/Los_Angeles", "action": "agent_task", "prompt": "Summarize this week."}).json()
+        ran = client.post(f"/api/automations/{made['id']}/run").json()
+        assert ran["status"] == "started" and ran["runId"] and ran["threadId"]
+        # The task is an ordinary background run: Tasks lists it on its own thread, under the automation's name.
+        listed = client.get("/api/runs").json()["runs"]
+        assert [(run["runId"], run["threadId"]) for run in listed] == [(ran["runId"], ran["threadId"])]
+        thread = client.get(f"/api/threads/{ran['threadId']}").json()
+        assert thread["thread"]["title"] == "Weekly notes" and thread["messages"][0]["text"].startswith("Summarize this week.")
+        # When the run finishes, the automation run and the automation say how it went.
+        for _ in range(200):
+            links = client.get("/api/automations/tasks").json()["links"]
+            if links[0]["status"] != "started":
+                break
+            time.sleep(0.02)
+        assert [(link["runId"], link["automationId"], link["status"]) for link in links] == [(ran["runId"], made["id"], "ok")]
+        [automation] = client.get("/api/automations").json()["automations"]
+        assert automation["lastStatus"] == "ok"
+        assert client.get("/api/automations/runs", params={"after": 0}).json()["runs"][0]["detail"] == "Wrote Weekly/2026-11-21.md."

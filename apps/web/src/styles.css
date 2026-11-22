@@ -468,6 +468,9 @@ button.osmo-list-row { cursor: pointer; }
 .agent-workbench-status { color: var(--muted-foreground); font-size: 11px; }
 .agent-workbench-status[data-status="failed"], .agent-workbench-error { color: #e66e6e; }
 .agent-workbench-run h3 { font-size: 13px; font-weight: 500; line-height: 21px; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-workbench-origin { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 6px; padding: 0 8px; height: 24px; border: 1px solid var(--border); border-radius: var(--radius-button, 8px); background: transparent; color: var(--muted-foreground); font-size: 11px; cursor: pointer; }
+.agent-workbench-origin span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workbench-origin:hover { color: var(--foreground); border-color: var(--muted-foreground); }
 .agent-run-result { margin-top: 10px; color: var(--muted-foreground); font-size: 12px; }
 .agent-run-result summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .agent-run-result[open] summary svg { transform: rotate(180deg); }
@@ -642,6 +645,9 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-kv { display: grid; grid-template-columns: 72px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; line-height: 20px; }
 .osmo-kv dt { padding-top: 1px; font-size: 12px; color: var(--muted-foreground); }
 .osmo-kv dd { margin: 0; }
+.osmo-detail-tasks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.osmo-detail-tasks li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.osmo-detail-tasks li .osmo-btn { margin-left: auto; }
 .osmo-detail-prompt { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); font: 13px/18px var(--font-mono); white-space: pre-wrap; }
 .osmo-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-weight: 500; }
 .osmo-badge[data-tone="green"] { color: #3ecf8e; }

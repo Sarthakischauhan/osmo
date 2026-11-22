@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, calendarApi, isoWithOffset, placement, rangeLabel, spanLabel, triggerLabel, weekStart } from "../src/lib/calendar";
+import { addDays, calendarApi, isoWithOffset, placement, rangeLabel, spanLabel, taskOrigin, triggerLabel, weekStart } from "../src/lib/calendar";
 
 describe("the week grid", () => {
   it("starts weeks on Monday and labels the range like the mockup", () => {
@@ -37,5 +37,19 @@ describe("the calendar API", () => {
     expect(week.occurrences[0]?.title).toBe("Run");
     expect(week.ticks[0]?.title).toBe("Brief");
     expect(asked[0]).toContain("/api/calendar/events?start=2026-11-16T00%3A00%3A00");
+  });
+
+  it("reads the tasks automations started and says where each came from", async () => {
+    const api = calendarApi(async (input) => {
+      expect(input).toBe("/api/automations/tasks");
+      return new Response(JSON.stringify({ links: [
+        { runId: "r1", threadId: "t1", automationId: "a1", title: "Weekly notes", at: "2026-11-21T15:00:00-08:00", status: "ok", trigger: "event_end", eventId: "e1", eventTitle: "Weekly notes" },
+        { runId: "r2", threadId: "t2", automationId: "a2", title: "Brief", at: "2026-11-21T08:00:00-08:00", status: "started", trigger: "time" },
+      ] }));
+    });
+    const [weekly, brief] = await api.tasks();
+    expect(taskOrigin(weekly!)).toBe("Weekly notes · end of \u201cWeekly notes\u201d");
+    expect(taskOrigin(brief!)).toBe("Brief");
+    expect(taskOrigin({ ...weekly!, trigger: "event_start", eventTitle: "Standup" })).toBe("Weekly notes · start of \u201cStandup\u201d");
   });
 });

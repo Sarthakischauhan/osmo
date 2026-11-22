@@ -4,10 +4,14 @@ Events carry an IANA zone and an optional RRULE (dateutil expands it on wall-clo
 2 PM across DST). An automation fires on its own schedule (`time`: a moment, optionally repeating by RRULE) or
 around an event (`event_start` / `event_end`, plus an offset in minutes), and does one thing: start a background
 agent run on a new thread (`agent_task`), raise a desktop notification (`notify`) or append to a vault note
-(`note_append`). `Scheduler` keeps each automation's `next_run_at`, sleeps until the earliest one and runs what is
+(`note_append`). `Scheduler` keeps each automation's `next_run_at`, sleeps until the earliest one and fires what is
 due; one that was due more than `MISSED_GRACE` ago (the app was not running, the machine slept) is recorded as
-skipped rather than run late. The desktop app keeps the server, and so the scheduler, alive from the tray when the
-window is closed; it never starts at login. `.ics` files import and export through icalendar.
+skipped rather than run late. The scheduler only decides when: an agent task is a durable background agent run
+(agents.AgentRuns over upstream/durable.py) on a thread of its own, so it shows in Tasks, can be stopped there, and
+picks up where it left off after a restart. Its automation run stays `started` until that agent run finishes, and then
+says `ok` or `error` (`Scheduler.settle`, called by AgentRuns, and `Scheduler.reconcile` at startup for runs that
+finished or were given up while the server was down). The desktop app keeps the server, and so the scheduler, alive
+from the tray when the window is closed; it never starts at login. `.ics` files import and export through icalendar.
 """
 
 from __future__ import annotations
@@ -19,11 +23,11 @@ import os
 import secrets
 import sqlite3
 import threading
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil.rrule import rrule, rrulestr
@@ -35,6 +39,8 @@ from core_harness import EventSink, Tool
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from symphony_server.canvas import WidgetBoard, show
+from symphony_server.storage import AgentRunRecord, AgentRunStatus
+from symphony_server.vault import Note, WriteMode
 from symphony_server.widgets import AgendaFooter, AgendaItem, AgendaProps, AgendaWidget
 
 log = logging.getLogger("symphony.calendar")
@@ -50,6 +56,12 @@ RUNS_KEPT = 500
 Trigger = Literal["time", "event_start", "event_end"]
 Action = Literal["agent_task", "notify", "note_append"]
 RunStatus = Literal["started", "ok", "error", "skipped"]
+# What an agent task's automation run says once its agent run is over.
+TASK_OUTCOMES: dict[AgentRunStatus, RunStatus] = {"completed": "ok", "failed": "error", "cancelled": "error"}
+# Runs a calendar from before agent tasks were linked do not have `run_id`; it is added on open.
+TASK_INDEX = "CREATE INDEX IF NOT EXISTS automation_runs_task ON automation_runs (run_id)"
+# How much of a finished task's result its automation run keeps (the whole answer is in the task's thread).
+TASK_DETAIL_MAX = 300
 
 
 def zone(name: str) -> ZoneInfo:
@@ -186,6 +198,8 @@ CREATE TABLE IF NOT EXISTS automations (
 CREATE TABLE IF NOT EXISTS automation_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     automation_id TEXT NOT NULL,
+    -- The agent run (task) an agent_task automation started, if any.
+    run_id TEXT,
     body TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS calendar_settings (
@@ -253,6 +267,10 @@ class CalendarStore:
         self.lock = threading.Lock()
         with self.transaction() as db:
             db.executescript(SCHEMA)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(automation_runs)")}
+            if "run_id" not in columns:
+                db.execute("ALTER TABLE automation_runs ADD COLUMN run_id TEXT")
+            db.execute(TASK_INDEX)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -345,7 +363,7 @@ class CalendarStore:
 
     def add_run(self, automation: Automation, at: datetime, status: RunStatus, detail: str = "", run_id: str | None = None, thread_id: str | None = None) -> AutomationRun:
         with self.transaction() as db:
-            cursor = db.execute("INSERT INTO automation_runs (automation_id, body) VALUES (?, '{}')", (automation.id,))
+            cursor = db.execute("INSERT INTO automation_runs (automation_id, run_id, body) VALUES (?, ?, '{}')", (automation.id, run_id))
             assert cursor.lastrowid is not None
             run = AutomationRun(id=cursor.lastrowid, automationId=automation.id, title=automation.title, at=at, status=status, detail=detail, runId=run_id, threadId=thread_id)
             db.execute("UPDATE automation_runs SET body = ? WHERE id = ?", (run.model_dump_json(), run.id))
@@ -356,6 +374,34 @@ class CalendarStore:
         with self.transaction() as db:
             rows = db.execute("SELECT body FROM automation_runs WHERE id > ? ORDER BY id LIMIT ?", (after, limit)).fetchall()
         return [AutomationRun.model_validate_json(row[0]) for row in rows]
+
+    def task_runs(self, limit: int = RUNS_KEPT) -> list[AutomationRun]:
+        """The latest automation runs that started an agent task, newest first."""
+        with self.transaction() as db:
+            rows = db.execute("SELECT body FROM automation_runs WHERE run_id IS NOT NULL ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [AutomationRun.model_validate_json(row[0]) for row in rows]
+
+    def started(self) -> list[AutomationRun]:
+        """Automation runs whose agent task has not finished yet."""
+        return [run for run in self.task_runs() if run.status == "started"]
+
+    def settle(self, task_id: str, status: RunStatus, detail: str) -> AutomationRun | None:
+        """Record how the agent task `task_id` ended on its automation run (and on the automation, if it is its
+        latest run); None when no automation started that task or it was already settled."""
+        with self.transaction() as db:
+            row = db.execute("SELECT body FROM automation_runs WHERE run_id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            run = AutomationRun.model_validate_json(row[0])
+            if run.status != "started":
+                return None
+            run.status, run.detail = status, detail
+            db.execute("UPDATE automation_runs SET body = ? WHERE run_id = ?", (run.model_dump_json(), task_id))
+        automation = self.automation(run.automationId)
+        if automation is not None and automation.lastRunAt == run.at and automation.lastStatus == "started":
+            automation.lastStatus = status
+            self.save_automation(automation)
+        return run
 
     def last_run_id(self) -> int:
         with self.transaction() as db:
@@ -449,22 +495,51 @@ def ics_event(component: Any) -> tuple[EventInput, str] | None:
 # ------------------------------------------------------------ the scheduler
 
 Clock = Callable[[], datetime]
-# What an automation does when it fires: a run record's status, detail, and agent run / thread ids.
-Perform = Callable[[Automation], Awaitable[tuple[RunStatus, str, str | None, str | None]]]
+
+
+class AutomationAgent(Protocol):
+    """The durable background agent (agents.AgentRuns), as automations use it."""
+
+    async def start_task(self, title: str, task: str) -> AgentRunRecord | str: ...
+
+    def get(self, run_id: str) -> AgentRunRecord | None: ...
+
+
+class NoteWriter(Protocol):
+    """The vaults (vault.VaultIndex), for `note_append`."""
+
+    def write(self, relative: str, text: str, mode: WriteMode, vault: str | None = None) -> Note: ...
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def automation_task(automation: Automation, event: CalendarEvent | None, at: datetime, tz: ZoneInfo) -> str:
+    """What an agent task automation asks the background agent: its prompt, and where it comes from."""
+    local = at.astimezone(tz)
+    hour = local.hour % 12 or 12
+    origin = f"This is the Osmo automation \u201c{automation.title}\u201d, run on {local:%a %b} {local.day} at {hour}:{local:%M %p}"
+    if event is not None and automation.trigger != "time":
+        edge = "start" if automation.trigger == "event_start" else "end"
+        origin += f", at the {edge} of the calendar event \u201c{event.title}\u201d"
+    return f"{automation.prompt}\n\n({origin}. Nobody is watching it run: a step that needs approval waits for the user in Tasks.)"
+
+
 class Scheduler:
     """Fires automations at their `nextRunAt`. `tick` is one pass (what tests drive with a fake clock)."""
 
-    def __init__(self, store: CalendarStore, perform: Perform | None = None, clock: Clock = utc_now) -> None:
-        # `perform` may be wired after construction (the app's needs the agent runs, which need the tools first).
-        self.store, self.perform, self.clock = store, perform, clock
+    def __init__(self, store: CalendarStore, notes: NoteWriter, timezone: str, clock: Clock = utc_now) -> None:
+        self.store, self.notes, self.clock = store, notes, clock
+        # The background agent; the app sets it once its agent runs exist (they need the tools, which need this).
+        self.agent: AutomationAgent | None = None
+        self.tz = zone(timezone)
         self.wakeup = asyncio.Event()
-        self.running = 0
+
+    @property
+    def running(self) -> int:
+        """Agent tasks that automations started and that have not finished."""
+        return len(self.store.started())
 
     def wake(self) -> None:
         """Something changed (an edit, a pause): look again now rather than at the next planned time."""
@@ -472,17 +547,53 @@ class Scheduler:
 
     async def fire(self, automation: Automation, now: datetime) -> AutomationRun:
         """Run one automation now (a due one, or Run now) and record it; never raises."""
-        self.running += 1
         try:
-            if self.perform is None:
-                raise RuntimeError("automations are not wired to any actions")
-            status, detail, run_id, thread_id = await self.perform(automation)
+            status, detail, run_id, thread_id = await self.perform(automation, now)
         except Exception as exc:  # an automation failing is recorded, never fatal to the scheduler
             log.warning("automation %s failed: %s", automation.id, exc)
             status, detail, run_id, thread_id = "error", str(exc) or type(exc).__name__, None, None
-        finally:
-            self.running -= 1
         return self.store.add_run(automation, now, status, detail, run_id, thread_id)
+
+    async def perform(self, automation: Automation, now: datetime) -> tuple[RunStatus, str, str | None, str | None]:
+        """What a due automation does: a background agent task on a new thread (it stays `started` until the task
+        is over), a note append, or a notification (the tray shows it)."""
+        if automation.action == "agent_task":
+            if self.agent is None:
+                return "error", "the background agent is not running", None, None
+            event = self.store.event(automation.eventId) if automation.eventId else None
+            started = await self.agent.start_task(automation.title, automation_task(automation, event, now, self.tz))
+            if isinstance(started, str):
+                return "error", started, None, None
+            return "started", "working in Tasks", started.runId, started.threadId
+        if automation.action == "note_append":
+            assert automation.notePath is not None
+            stamp = now.astimezone(self.tz).strftime("%Y-%m-%d %H:%M")
+            note = await asyncio.to_thread(self.notes.write, automation.notePath, f"\n## {stamp}\n\n{automation.prompt}\n", "append")
+            return "ok", f"appended to {note.path}", None, None
+        return "ok", automation.prompt, None, None
+
+    def settle(self, task: AgentRunRecord) -> AutomationRun | None:
+        """An agent run changed: if it is an automation's task and it is over, record how it ended."""
+        outcome = TASK_OUTCOMES.get(task.status)
+        if outcome is None:
+            return None
+        detail = (task.result or task.status).strip()
+        if len(detail) > TASK_DETAIL_MAX:
+            detail = detail[: TASK_DETAIL_MAX - 1] + "\u2026"
+        return self.store.settle(task.runId, outcome, detail)
+
+    def reconcile(self) -> list[AutomationRun]:
+        """At startup: settle the tasks that finished, or were given up, while no one was listening."""
+        settled: list[AutomationRun] = []
+        if self.agent is None:
+            return []
+        for run in self.store.started():
+            assert run.runId is not None
+            task = self.agent.get(run.runId)
+            done = self.store.settle(run.runId, "error", "the task is gone") if task is None else self.settle(task)
+            if done is not None:
+                settled.append(done)
+        return settled
 
     async def tick(self) -> list[AutomationRun]:
         """Run (or skip, when missed or paused) every automation that is due, and plan each one's next run."""
@@ -593,6 +704,40 @@ class Imported(BaseModel):
     imported: int
 
 
+class TaskLink(BaseModel):
+    """An agent task an automation started: what the Tasks screen shows beside it, and where it opens in the calendar."""
+
+    runId: str
+    threadId: str | None
+    automationId: str
+    title: str
+    at: datetime
+    status: RunStatus
+    # None when the automation was deleted since.
+    trigger: Trigger | None = None
+    eventId: str | None = None
+    eventTitle: str | None = None
+
+
+class TaskLinks(BaseModel):
+    links: list[TaskLink]
+
+
+def task_links(store: CalendarStore) -> list[TaskLink]:
+    links: list[TaskLink] = []
+    for run in store.task_runs():
+        assert run.runId is not None
+        automation = store.automation(run.automationId)
+        event = store.event(automation.eventId) if automation is not None and automation.eventId else None
+        links.append(
+            TaskLink(
+                runId=run.runId, threadId=run.threadId, automationId=run.automationId, title=run.title, at=run.at, status=run.status,
+                trigger=automation.trigger if automation is not None else None, eventId=event.id if event else None, eventTitle=event.title if event else None,
+            )
+        )
+    return links
+
+
 def create_calendar_router(store: CalendarStore, scheduler: Scheduler) -> APIRouter:
     """Events, automations and the scheduler's state for the Calendar screen and the desktop tray."""
     router = APIRouter(prefix="/api", tags=["calendar"])
@@ -682,6 +827,11 @@ def create_calendar_router(store: CalendarStore, scheduler: Scheduler) -> APIRou
     async def runs(after: int = Query(0, ge=0)) -> RunList:
         listed = store.runs_after(after)
         return RunList(runs=listed, last=listed[-1].id if listed else max(after, 0))
+
+    @router.get("/automations/tasks")
+    async def tasks() -> TaskLinks:
+        """The agent tasks automations started, newest first (the Tasks screen links each to its automation and event)."""
+        return TaskLinks(links=await asyncio.to_thread(task_links, store))
 
     @router.get("/automations/status")
     async def status() -> SchedulerStatus:

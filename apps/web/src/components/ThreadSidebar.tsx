@@ -1,5 +1,5 @@
 import type { Thread } from "@osmo/osmo-composer";
-import { Gauge, Settings, History, MoreHorizontal, PanelLeft, Plus, ListTodo } from "lucide-react";
+import { Gauge, Settings, History, MoreHorizontal, PanelLeft, Plus } from "lucide-react";
 import { type ReactNode, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -48,10 +48,9 @@ export interface ThreadSidebarProps {
   footer?: ReactNode;
   /** Open the settings screen. */
   onOpenSettings?: () => void;
-  onOpenWorkbench?: () => void;
   /** Open the usage and cost dialog. */
   onOpenUsage?: () => void;
-  /** Osmo's other screens (notes, calendar, music), listed under New thread. */
+  /** Osmo's other screens (Tasks, then Calendar right below it, then Notes), listed under New thread. */
   places?: readonly SidebarPlace[];
 }
 
@@ -64,7 +63,7 @@ export interface SidebarPlace {
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenWorkbench, onOpenUsage, places = [] }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenUsage, places = [] }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -96,15 +95,14 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
             <IconButton label="New thread" hint="⌘K" onClick={onNew}>
               <Plus size={16} />
             </IconButton>
-            {onOpenWorkbench && <IconButton label="Tasks" onClick={onOpenWorkbench}><ListTodo size={16} /></IconButton>}
-            <IconButton label="History" onClick={toggleSidebar}>
-              <History size={16} />
-            </IconButton>
             {places.map((place) => (
               <IconButton key={place.id} label={place.label} onClick={place.onOpen}>
                 {place.icon}
               </IconButton>
             ))}
+            <IconButton label="History" onClick={toggleSidebar}>
+              <History size={16} />
+            </IconButton>
           </div>
         ) : (
           <>
@@ -113,7 +111,6 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
               <span>New thread</span>
               <kbd>⌘K</kbd>
             </button>
-            {onOpenWorkbench && <button type="button" className="osmo-new-thread" onClick={onOpenWorkbench}><ListTodo size={16} aria-hidden /><span>Tasks</span></button>}
             {places.length > 0 && (
               <nav className="osmo-places" aria-label="Places">
                 {places.map((place) => (

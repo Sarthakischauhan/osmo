@@ -48,6 +48,18 @@ export const automationRunSchema = z.object({
   runId: z.string().nullish(),
   threadId: z.string().nullish(),
 });
+/** An agent task an automation started (`GET /api/automations/tasks`): Tasks and the calendar link each other by it. */
+export const taskLinkSchema = z.object({
+  runId: z.string(),
+  threadId: z.string().nullish(),
+  automationId: z.string(),
+  title: z.string(),
+  at: z.string(),
+  status: z.enum(["started", "ok", "error", "skipped"]),
+  trigger: z.enum(["time", "event_start", "event_end"]).nullish(),
+  eventId: z.string().nullish(),
+  eventTitle: z.string().nullish(),
+});
 export const tickSchema = z.object({ automationId: z.string(), title: z.string(), at: z.string() });
 export const schedulerStatusSchema = z.object({ paused: z.boolean(), running: z.number(), next: automationSchema.nullish(), last: z.number() });
 
@@ -57,6 +69,7 @@ export type Automation = z.infer<typeof automationSchema>;
 export type AutomationRun = z.infer<typeof automationRunSchema>;
 export type SchedulerStatus = z.infer<typeof schedulerStatusSchema>;
 export type Tick = z.infer<typeof tickSchema>;
+export type TaskLink = z.infer<typeof taskLinkSchema>;
 export type AutomationInput = Omit<Automation, "id" | "lastRunAt" | "lastStatus" | "nextRunAt">;
 
 const browserFetch: Fetcher = (input, init) => fetch(input, init);
@@ -92,6 +105,9 @@ export function calendarApi(fetcher: Fetcher = browserFetch) {
     },
     async runNow(id: string): Promise<AutomationRun> {
       return read(await fetcher(`/api/automations/${encodeURIComponent(id)}/run`, { method: "POST" }), automationRunSchema);
+    },
+    async tasks(): Promise<TaskLink[]> {
+      return (await read(await fetcher("/api/automations/tasks"), z.object({ links: z.array(taskLinkSchema) }))).links;
     },
     async status(): Promise<SchedulerStatus> {
       return read(await fetcher("/api/automations/status"), schedulerStatusSchema);
@@ -161,4 +177,11 @@ export function triggerLabel(automation: Pick<Automation, "trigger" | "offsetMin
   if (automation.trigger === "event_start") return `At event start${shift}`;
   if (automation.trigger === "event_end") return `At event end${shift}`;
   return automation.rrule ? "On a schedule" : "Once";
+}
+
+/** How a task an automation started says where it came from: `Weekly notes · end of “Weekly notes”`. */
+export function taskOrigin(link: TaskLink): string {
+  if (!link.eventTitle) return link.title;
+  const edge = link.trigger === "event_start" ? "start" : link.trigger === "event_end" ? "end" : undefined;
+  return edge ? `${link.title} · ${edge} of \u201c${link.eventTitle}\u201d` : `${link.title} · \u201c${link.eventTitle}\u201d`;
 }

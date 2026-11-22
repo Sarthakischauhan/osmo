@@ -71,10 +71,7 @@ from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.web_search import WebSearchTool
 from symphony_server.local_calendar import (
     CALENDAR_TOOL_NAMES,
-    Automation,
     CalendarStore,
-    RunStatus,
-    zone,
     Scheduler,
     calendar_tools,
     create_calendar_router,
@@ -227,8 +224,8 @@ def create_app(
             log.info("coding tools are off: the macOS sandbox (sandbox-exec) is not available here")
     vaults = VaultIndex(settings.vaults, settings.vault_index_file)
     calendar = CalendarStore(settings.database_file)
-    # Its `perform` needs the agent runs made below and is set there; it only runs once the app does.
-    scheduler = Scheduler(calendar)
+    # It fires automations on the calendar's clock; their agent tasks are durable runs of `agents`, set below.
+    scheduler = Scheduler(calendar, vaults, settings.timezone)
     library = LocalLibrary(settings.music_dirs)
     spotify = SpotifyAccount(settings.spotify_client_id, credentials, http_client)
     music_now = MusicNow()
@@ -244,22 +241,8 @@ def create_app(
     backend = DurableRunBackend(RunExecutor(core_config), run_store)
     agents = AgentRuns(backend, storage, broker, access, settings.agent_model, browsers, desktops=desktops, auto_model=settings.agent_model_auto)
 
-    async def perform(automation: Automation) -> tuple[RunStatus, str, str | None, str | None]:
-        """What a due automation does: an agent run on a new thread, a note append, or a notification (the tray shows it)."""
-        if automation.action == "agent_task":
-            thread = storage.create_thread(automation.title)
-            started = await agents.start(thread.id, automation.prompt)
-            if isinstance(started, str):
-                return "error", started, None, thread.id
-            return "started", f"agent run {started.runId}", started.runId, thread.id
-        if automation.action == "note_append":
-            assert automation.notePath is not None
-            stamp = scheduler.clock().astimezone(zone(settings.timezone)).strftime("%Y-%m-%d %H:%M")
-            note = await asyncio.to_thread(vaults.write, automation.notePath, f"\n## {stamp}\n\n{automation.prompt}\n", "append")
-            return "ok", f"appended to {note.path}", None, None
-        return "ok", automation.prompt, None, None
-
-    scheduler.perform = perform
+    scheduler.agent = agents
+    agents.finished.append(scheduler.settle)
 
     def subscription_connected(provider: str) -> None:
         storage.save_connection(subscription_id(provider), "oauth")
@@ -284,6 +267,8 @@ def create_app(
         persistence.prune(cutoff)
         # Runs the previous server left unfinished pick up where they stopped.
         await agents.recover()
+        # Automation tasks that ended (or were given up) while the server was down are settled on their automation.
+        scheduler.reconcile()
         # The vaults: make the folders, bring the index up to date in a worker thread, then follow file changes.
         vault_watch = asyncio.create_task(keep_vaults(vaults))
         # Automations: the scheduler runs as long as the server does (the desktop keeps it up from the tray).

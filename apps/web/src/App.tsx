@@ -36,7 +36,7 @@ import { AgentModelDialog } from "@/components/AgentModelDialog";
 import { UsageDialog } from "@/components/UsageDialog";
 import { NotesView } from "@/components/NotesView";
 import type { SidebarPlace } from "@/components/ThreadSidebar";
-import { CalendarDays, NotebookPen } from "lucide-react";
+import { CalendarDays, ListTodo, NotebookPen } from "lucide-react";
 import { CalendarView } from "@/components/CalendarView";
 import { FeedTurn } from "./FeedTurn";
 import { agentActivity } from "./compact";
@@ -66,8 +66,8 @@ export function App() {
 }
 
 /** The main pane's screens; `#notes` (etc.) in the URL opens one directly. */
-export type AppView = "chat" | "notes" | "calendar";
-const VIEWS: readonly AppView[] = ["chat", "notes", "calendar"];
+export type AppView = "chat" | "tasks" | "calendar" | "notes";
+const VIEWS: readonly AppView[] = ["chat", "tasks", "calendar", "notes"];
 
 function initialView(): AppView {
   const hash = window.location.hash.slice(1);
@@ -88,7 +88,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const [feed, dispatchFeed] = useReducer(feedReducer, emptyFeed);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadId, setThreadId] = useState<string>();
-  const [workbenchOpen, setWorkbenchOpen] = useState(false);
+  // The automation the calendar opens on (Tasks links each automation task to it).
+  const [calendarFocus, setCalendarFocus] = useState<string>();
   const [runs, setRuns] = useState<Runs>({});
   const approvals = useRef<ApprovalRequest[]>([]);
   const now = useNow();
@@ -140,7 +141,6 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   }, []);
   const openThread = useCallback(
     async (id: string | undefined) => {
-      setWorkbenchOpen(false);
       end();
       void window.osmoDesktop?.setEnabled(false);
       setThreadId(id);
@@ -369,7 +369,8 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
   const showThought = currentThought !== undefined && (session.state === "thinking" || session.state === "working");
   const showOrbBubble = orbBubbleVisible(session.state, orbActivity, showThought);
   // The welcome screen holds the orb at the centre over the voice field; the first turn docks it.
-  const home = view === "chat" && !workbenchOpen && feed.turns.length === 0;
+  const workbenchOpen = view === "tasks";
+  const home = view === "chat" && feed.turns.length === 0;
 
   const place = (id: Exclude<AppView, "chat">, label: string, icon: ReactNode): SidebarPlace => ({
     id,
@@ -378,11 +379,18 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     active: view === id,
     onOpen: () => setView(id),
   });
+  // Tasks first, the calendar directly below it (its automations run as tasks), then the notes.
   const places = [
-    place("notes", "Notes", <NotebookPen size={16} aria-hidden />),
+    place("tasks", "Tasks", <ListTodo size={16} aria-hidden />),
     place("calendar", "Calendar", <CalendarDays size={16} aria-hidden />),
+    place("notes", "Notes", <NotebookPen size={16} aria-hidden />),
   ];
-  const screen = view === "notes" ? <NotesView /> : view === "calendar" ? <CalendarView /> : undefined;
+  const openAutomation = (id: string) => {
+    setCalendarFocus(id);
+    setView("calendar");
+  };
+  const screen =
+    view === "notes" ? <NotesView /> : view === "calendar" ? <CalendarView focus={calendarFocus} onOpenTask={(id) => void openThread(id)} /> : undefined;
 
   return (
     <>
@@ -396,7 +404,6 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
         onDelete={(id) => void deleteThread(id)}
         countMessages={countMessages}
         onOpenSettings={() => setAgentModelOpen(true)}
-        onOpenWorkbench={() => setWorkbenchOpen(true)}
         onOpenUsage={() => setUsageOpen(true)}
         places={places}
       />
@@ -419,7 +426,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
           </div>
         </header>
 
-        {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} /> : <>
+        {workbenchOpen ? <AgentWorkbench onOpenThread={(id) => void openThread(id)} onOpenSettings={() => setAgentModelOpen(true)} onOpenAutomation={openAutomation} /> : <>
         <WidgetProvider widgets={osmoWidgets} respondToWidget={respondToWidget} disabled={!connected}>
           <BrowserControlsContext.Provider value={browserControls}>
             <div className="osmo-scroll-host">
