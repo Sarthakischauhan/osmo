@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { agentRunSchema, threadApi, type AgentRun } from "@/lib/threads";
 import { decideApproval, fetchRuns, type ApprovalRequest } from "@/lib/runs";
 import { agentModelApi, type AgentModelState } from "@/agentModel";
-import { calendarApi, taskOrigin, type TaskLink } from "@/lib/calendar";
+import { calendarApi, taskOrigin, taskPrompt, type TaskLink } from "@/lib/calendar";
 
 const active = (run: AgentRun) => run.status === "running" || run.status === "waiting_approval";
 const label = (status: AgentRun["status"]) => ({ running: "Working", waiting_approval: "Needs approval", completed: "Completed", failed: "Failed", cancelled: "Stopped" })[status] ?? status;
@@ -82,7 +82,7 @@ export function AgentWorkbench({ onOpenThread, onOpenSettings, onOpenAutomation 
       <div className="agent-run-icon" data-status={run.status} aria-hidden="true">{run.status === "running" ? <LoaderCircle size={15} /> : run.status === "completed" ? <Check size={15} /> : <CircleAlert size={15} />}</div>
       <div className="agent-run-content">
         <div className="agent-workbench-run-top"><span className="agent-workbench-status" data-status={run.status}>{label(run.status)}</span><time dateTime={new Date(run.createdAt * 1000).toISOString()}>{new Date(run.createdAt * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time></div>
-        <h3>{run.task}</h3>
+        <h3>{origin ? taskPrompt(run.task) : run.task}</h3>
         {origin && onOpenAutomation && <button type="button" className="agent-workbench-origin" onClick={() => onOpenAutomation(origin.automationId)} title="Open the automation in Calendar"><CalendarClock size={12} aria-hidden /><span>{taskOrigin(origin)}</span></button>}
         {phases[run.runId] && <p role="status">{phases[run.runId]}</p>}
         {run.result && <details className="agent-run-result"><summary>View result <ChevronDown size={14} /></summary><p>{run.result}</p></details>}

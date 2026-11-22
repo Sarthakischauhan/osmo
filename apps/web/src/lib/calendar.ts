@@ -179,6 +179,14 @@ export function triggerLabel(automation: Pick<Automation, "trigger" | "offsetMin
   return automation.rrule ? "On a schedule" : "Once";
 }
 
+// The note local_calendar.automation_task adds after an automation's prompt, for the agent; Tasks shows the chip instead.
+const ORIGIN_NOTE = /\n\n\(This is the Osmo automation [\s\S]*\)$/;
+
+/** What Tasks shows as an automation task's title: its prompt, without the note the agent got about where it came from. */
+export function taskPrompt(task: string): string {
+  return task.replace(ORIGIN_NOTE, "");
+}
+
 /** How a task an automation started says where it came from: `Weekly notes · end of “Weekly notes”`. */
 export function taskOrigin(link: TaskLink): string {
   if (!link.eventTitle) return link.title;

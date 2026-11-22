@@ -109,22 +109,23 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
     <div className="osmo-calendar">
       <header className="osmo-view-head">
         <h1>Calendar</h1>
-        <div className="osmo-view-tools osmo-week-tools">
-          <button type="button" className="osmo-week-nav" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))}>
-            <ChevronLeft size={14} />
-          </button>
-          <span className="osmo-week-range">{rangeLabel(start)}</span>
-          <button type="button" className="osmo-week-nav" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}>
-            <ChevronRight size={14} />
-          </button>
-          <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setStart(weekStart(now))}>Today</button>
-          <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-event" })}>New event</button>
-          <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation" })}>New automation</button>
-        </div>
       </header>
       {error && <p className="osmo-notes-error" role="alert">{error}</p>}
       <div className="osmo-calendar-pane">
         <div className="osmo-week">
+          <div className="osmo-week-tools">
+            <button type="button" className="osmo-week-nav" aria-label="Previous week" onClick={() => setStart(addDays(start, -7))}>
+              <ChevronLeft size={14} />
+            </button>
+            <span className="osmo-week-range">{rangeLabel(start)}</span>
+            <button type="button" className="osmo-week-nav" aria-label="Next week" onClick={() => setStart(addDays(start, 7))}>
+              <ChevronRight size={14} />
+            </button>
+            <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setStart(weekStart(now))}>Today</button>
+            <span className="osmo-week-tools-gap" />
+            <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-event" })}>New event</button>
+            <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation" })}>New automation</button>
+          </div>
           <div className="osmo-week-head">
             <div />
             {days.map((day, i) => (
@@ -140,6 +141,9 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
                 <span key={hour} style={{ top: (hour - GRID_FIRST_HOUR) * HOUR_PX }}>{hourLabel(hour)}</span>
               ))}
             </div>
+            {days.some((day) => sameDay(day, now)) && now.getHours() >= GRID_FIRST_HOUR && now.getHours() < GRID_LAST_HOUR && (
+              <div className="osmo-week-now" style={{ top: placement(now, now).top }} />
+            )}
             <div className="osmo-week-lines" aria-hidden>
               {Array.from({ length: GRID_LAST_HOUR - GRID_FIRST_HOUR + 1 }, (_, i) => <i key={i} style={{ top: i * HOUR_PX }} />)}
             </div>
@@ -181,9 +185,6 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
                       </button>
                     );
                   })}
-                {sameDay(day, now) && now.getHours() >= GRID_FIRST_HOUR && now.getHours() < GRID_LAST_HOUR && (
-                  <div className="osmo-week-now" style={{ top: placement(now, now).top }} />
-                )}
               </div>
             ))}
           </div>

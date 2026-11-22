@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, calendarApi, isoWithOffset, placement, rangeLabel, spanLabel, taskOrigin, triggerLabel, weekStart } from "../src/lib/calendar";
+import { addDays, calendarApi, isoWithOffset, placement, rangeLabel, spanLabel, taskOrigin, taskPrompt, triggerLabel, weekStart } from "../src/lib/calendar";
 
 describe("the week grid", () => {
   it("starts weeks on Monday and labels the range like the mockup", () => {
@@ -51,5 +51,13 @@ describe("the calendar API", () => {
     expect(taskOrigin(weekly!)).toBe("Weekly notes · end of \u201cWeekly notes\u201d");
     expect(taskOrigin(brief!)).toBe("Brief");
     expect(taskOrigin({ ...weekly!, trigger: "event_start", eventTitle: "Standup" })).toBe("Weekly notes · start of \u201cStandup\u201d");
+  });
+});
+
+describe("taskPrompt", () => {
+  it("drops the origin note the agent got, keeping the prompt's own paragraphs", () => {
+    const task = "Summarize the week.\n\nKeep it short.\n\n(This is the Osmo automation “Weekly”, run on Fri Nov 20 at 3:30 PM. Nobody is watching it run: a step that needs approval waits for the user in Tasks.)";
+    expect(taskPrompt(task)).toBe("Summarize the week.\n\nKeep it short.");
+    expect(taskPrompt("Fix the build (the CI one)")).toBe("Fix the build (the CI one)");
   });
 });
