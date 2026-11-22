@@ -175,6 +175,7 @@ class VoiceTurns:
             log.warning("speech was detected but transcript was not received before timeout (utterance=%s)", utterance)
             await self.host.emit(TranscriptDelta(role="user", text="", itemId=utterance, final=True))
             await self.host.emit(VoiceErrorEvent(code="transcript_timeout", message="Speech was detected, but transcription did not arrive. Please try again."))
+            await self.host.set_state("listening", "Speech was detected, but transcription did not arrive.")
 
     async def answer(self, voice: VoiceSession) -> None:
         """Read the session's responses in order for as long as it is open: show and store each
