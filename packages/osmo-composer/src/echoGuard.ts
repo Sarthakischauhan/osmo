@@ -36,8 +36,8 @@ export interface EchoGuardOptions {
   musicHangMs: number;
 }
 
-/** Chosen values: a 50 ms block, three of them (150 ms of speech) to barge in, -34 dBFS floor, user at least 0.6x the output. */
-export const ECHO_GUARD: EchoGuardOptions = { floor: 0.02, ratio: 0.6, blocks: 3, blockMs: 50, tailMs: 300, preroll: 5, musicFloor: 0.08, musicHangMs: 800 };
+/** Favor preserving quiet speech over aggressive echo suppression; provider VAD still decides turn boundaries. */
+export const ECHO_GUARD: EchoGuardOptions = { floor: 0.012, ratio: 0.35, blocks: 2, blockMs: 50, tailMs: 0, preroll: 5, musicFloor: 0.035, musicHangMs: 1000 };
 
 /** Root mean square of samples (0..1). */
 export function rms(samples: Float32Array, start = 0, end = samples.length): number {
@@ -64,7 +64,6 @@ export interface GuardStep {
 export class EchoGuard {
   private held: ArrayBuffer[] = [];
   private run = 0;
-  private lastPlayback = Number.NEGATIVE_INFINITY;
   // After a barge-in, frames pass until playback has stopped (the caller flushed it).
   private open = false;
   private heardOverMusic = Number.NEGATIVE_INFINITY;
@@ -79,8 +78,8 @@ export class EchoGuard {
    * the time (ms, any monotonic clock), and whether the music player is playing.
    */
   push(frame: ArrayBuffer, playing: boolean, output: number, now: number, music = false): GuardStep {
-    if (playing) this.lastPlayback = now;
-    const guarded = playing || now - this.lastPlayback < this.options.tailMs;
+    // Never gate audio after playback has stopped: the first quiet words of a new turn must reach provider VAD.
+    const guarded = playing;
     if (!guarded && music) return this.overMusic(frame, now);
     if (!guarded || this.open) {
       if (!playing) this.open = false;
