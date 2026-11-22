@@ -12,7 +12,7 @@ import logging
 import secrets
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from core_ai.voice import (
     AudioDelta,
@@ -30,6 +30,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from symphony_server.grok_compat import ReasoningDelta
 from symphony_server.protocol import OsmoState, ServerEvent, TranscriptDelta
+from symphony_server.voice_switch import VoiceSwitch
 from symphony_server.voice_tool_calls import VoiceToolCalls
 from symphony_server.voice_transcript import Transcript
 from symphony_server.voices import Selection, VoiceModel
@@ -65,6 +66,7 @@ class TurnHost(Protocol):
 
     voice: VoiceSession | None
     selection: Selection
+    switch: VoiceSwitch
 
     async def emit(self, event: ServerEvent) -> None:
         """Send an event to the browser."""
@@ -83,9 +85,6 @@ class TurnHost(Protocol):
 
     async def record_usage(self, done: ResponseDone) -> None:
         """Store and show what an answer used."""
-
-    async def apply_swap(self, source: Literal["client", "tool"]) -> None:
-        """Move onto the selected model now."""
 
     async def voice_lost(self) -> None:
         """The voice session ended on its own."""
@@ -243,7 +242,7 @@ class VoiceTurns:
         self.idle.set()
         if self.swap_after_turn:
             self.swap_after_turn = False
-            await self.host.apply_swap("tool")
+            await self.host.switch.apply_swap("tool")
         await self.host.set_state("listening")
 
     async def ask(self, voice: VoiceSession) -> None:

@@ -17,7 +17,7 @@ import asyncio
 import logging
 import secrets
 from collections.abc import Coroutine, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from core_ai.voice import ResponseDone, VoiceConfig, VoiceSession
 from core_harness import Tool
@@ -60,15 +60,13 @@ from symphony_server.session_previews import SessionPreviews
 from symphony_server.storage import DEFAULT_THREAD_TITLE, Storage, ThreadRecord
 from symphony_server.turn_events import action_text
 from symphony_server.usage import voice_usage
+from symphony_server.voice_switch import VoiceSwitch
 from symphony_server.voice_tool_calls import VoiceToolCalls, VoiceToolSink
 from symphony_server.voice_transcript import Transcript, conversation_title
 from symphony_server.voice_turns import BARGE_IN, VoiceTurns
 from symphony_server.voices import PreviewCache, Selection, SetVoiceArgs, VoiceModel, default_selection, find_model, resolve_selection
 
 log = logging.getLogger("symphony.voice")
-
-# A picker model switch waits this long for the current answer to finish.
-SWAP_WAIT_S = 15.0
 
 
 class VoiceBridge:
@@ -98,7 +96,8 @@ class VoiceBridge:
         self.previews = SessionPreviews(access, previews)
         self.desk = AgentDesk(agents, desktop=self.desktop)
         self.transcript = Transcript(storage, instructions)
-        sink = VoiceToolSink(self.emit, self.transcript, self.configure)
+        self.switch = VoiceSwitch(self)
+        sink = VoiceToolSink(self.emit, self.transcript, self.switch.configure)
         voice_tools = [*tools, RunAgentTool(self.desk), AgentStatusTool(self.desk), CancelAgentTool(self.desk)]
         self.broker = broker
         self.calls = VoiceToolCalls(
@@ -117,7 +116,6 @@ class VoiceBridge:
         self.state: OsmoState = "idle"
         self.state_detail: str | None = None
         self.turns = VoiceTurns(self, browser, self.transcript, self.calls)
-        self.configure_lock = asyncio.Lock()
         self.tasks: set[asyncio.Task[None]] = set()
 
     async def run(self) -> None:
@@ -198,7 +196,7 @@ class VoiceBridge:
             await self.widget_action(event)
         elif isinstance(event, SessionConfigure):
             # Beside the receive loop: a model switch may wait for the current answer to end.
-            self.spawn(self.configure_from_client(SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)))
+            self.spawn(self.switch.from_client(SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)))
         elif isinstance(event, VoicePreviewRequest):
             self.spawn(self.preview(event))
 
@@ -313,16 +311,6 @@ class VoiceBridge:
         for message in self.storage.messages(self.thread.id):
             await voice.add_message("assistant" if message.role == "assistant" else "user", message.text)
 
-    async def swap(self) -> bool:
-        """Move onto a newly selected model: the model is fixed per voice session, so open a new
-        one (seeded from the thread). The browser socket stays."""
-        old = self.voice
-        if not await self.open_voice():
-            return False
-        if old is not None:
-            await old.aclose()
-        return True
-
     async def close_voice(self) -> None:
         """Close the voice session, storing the answers still held."""
         self.desktop.configure(False)
@@ -377,53 +365,6 @@ class VoiceBridge:
         await voice.add_message("user", notice.text)
         if notice.tag != "silent":
             await self.turns.ask(voice)
-
-    async def configure_from_client(self, change: SetVoiceArgs) -> None:
-        """A picker commit. A model switch waits for the current answer to finish (never
-        cutting it off), then swaps and tells the browser the session is listening."""
-        async with self.configure_lock:
-            swapping = self.voice is not None and (change.model or self.selection.model) != self.selection.model
-            if swapping:
-                try:
-                    async with asyncio.timeout(SWAP_WAIT_S):
-                        await self.turns.idle.wait()
-                except TimeoutError:
-                    log.warning("model switch waited %.0fs for the answer to end; switching anyway", SWAP_WAIT_S)
-            before = self.voice
-            outcome = await self.configure(change, "client")
-            if isinstance(outcome, Selection) and self.voice is not before:
-                await self.set_state("listening")
-
-    async def configure(self, change: SetVoiceArgs, source: Literal["client", "tool"]) -> Selection | str:
-        """The one path for picker commits and `set_voice`: validate, apply, tell the browser.
-        The browser always hears back with the applied selection, or the one still in effect plus `error`."""
-        picked = resolve_selection(self.access.models(), change, self.selection)
-        if isinstance(picked, str):
-            log.warning("rejected voice change from %s: %s", source, picked)
-            await self.emit(VoiceConfigured(selection=self.selection, source=source, error=picked))
-            return picked
-        previous, self.selection = self.selection, picked
-        if self.voice is None:
-            await self.emit(VoiceConfigured(selection=picked, source=source))
-            return picked
-        if picked.model == previous.model:
-            await self.voice.update(self.voice_config())
-        elif source == "tool":
-            # The answer that asked is still speaking its confirmation on this session.
-            self.turns.swap_after_turn = True
-            return picked
-        elif not await self.swap():
-            self.selection = previous
-            error = f"could not open {picked.model}; still on {previous.model}"
-            await self.emit(VoiceConfigured(selection=previous, source=source, error=error))
-            return error
-        await self.emit(VoiceConfigured(selection=picked, source=source))
-        return picked
-
-    async def apply_swap(self, source: Literal["client", "tool"]) -> None:
-        """Move onto the selected model now, and tell the browser how it went."""
-        error = None if await self.swap() else f"could not open {self.selection.model}"
-        await self.emit(VoiceConfigured(selection=self.selection, source=source, error=error))
 
     async def preview(self, request: VoicePreviewRequest) -> None:
         """Play a voice preview in the browser."""
