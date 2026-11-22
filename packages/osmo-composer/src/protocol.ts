@@ -164,6 +164,7 @@ export const serverEventSchema = z.discriminatedUnion("type", [
   musicCommandSchema,
   z.object({ type: z.literal("desktop.request"), requestId: z.string(), action: z.record(z.unknown()) }),
   z.object({ type: z.literal("state"), state: osmoStateSchema, detail: z.string().optional() }),
+  z.object({ type: z.literal("voice.error"), code: z.enum(["transcript_timeout", "provider_error"]), message: z.string() }),
   z.object({
     type: z.literal("transcript.delta"),
     role: z.enum(["user", "assistant"]),
