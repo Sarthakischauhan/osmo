@@ -73,7 +73,11 @@ def executable(path: Path) -> Path:
     return path
 
 
-def test_find_chrome_prefers_an_installed_mac_app_then_path_then_nothing(tmp_path: Path) -> None:
+def test_find_chrome_prefers_an_installed_mac_app_then_path_then_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Avoid reading the real machine's /Applications while checking browser priority.
+    from symphony_server import chrome as chrome_module
+
+    monkeypatch.setattr(chrome_module, "browser_candidates", lambda platform, home: [home / "Applications" / name for name in chrome_module.MAC_BROWSERS] if platform == "darwin" else [])
     on_path = {"chromium": "/usr/bin/chromium"}
     # Linux: the first browser on PATH, in Osmo's order.
     assert find_chrome("linux", tmp_path, on_path.get) == "/usr/bin/chromium"

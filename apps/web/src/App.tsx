@@ -22,7 +22,6 @@ import { ThreadSidebar } from "@/components/ThreadSidebar";
 import { AgentWorkbench } from "@/components/AgentWorkbench";
 import { ScrollDirectionBar } from "@/components/ScrollDirectionBar";
 import { RunsList } from "@/components/home/RunsList";
-import { AsciiHome } from "@/components/home/AsciiHome";
 import { VoiceField } from "@/components/home/VoiceField";
 import { type ApprovalRequest, COMPLETED_LINGER_MS, type RunView, type Runs, decideApproval, fetchRuns, mergeListed, reduceRuns, visibleRuns } from "@/lib/runs";
 import { insertAfter, threadApi } from "@/lib/threads";
@@ -450,7 +449,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
             <div className="osmo-scroll-host">
               <main ref={feedScrollRef} className="canvas chat-root osmo-scroll" data-theme={theme} onChange={onFeedChange}>
                 {feed.turns.length === 0 ? (
-                  <AsciiHome />
+                  <div className="osmo-ascii-home chat-welcome"><h1 className="sr-only">New conversation</h1></div>
                 ) : (
                   <div className="feed">
                     {shownRuns.length > 0 && <div className="osmo-feed-runs">{runsList}</div>}
