@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { HtmlWidget, withCsp } from "../src/html";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { HtmlWidget, withKit } from "../src/html";
+import { OSMO_UI_CSS } from "../src/kit/osmoUi";
 
 afterEach(cleanup);
 
@@ -27,7 +30,11 @@ describe("HtmlWidget", () => {
     }
     const frame = onlyFrame();
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
-    expect(frame.getAttribute("srcdoc")).toContain(`connect-src 'none'`);
+    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    for (const directive of ["default-src 'none'", "connect-src 'none'", "img-src data: blob:", "form-action 'none'", "base-uri 'none'"]) {
+      expect(srcdoc).toContain(directive);
+    }
+    expect(srcdoc).toContain("window.osmo");
     expect(frame.getAttribute("title")).toBe("Tip calculator");
   });
 
@@ -89,10 +96,63 @@ describe("HtmlWidget", () => {
   });
 });
 
-describe("withCsp", () => {
-  it("injects the CSP inside head, after a doctype, or at the start", () => {
-    expect(withCsp("<html><head></head></html>")).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy"/);
-    expect(withCsp("<!doctype html><p>x</p>")).toMatch(/^<!doctype html><meta/);
-    expect(withCsp("<p>x</p>")).toMatch(/^<meta/);
+describe("withKit", () => {
+  it("puts the CSP, kit and bridge inside head, after a doctype, or at the start", () => {
+    expect(withKit("<html><head></head></html>", "dark")).toMatch(/^<html><head><meta http-equiv="Content-Security-Policy"/);
+    expect(withKit("<!doctype html><p>x</p>", "dark")).toMatch(/^<!doctype html><meta/);
+    expect(withKit("<p>x</p>", "dark")).toMatch(/^<meta/);
+    const kit = withKit("<p>x</p>", "light");
+    expect(kit.indexOf("<style>")).toBeLessThan(kit.indexOf("<p>x</p>"));
+    expect(kit.indexOf("<script>")).toBeLessThan(kit.indexOf("<p>x</p>"));
+    expect(kit).toContain('dataset.theme = "light"');
+  });
+
+  it("defines every class the render_widget description tells the model about", () => {
+    const widgets = readFileSync(join(__dirname, "../../../apps/symphony-server/src/symphony_server/widgets.py"), "utf8");
+    const listed = /instead of inline CSS: "\s*"([^"]+)"\s*"([^"]+)"/.exec(widgets);
+    expect(listed).not.toBeNull();
+    const names = `${listed?.[1]} ${listed?.[2]}`.replace(/\([^)]*\)/g, "").split(/[,.\s]+/).filter(Boolean);
+    expect(names.length).toBeGreaterThan(14);
+    for (const name of names) expect(OSMO_UI_CSS).toMatch(new RegExp(`\\.${name}\\b`));
+  });
+
+  it("uses 8px radius buttons", () => {
+    expect(OSMO_UI_CSS).toContain("--radius-md: 8px");
+    expect(/\.button \{[^}]*border-radius: var\(--radius-md\)/.exec(OSMO_UI_CSS)).not.toBeNull();
+  });
+});
+
+describe("click bridge", () => {
+  const actions = [{ id: "approve", label: "Approve" }];
+  const post = (source: MessageEventSource | null, data: unknown) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data, source }));
+    });
+
+  it("reports a declared action from its own frame, with the value", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve", value: "yes" });
+    expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, "yes");
+  });
+
+  it("drops undeclared ids, malformed messages and messages from any other window", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    const own = onlyFrame().contentWindow;
+    post(own, { osmo: "action", id: "delete" });
+    post(own, { osmo: "action", id: "approve", extra: 1 });
+    post(own, { osmo: "action", id: "approve", value: "x".repeat(2001) });
+    post(window, { osmo: "action", id: "approve" });
+    post(null, { osmo: "action", id: "approve" });
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("follows the frame into fullscreen", () => {
+    const onAction = vi.fn();
+    render(<HtmlWidget html={DOC} title="t" actions={actions} onAction={onAction} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open fullscreen" }));
+    post(onlyFrame().contentWindow, { osmo: "action", id: "approve" });
+    expect(onAction).toHaveBeenCalledWith({ id: "approve", label: "Approve" }, undefined);
   });
 });

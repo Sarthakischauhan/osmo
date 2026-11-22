@@ -3,13 +3,12 @@
 # sources unmodified; outside that workspace they must be ignored.)
 #
 # core-server is vendored unmodified until it is published; replace this
-# line with a version pin then. symphony-core is the PyPI release 0.0.4 (it has core_ai.voice and
-# Sarvam; verified against https://pypi.org/pypi/symphony-core/json). symphony-harness is pinned to the
-# head of Symphony PR #165 (release/0.0.4), which is not the harness 0.0.1 on PyPI; REPIN it to a
-# release once one is published.
-# The vendored core_server is still byte-identical to a335957 (CI checks it).
-symphony-core==0.0.4
-symphony-harness @ git+https://github.com/Sarthakischauhan/symphony@c69034780524a6093ee598bbeba67aba8c66226b#subdirectory=core_harness
+# line with a version pin then. symphony-core and symphony-harness are the PyPI 0.0.7 releases
+# (Symphony #181), which carry #180's cached-token usage, core_ai.models.pricing and the
+# cached-rate session_cost.
+# The vendored core_server is byte-identical to Symphony 9fb6c8bf2faac74b41bf1b52eb68e6e52946cc31 (CI checks it).
+symphony-core==0.0.7
+symphony-harness==0.0.7
 core-server @ file:../../vendor/core_server
 # Infisical SDK for OSMO_SECRET_STORE=infisical, pinned to the version the store is tested against.
 infisicalsdk==1.0.18

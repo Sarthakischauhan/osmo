@@ -1,7 +1,11 @@
-import { WidgetProvider, WidgetRenderer } from "@sarchauhan/chat";
+// @vitest-environment jsdom
+import { WidgetProvider, WidgetRenderer, type WidgetResponse } from "@sarchauhan/chat";
+import { act, cleanup, render as mount } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { osmoWidgets, toWidgetPart } from "../src/registry";
+
+afterEach(cleanup);
 
 const respond = async () => undefined;
 
@@ -61,6 +65,24 @@ describe("osmo widget registry on chat-sdk", () => {
 
   it("shows the agent browser as starting until its first frame", () => {
     expect(render("w8", "browser", { status: "live" })).toContain("Starting the browser");
+  });
+
+  it("makes an html widget interactive only when it declares actions, and answers with the declared action", async () => {
+    expect(toWidgetPart("w9", "html", { html: "<p>x</p>" })?.interactive).toBe(false);
+    const part = toWidgetPart("w9", "html", { html: "<p>x</p>", actions: [{ id: "approve", label: "Approve" }] });
+    if (!part) throw new Error("html failed validation");
+    expect(part.interactive).toBe(true);
+    const answered = vi.fn(async (_response: WidgetResponse) => undefined);
+    const { container } = mount(
+      <WidgetProvider widgets={osmoWidgets} respondToWidget={answered}>
+        <WidgetRenderer part={part} />
+      </WidgetProvider>,
+    );
+    const frame = container.querySelector("iframe");
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent("message", { data: { osmo: "action", id: "approve", value: "now" }, source: frame?.contentWindow ?? null }));
+    });
+    expect(answered).toHaveBeenCalledWith(expect.objectContaining({ widgetId: "w9", actionId: "approve", value: "now", label: "Approve" }));
   });
 
   it("drops widgets that fail the schema", () => {

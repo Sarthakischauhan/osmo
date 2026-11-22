@@ -1,5 +1,5 @@
 import type { Thread } from "@osmo/osmo-composer";
-import { Settings, History, MoreHorizontal, PanelLeft, Plus, ListTodo } from "lucide-react";
+import { Gauge, Settings, History, MoreHorizontal, PanelLeft, Plus } from "lucide-react";
 import { type ReactNode, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   AlertDialog,
@@ -46,13 +46,26 @@ export interface ThreadSidebarProps {
   initialRenaming?: string;
   now?: number;
   footer?: ReactNode;
+  /** The music mini player, at the very bottom (GUI's music-mini mockup); told whether the sidebar is collapsed. */
+  player?: (collapsed: boolean) => ReactNode;
   /** Open the settings screen. */
   onOpenSettings?: () => void;
-  onOpenWorkbench?: () => void;
+  /** Open the usage and cost dialog. */
+  onOpenUsage?: () => void;
+  /** Osmo's other screens (Tasks, then Calendar right below it, then Notes), listed under New thread. */
+  places?: readonly SidebarPlace[];
+}
+
+export interface SidebarPlace {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  active: boolean;
+  onOpen: () => void;
 }
 
 /** Osmo's thread list: date groups, inline rename, fork, delete with confirmation. */
-export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenWorkbench }: ThreadSidebarProps) {
+export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, onFork, onDelete, countMessages, initialRenaming, now, footer, onOpenSettings, onOpenUsage, places = [], player }: ThreadSidebarProps) {
   const [renaming, setRenaming] = useState<string | undefined>(initialRenaming);
   const [deleting, setDeleting] = useState<{ thread: Thread; messages: number }>();
   const { state, toggleSidebar } = useSidebar();
@@ -84,7 +97,11 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
             <IconButton label="New thread" hint="⌘K" onClick={onNew}>
               <Plus size={16} />
             </IconButton>
-            {onOpenWorkbench && <IconButton label="Tasks" onClick={onOpenWorkbench}><ListTodo size={16} /></IconButton>}
+            {places.map((place) => (
+              <IconButton key={place.id} label={place.label} onClick={place.onOpen}>
+                {place.icon}
+              </IconButton>
+            ))}
             <IconButton label="History" onClick={toggleSidebar}>
               <History size={16} />
             </IconButton>
@@ -96,7 +113,23 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
               <span>New thread</span>
               <kbd>⌘K</kbd>
             </button>
-            {onOpenWorkbench && <button type="button" className="osmo-new-thread" onClick={onOpenWorkbench}><ListTodo size={16} aria-hidden /><span>Tasks</span></button>}
+            {places.length > 0 && (
+              <nav className="osmo-places" aria-label="Places">
+                {places.map((place) => (
+                  <button
+                    key={place.id}
+                    type="button"
+                    className="osmo-new-thread osmo-place"
+                    data-active={place.active}
+                    aria-current={place.active ? "page" : undefined}
+                    onClick={place.onOpen}
+                  >
+                    {place.icon}
+                    <span>{place.label}</span>
+                  </button>
+                ))}
+              </nav>
+            )}
             {groups.length === 0 ? (
               <div className="osmo-sidebar-empty">
                 <p className="osmo-sidebar-empty-title">No threads yet</p>
@@ -130,18 +163,26 @@ export function ThreadSidebar({ threads, activeId, onSelect, onNew, onRename, on
           </>
         )}
       </SidebarContent>
-      {onOpenSettings && (
+      {(onOpenSettings || onOpenUsage) && (
         <SidebarFooter className="osmo-settings-footer">
-          {collapsed ? (
+          {onOpenUsage && (collapsed ? (
+            <IconButton label="Usage" onClick={onOpenUsage}><Gauge size={16} /></IconButton>
+          ) : (
+            <button type="button" className="osmo-new-thread osmo-settings-button" onClick={onOpenUsage}>
+              <Gauge size={16} aria-hidden /><span>Usage</span>
+            </button>
+          ))}
+          {onOpenSettings && (collapsed ? (
             <IconButton label="Settings" onClick={onOpenSettings}><Settings size={16} /></IconButton>
           ) : (
             <button type="button" className="osmo-new-thread osmo-settings-button" onClick={onOpenSettings}>
               <Settings size={16} aria-hidden /><span>Settings</span>
             </button>
-          )}
+          ))}
         </SidebarFooter>
       )}
       {footer && <SidebarFooter className="osmo-desktop-footer">{footer}</SidebarFooter>}
+      {player && <SidebarFooter className="osmo-player-footer">{player(collapsed)}</SidebarFooter>}
       <SidebarRail />
       <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
         <AlertDialogContent className="osmo-delete-dialog">

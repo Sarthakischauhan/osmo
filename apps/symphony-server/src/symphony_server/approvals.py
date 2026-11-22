@@ -4,6 +4,7 @@
 tool in `before_tool`: it emits `approval_required` on the run, waits on the shared
 `ApprovalBroker`, emits `approval_resolved`, and denies the tool unless the user approved.
 `POST /api/approvals/{id}` resolves it; the voice bridge shows the request from the run's events.
+An `ApprovalPolicy` (the agent browser's per-domain rules) can let a step through without asking, or make one ask.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import json
 import secrets
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Protocol
 
 from core_harness import Addon
 from fastapi import APIRouter, HTTPException
@@ -89,19 +90,33 @@ def shown_arguments(arguments: Mapping[str, Any]) -> str:
     return text if len(text) <= ARGUMENTS_SHOWN_MAX else text[: ARGUMENTS_SHOWN_MAX - 1] + "…"
 
 
+class ApprovalPolicy(Protocol):
+    def decide(self, tool_name: str, arguments: Mapping[str, Any]) -> Literal["allow", "ask"] | None:
+        """`allow` runs the step without asking, `ask` always asks, None leaves it to the `risky` list."""
+        ...
+
+
 class ApprovalAddon(Addon):
-    """Holds each of `risky` tools until the user approves it."""
+    """Holds each of `risky` tools until the user approves it (unless `policy` says otherwise for a step)."""
 
     name = "osmo_approvals"
 
-    def __init__(self, broker: ApprovalBroker, session_id: str, risky: frozenset[str], timeout_s: float = APPROVAL_TIMEOUT_S) -> None:
-        self.broker, self.session_id, self.risky, self.timeout_s = broker, session_id, risky, timeout_s
+    def __init__(
+        self,
+        broker: ApprovalBroker,
+        session_id: str,
+        risky: frozenset[str],
+        timeout_s: float = APPROVAL_TIMEOUT_S,
+        policy: ApprovalPolicy | None = None,
+    ) -> None:
+        self.broker, self.session_id, self.risky, self.timeout_s, self.policy = broker, session_id, risky, timeout_s, policy
 
     async def before_tool(self, **payload: Any) -> str | None:
         tool_name = str(payload["tool_name"])
-        if tool_name not in self.risky:
-            return None
         arguments: Mapping[str, Any] = payload["arguments"]
+        decision = self.policy.decide(tool_name, arguments) if self.policy is not None else None
+        if decision == "allow" or (decision is None and tool_name not in self.risky):
+            return None
         emit: Emit = payload["emit"]
         approval_id = self.broker.open(self.session_id)
         request = ApprovalPayload(

@@ -7,7 +7,7 @@ test('every channel is unique, and renderer channels are separate from the ones 
   const names = Object.values(CHANNELS);
   assert.equal(new Set(names).size, names.length);
   assert.deepEqual(Object.keys(CHANNELS).sort(), [
-    'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
+    'audioBargeIn', 'audioFlush', 'audioFrame', 'audioPlay', 'audioReady', 'audioStart', 'audioStarted', 'audioStop',
     'box', 'end', 'event', 'interrupt', 'move', 'openThread', 'send', 'showFull', 'snapshot', 'start', 'status',
   ]);
 });
@@ -27,6 +27,10 @@ test('a renderer may send on only the events the UI sends', () => {
     { type: 'browser.scroll', id: 'b', x: 0, y: 0.2, deltaX: 0, deltaY: -120 },
     { type: 'browser.key', id: 'b', key: 'a', code: 'KeyA', keyCode: 65 },
     { type: 'browser.close', id: 'b' },
+    { type: 'browser.takeover', id: 'b', user: true },
+    { type: 'browser.takeover', id: 'b', user: false },
+    { type: 'music.state', playing: true, track: { id: 'abc', source: 'local', title: 'Kerala', artist: 'Bonobo', url: '/api/music/local/abc', art: null }, positionMs: 1000, volume: 70 },
+    { type: 'music.state', playing: false, track: null, positionMs: 0, volume: 80, error: 'Spotify needs Premium' },
   ];
   for (const event of allowed) assert.deepEqual(validateClientEvent(event), event);
 });
@@ -37,7 +41,7 @@ test('session control, computer support, previews and malformed events are refus
     { type: 'desktop.result', requestId: 'r', result: {} }, { type: 'desktop.configure', enabled: true },
     { type: 'voice.preview', requestId: 'p', model: 'm', voice: 'v' },
     { type: 'widget.action', id: '', action: 'a' }, { type: 'widget.action', id: 'w', action: 'a', extra: 1 },
-    { type: 'browser.click', id: 'b', x: 2, y: 0 }, { type: 'browser.scroll', id: 'b', x: 0, y: 0, deltaX: NaN, deltaY: 0 },
+    { type: 'browser.click', id: 'b', x: 2, y: 0 }, { type: 'browser.takeover', id: 'b', user: 'yes' }, { type: 'browser.takeover', id: 'b' }, { type: 'music.state', playing: 'yes', positionMs: 0, volume: 1 }, { type: 'music.state', playing: true, positionMs: 0, volume: 101 }, { type: 'music.state', playing: true, positionMs: 0, volume: 50, track: { id: 'x', source: 'youtube', title: 't', artist: 'a' } }, { type: 'music.state', playing: true, positionMs: 0, volume: 50, track: { id: 'x', source: 'local', title: 't', artist: 'a', path: '/etc/passwd' } }, { type: 'browser.scroll', id: 'b', x: 0, y: 0, deltaX: NaN, deltaY: 0 },
     { type: 'browser.key', id: 'b', key: 'a', code: 'KeyA', keyCode: -1 }, { type: 'session.configure', model: 'm', voice: 'v', effort: 'max' },
   ];
   for (const event of refused) assert.throws(() => validateClientEvent(event), undefined, JSON.stringify(event));

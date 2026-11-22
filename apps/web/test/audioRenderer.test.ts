@@ -12,6 +12,7 @@ function setup() {
     ready: () => void sent.push("ready"),
     started: (result) => void sent.push(["started", result]),
     frame: (pcm16) => void sent.push(["frame", pcm16.byteLength]),
+    bargeIn: () => void sent.push("barge-in"),
     onStart: (callback) => ((callbacks.start = callback), () => undefined),
     onStop: (callback) => ((callbacks.stop = callback), () => undefined),
     onPlay: (callback) => ((callbacks.play = callback), () => undefined),
@@ -30,10 +31,12 @@ function setup() {
 class FakeRuntime implements AudioRuntime {
   log: string[] = [];
   onFrame: ((pcm16: ArrayBuffer) => void) | undefined;
+  onBargeIn: (() => void) | undefined;
   opened: { resolve: () => void; reject: (error: Error) => void } | undefined;
-  start(onFrame: (pcm16: ArrayBuffer) => void) {
+  start(onFrame: (pcm16: ArrayBuffer) => void, onBargeIn: () => void) {
     this.log.push("start");
     this.onFrame = onFrame;
+    this.onBargeIn = onBargeIn;
     return new Promise<void>((resolve, reject) => (this.opened = { resolve, reject }));
   }
   stop() {
@@ -116,5 +119,16 @@ describe("the hidden audio renderer", () => {
     await settled();
     expect(runtimes[0]?.log).toEqual(["start", "stop"]);
     expect(sent).toEqual(["ready", ["started", {}]]);
+  });
+});
+
+describe("the audio renderer's barge-in", () => {
+  it("tells main when the echo guard heard the user over Osmo", async () => {
+    const { sent, callbacks, runtimes } = setup();
+    callbacks.start?.();
+    runtimes[0]?.opened?.resolve();
+    await Promise.resolve();
+    runtimes[0]?.onBargeIn?.();
+    expect(sent.at(-1)).toBe("barge-in");
   });
 });

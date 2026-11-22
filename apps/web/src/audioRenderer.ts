@@ -1,10 +1,13 @@
-import { AUDIO_SAMPLE_RATE, MicCapture, PcmPlayer } from "@osmo/osmo-composer";
+import { AUDIO_SAMPLE_RATE, EchoGuard, MicCapture, PcmPlayer } from "@osmo/osmo-composer";
 import type { AudioBridge } from "./audioBridge";
 
 /** What the hidden audio page does for a call: capture the microphone, play what Osmo says, and drop it on barge-in. */
 export interface AudioRuntime {
-  /** Opens the microphone; resolves once frames are flowing, rejects with why not (denied, no device). */
-  start(onFrame: (pcm16: ArrayBuffer) => void): Promise<void>;
+  /**
+   * Opens the microphone; resolves once frames are flowing, rejects with why not (denied, no device). Frames pass the
+   * echo guard: while Osmo plays they are held back, and `onBargeIn` says the user talked over it (playback is already cut).
+   */
+  start(onFrame: (pcm16: ArrayBuffer) => void, onBargeIn: () => void): Promise<void>;
   /** Closes the microphone and drops queued speech. */
   stop(): void;
   enqueue(pcm16: ArrayBuffer): void;
@@ -16,10 +19,19 @@ export function browserRuntime(): AudioRuntime {
   const context = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE });
   const mic = new MicCapture(context);
   const player = new PcmPlayer(context, () => undefined);
+  const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
   return {
-    async start(onFrame) {
+    async start(onFrame, onBargeIn) {
       await context.resume();
-      await mic.start(onFrame);
+      await mic.start((frame) => {
+        const step = guard.push(frame, player.playing, player.rms(), performance.now());
+        if (step.bargeIn) {
+          // Cut Osmo off here and now, before main and the server hear about it.
+          player.flush();
+          onBargeIn();
+        }
+        for (const held of step.send) onFrame(held);
+      });
     },
     stop() {
       mic.stop();
@@ -49,7 +61,7 @@ export function runAudioRenderer(bridge: AudioBridge, open: () => AudioRuntime):
     const current = open();
     runtime = current;
     try {
-      await current.start(bridge.frame);
+      await current.start(bridge.frame, bridge.bargeIn);
     } catch (cause) {
       // Only the newest start is answered: a replaced one belongs to a call main has already moved on from.
       if (runtime !== current) return;

@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from symphony_server.storage import AgentRunStatus, ThreadRecord
+from symphony_server.storage import AgentRunStatus, ThreadRecord, UsageRecord
 from symphony_server.voices import Effort, Selection, VoiceModel
 
 OsmoState = Literal["idle", "listening", "thinking", "speaking", "working"]
@@ -89,6 +89,14 @@ class BrowserKey(_Event):
     keyCode: int = Field(ge=0)
 
 
+class BrowserTakeover(_Event):
+    """The user takes the thread's browser over (`user`) from the agent, or hands it back."""
+
+    type: Literal["browser.takeover"]
+    id: str = Field(min_length=1)
+    user: bool
+
+
 class BrowserClose(_Event):
     """The user closed the thread's browser."""
 
@@ -114,6 +122,44 @@ class DesktopRequest(_Event):
     action: dict[str, Any]
 
 
+class Track(_Event):
+    """Something the app can play: a local file (`url`) or a Spotify track (`uri`)."""
+
+    id: str
+    source: Literal["local", "spotify"]
+    title: str
+    artist: str
+    album: str | None = None
+    durationMs: int | None = None
+    art: str | None = None
+    url: str | None = None
+    uri: str | None = None
+
+    def label(self) -> str:
+        return f"{self.title} by {self.artist}" if self.artist else self.title
+
+
+
+class MusicCommand(_Event):
+    """`music.command`: what the app's player should do. `play` plays `tracks[0]` and queues the rest."""
+
+    type: Literal["music.command"] = "music.command"
+    action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+    tracks: list[Track] = []
+    volume: int | None = Field(default=None, ge=0, le=100)
+
+
+class MusicState(_Event):
+    """`music.state` from the app: what its player is doing."""
+
+    type: Literal["music.state"]
+    playing: bool
+    track: Track | None = None
+    positionMs: int = Field(default=0, ge=0)
+    volume: int = Field(default=80, ge=0, le=100)
+    error: str | None = None
+
+
 ClientEvent = Annotated[
     Union[
         SessionStart,
@@ -124,6 +170,8 @@ ClientEvent = Annotated[
         BrowserScroll,
         BrowserKey,
         BrowserClose,
+        BrowserTakeover,
+        MusicState,
         SessionConfigure,
         VoicePreviewRequest,
         DesktopConfigure,
@@ -241,6 +289,13 @@ class ApprovalResolved(_Event):
     approved: bool
 
 
+class UsageEvent(_Event):
+    """A voice response or agent turn on this thread used tokens (usage.py); the usage dialog ticks."""
+
+    type: Literal["usage"] = "usage"
+    usage: UsageRecord
+
+
 ServerEvent = Union[
     StateEvent,
     TranscriptDelta,
@@ -254,4 +309,6 @@ ServerEvent = Union[
     ApprovalRequest,
     ApprovalResolved,
     DesktopRequest,
+    UsageEvent,
+    MusicCommand,
 ]

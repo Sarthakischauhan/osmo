@@ -121,6 +121,10 @@ button { font: inherit; color: inherit; }
 .osmo-frame-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .osmo-frame-tools { display: flex; align-items: center; gap: 2px; }
 .osmo-frame-readout { min-width: 38px; text-align: center; font: 10px var(--font-mono); color: var(--muted-foreground); }
+.osmo-browser-takeover { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-button); background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; transition: background .2s ease; }
+.osmo-browser-takeover:hover { background: var(--surface-3); }
+.osmo-browser-takeover[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.osmo-frame-readout[data-rule="deny"] { color: #e5484d; }
 .osmo-icon-button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-button); background: transparent; color: var(--muted-foreground); cursor: pointer; transition: background .2s ease, color .2s ease; }
 .osmo-icon-button:hover:not(:disabled) { background: var(--surface-3); color: var(--foreground); }
 .osmo-icon-button:focus-visible { background: var(--surface-3); color: var(--foreground); outline: 1px solid var(--ring); outline-offset: 0; box-shadow: none; }
@@ -420,6 +424,20 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-agent-model .osmo-agent-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--fg-tertiary); font-size: 12px; font-weight: 400; }
 .osmo-desktop-footer { gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
 [data-state="collapsed"] .osmo-desktop-footer { display: none; }
+/* The music mini player (GUI's music-mini mockup, sidebar footer): 32px art, title and artist, a 24px round play button. */
+.osmo-player-footer { padding: 0; border-top: 1px solid var(--border); }
+.osmo-player-footer:empty { display: none; }
+.osmo-music-mini { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; }
+.osmo-music-mini[data-collapsed] { display: flex; justify-content: center; }
+.osmo-music-art { display: grid; place-items: center; width: 32px; height: 32px; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #111; color: #ededed; font-size: 10px; font-weight: 500; letter-spacing: -.04em; }
+.osmo-music-art img { width: 100%; height: 100%; object-fit: cover; }
+.osmo-music-text { min-width: 0; }
+.osmo-music-title { margin: 0; overflow: hidden; font-size: 12px; font-weight: 500; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.osmo-music-sub { margin: 0; overflow: hidden; color: var(--muted-foreground); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.osmo-music-sub[data-error="true"] { color: #e5484d; }
+.osmo-music-play { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: var(--foreground); color: var(--background); cursor: pointer; }
+.osmo-music-connect { height: 20px; margin-top: 2px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-button); background: transparent; color: var(--foreground); font-size: 11px; cursor: pointer; }
+.osmo-music-connect:hover { border-color: var(--muted-foreground); }
 .desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-button); background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .desktop-support.active { color: var(--background); background: var(--foreground); }
 .desktop-support-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); }
@@ -464,6 +482,9 @@ button.osmo-list-row { cursor: pointer; }
 .agent-workbench-status { color: var(--muted-foreground); font-size: 11px; }
 .agent-workbench-status[data-status="failed"], .agent-workbench-error { color: #e66e6e; }
 .agent-workbench-run h3 { font-size: 13px; font-weight: 500; line-height: 21px; margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-workbench-origin { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 6px; padding: 0 8px; height: 24px; border: 1px solid var(--border); border-radius: var(--radius-button); background: transparent; color: var(--muted-foreground); font-size: 11px; cursor: pointer; }
+.agent-workbench-origin span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workbench-origin:hover { color: var(--foreground); border-color: var(--muted-foreground); }
 .agent-run-result { margin-top: 10px; color: var(--muted-foreground); font-size: 12px; }
 .agent-run-result summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .agent-run-result[open] summary svg { transform: rotate(180deg); }
@@ -517,3 +538,141 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-compact-agent-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .osmo-compact-agent-detail { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 16px; }
 .osmo-compact-agent .osmo-approval { padding: 8px 0 0; background: none; }
+
+/* Usage dialog (components/UsageDialog.tsx). */
+.osmo-usage { display: flex; flex-direction: column; gap: 20px; width: 720px; padding: 28px; border-radius: var(--radius, 3px); background: var(--background); }
+.osmo-usage-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.osmo-segmented { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-button); background: var(--surface-1); }
+.osmo-segmented button { height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-button); background: none; color: var(--muted-foreground); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease-out, color .15s ease-out; }
+.osmo-segmented button[aria-pressed="true"] { background: var(--surface-3); color: var(--foreground); }
+.osmo-segmented button:disabled { opacity: .4; cursor: not-allowed; }
+.osmo-usage-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.osmo-usage-stats > div { display: grid; gap: 2px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-button); }
+.osmo-usage-stats span, .osmo-usage-stats small { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.osmo-usage-stats strong { font-size: 20px; line-height: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.osmo-usage-section { display: grid; gap: 8px; }
+.osmo-usage-section h3 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
+.osmo-usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 72px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-button); }
+.osmo-usage-bars span { flex: 1; min-width: 2px; border-radius: 2px; background: var(--foreground); opacity: .7; }
+.osmo-usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.osmo-usage-table th { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); font-weight: 500; text-align: right; }
+.osmo-usage-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; }
+.osmo-usage-table .osmo-usage-left { text-align: left; }
+.osmo-usage-model { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; }
+.osmo-usage-empty, .osmo-usage-note { margin: 0; color: var(--muted-foreground); font-size: 12px; line-height: 18px; }
+@media (max-width: 600px) { .osmo-usage { padding: 20px; } .osmo-usage-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Places (notes, calendar, music): a screen takes the topbar and canvas rows; the orb stays in the dock.
+   Layout follows the GUI mockups (mockups/tokens.css): a 52px head with a 14px title, a 24px gutter. */
+.osmo-places { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 4px; }
+.osmo-place[data-active="true"] { background: var(--sidebar-accent); }
+.osmo-screen { grid-row: 1 / 3; min-height: 0; display: flex; flex-direction: column; }
+.osmo-view-head { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 24px; }
+.osmo-view-head h1 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; letter-spacing: 0; }
+.osmo-view-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.osmo-view-select { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--background); color: var(--foreground); font-size: 13px; }
+.osmo-icon-btn[disabled], .osmo-btn[disabled] { opacity: .45; cursor: default; }
+.osmo-btn kbd { font: 11px var(--font-mono); opacity: .6; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.osmo-notes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.osmo-notes-search { display: flex; align-items: center; gap: 6px; height: 28px; width: 240px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-button); color: var(--muted-foreground); }
+.osmo-notes-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--foreground); font-size: 13px; }
+.osmo-notes-create { display: flex; gap: 8px; padding: 0 24px 12px; }
+.osmo-notes-create input { flex: 1; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-button); background: var(--background); color: var(--foreground); font-size: 13px; }
+.osmo-notes-error { margin: 0 24px 12px; font-size: 12px; color: var(--destructive); }
+.osmo-notes-pane { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 0 24px 16px; }
+.osmo-notes-list { width: 280px; flex: none; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.osmo-notes-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 0; border-radius: var(--radius-button); background: none; text-align: left; cursor: pointer; }
+.osmo-notes-row:hover { background: var(--surface-1); }
+.osmo-notes-row[data-active="true"] { background: var(--surface-2); }
+.osmo-notes-row-title { font-size: 13px; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osmo-notes-row-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-notes-row-meta .mono { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osmo-notes-row-snippet { font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-notes-row-snippet mark { background: none; color: var(--foreground); font-weight: 600; }
+.osmo-notes-empty { margin: 8px 10px; font-size: 13px; color: var(--muted-foreground); }
+.osmo-notes-doc { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); overflow: hidden; }
+.osmo-notes-doc-head { height: 44px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--border); }
+.osmo-notes-path { flex: 1; min-width: 0; font-size: 12px; color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osmo-notes-state { font-size: 12px; color: var(--muted-foreground); }
+.osmo-notes-editor { flex: 1; min-height: 0; overflow: hidden; }
+.osmo-notes-backlinks { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+.osmo-notes-link { height: 24px; padding: 0 8px; border: 0; border-radius: var(--radius-button); background: var(--surface-2); color: var(--foreground); font-size: 12px; cursor: pointer; }
+
+/* The agenda widget (calendar_events show=true), after GUI's calendar-widget mockup. */
+.osmo-agenda { width: 100%; max-width: 440px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.osmo-agenda h2 { margin: 0 0 2px; font-size: 14px; line-height: 20px; font-weight: 600; }
+.osmo-agenda-sub { margin: 0 0 12px; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-agenda ul { margin: 0; padding: 0; list-style: none; }
+.osmo-agenda li { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; height: 36px; font-size: 13px; }
+.osmo-agenda li + li { border-top: 1px solid var(--border); }
+.osmo-agenda-time { font: 12px/16px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.osmo-agenda-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.osmo-agenda li[data-state="past"] .osmo-agenda-title { color: var(--muted-foreground); }
+.osmo-agenda li[data-state="now"] .osmo-agenda-title { font-weight: 500; }
+.osmo-agenda-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-agenda-tag i { width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+.osmo-agenda-empty { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+.osmo-agenda-next { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.osmo-agenda-label { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+.osmo-agenda-detail { font: 12px var(--font-mono); color: var(--muted-foreground); }
+
+/* Calendar (GUI's calendar-week mockup): 8 AM–10 PM at 36px an hour, the detail card on the right. */
+.osmo-calendar { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.osmo-week-tools { display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 0 4px; }
+.osmo-week-tools-gap { flex: 1; }
+.osmo-week-range { min-width: 148px; text-align: center; font-size: 13px; font-weight: 500; }
+.osmo-week-nav { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-button); background: none; color: var(--foreground); cursor: pointer; }
+.osmo-week-nav:hover { background: var(--surface-1); }
+.osmo-calendar-pane { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 0 24px 8px; overflow-y: auto; }
+.osmo-week { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.osmo-week-head { display: grid; grid-template-columns: 48px repeat(7, 1fr); padding-bottom: 8px; }
+.osmo-dow { text-align: center; }
+.osmo-dow-name { display: block; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--muted-foreground); }
+.osmo-dow-num { display: block; margin-top: 2px; font: 500 14px/20px var(--font-mono); font-variant-numeric: tabular-nums; }
+.osmo-dow[data-today="true"] .osmo-dow-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 2px auto 0; border-radius: 50%; background: var(--foreground); color: var(--background); }
+.osmo-week-body { position: relative; flex: none; display: grid; grid-template-columns: 48px repeat(7, 1fr); border-top: 1px solid var(--border); }
+.osmo-week-hours { position: relative; }
+.osmo-week-hours span { position: absolute; right: 8px; transform: translateY(-50%); font: 11px/16px var(--font-mono); color: var(--muted-foreground); }
+.osmo-week-lines { position: absolute; inset: 0 0 0 48px; pointer-events: none; }
+.osmo-week-lines i { position: absolute; left: 0; right: 0; border-top: 1px solid var(--surface-2); }
+.osmo-week-col { position: relative; border-left: 1px solid var(--surface-2); }
+.osmo-week-col[data-today="true"] { background: var(--surface-1); }
+.osmo-event { position: absolute; left: 4px; right: 4px; padding: 4px 6px 4px 8px; overflow: hidden; border: 0; border-radius: 6px; background: var(--surface-2); color: var(--foreground); text-align: left; font-size: 12px; line-height: 16px; font-weight: 500; cursor: pointer; }
+.osmo-event[data-past="true"] { background: var(--surface-1); color: var(--muted-foreground); font-weight: 400; }
+.osmo-event[data-selected="true"] { background: var(--foreground); color: var(--background); }
+.osmo-event-when { display: block; font: 11px/14px var(--font-mono); color: var(--muted-foreground); font-weight: 400; }
+.osmo-event[data-selected="true"] .osmo-event-when { color: color-mix(in srgb, var(--background) 70%, transparent); }
+.osmo-event-mark { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+.osmo-event[data-selected="true"] .osmo-event-mark { background: var(--background); }
+.osmo-auto-tick { position: absolute; left: 4px; right: 4px; height: 14px; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--muted-foreground); font-size: 11px; line-height: 14px; text-align: left; white-space: nowrap; overflow: hidden; cursor: pointer; z-index: 1; }
+.osmo-auto-tick i { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--foreground); opacity: .7; }
+.osmo-week-now { position: absolute; left: 48px; right: 0; pointer-events: none; border-top: 1px solid var(--foreground); z-index: 3; }
+.osmo-week-now::before { content: ""; position: absolute; left: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--foreground); }
+.osmo-calendar-detail { width: 280px; flex: none; align-self: flex-start; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.osmo-calendar-detail h2 { margin: 0 0 2px; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
+.osmo-detail-meta { margin: 0 0 16px; font-size: 13px; color: var(--muted-foreground); }
+.osmo-detail-meta .mono { font-size: 12px; }
+.osmo-detail-notes { margin: 0 0 16px; font-size: 13px; }
+.osmo-detail-section { margin: 0 0 16px; }
+.osmo-detail-label { margin: 0 0 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted-foreground); }
+.osmo-kv { display: grid; grid-template-columns: 72px 1fr; gap: 6px 12px; margin: 0; font-size: 13px; line-height: 20px; }
+.osmo-kv dt { padding-top: 1px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-kv dd { margin: 0; }
+.osmo-detail-tasks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.osmo-detail-tasks li { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.osmo-detail-tasks li .osmo-btn { margin-left: auto; }
+.osmo-detail-prompt { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); font: 13px/18px var(--font-mono); white-space: pre-wrap; }
+.osmo-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-weight: 500; }
+.osmo-badge[data-tone="green"] { color: #3ecf8e; }
+.osmo-badge[data-tone="amber"] { color: #f5a524; }
+.osmo-badge[data-tone="red"] { color: #f87171; }
+.light .osmo-badge[data-tone="green"] { color: #18794e; }
+.light .osmo-badge[data-tone="amber"] { color: #a35200; }
+.light .osmo-badge[data-tone="red"] { color: #da2f35; }
+.osmo-calendar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.osmo-tray-note { margin: 0; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-calendar-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.osmo-calendar-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
+.osmo-calendar-form input, .osmo-calendar-form select, .osmo-calendar-form textarea { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 13px var(--font-sans); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeWidget, widgetSchema } from "../src/schema";
+import { describeWidget, isActionableWidget, widgetSchema } from "../src/schema";
 
 describe("widgetSchema", () => {
   it("accepts a valid options widget and describes it", () => {
@@ -43,6 +43,15 @@ describe("widgetSchema", () => {
     expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", title: "t".repeat(81) } }).success).toBe(false);
   });
 
+  it("accepts declared html actions, describes them, and counts them as waiting on the user", () => {
+    const props = { html: "<p>x</p>", title: "Review", actions: [{ id: "ok", label: "Looks good" }] };
+    expect(describeWidget(widgetSchema.parse({ type: "html", props }))).toBe('interactive html widget "Review" with 1 actions');
+    expect(isActionableWidget("html", props)).toBe(true);
+    expect(isActionableWidget("html", { html: "<p>x</p>" })).toBe(false);
+    const nine = Array.from({ length: 9 }, (_, i) => ({ id: `a${i}`, label: "x" }));
+    expect(widgetSchema.safeParse({ type: "html", props: { html: "<p>x</p>", actions: nine } }).success).toBe(false);
+  });
+
   it("accepts an agent browser with or without a frame, and nothing but a picture as the frame", () => {
     const browser = (props: object) => widgetSchema.safeParse({ type: "browser", props }).success;
     expect(browser({ status: "live" })).toBe(true);
@@ -52,5 +61,17 @@ describe("widgetSchema", () => {
     expect(browser({ status: "live", frame: "data:text/html;base64,PGI+" })).toBe(false);
     expect(browser({ status: "live", extra: 1 })).toBe(false);
     expect(describeWidget(widgetSchema.parse({ type: "browser", props: { status: "live" } }))).toBe("agent browser");
+  });
+});
+
+describe("agenda widget", () => {
+  it("accepts the calendar tool's agenda and describes it", () => {
+    const parsed = widgetSchema.parse({
+      type: "agenda",
+      props: { title: "Today", subtitle: "Sat Nov 21", items: [{ time: "9:00", title: "Farmers market", state: "past", tag: "done" }], footer: { label: "Next automation", value: "Weekly notes", detail: "3:00 PM · in 3 min" } },
+    });
+    expect(describeWidget(parsed)).toBe('agenda "Today" with 1 items');
+    expect(isActionableWidget("agenda", parsed.props)).toBe(false);
+    expect(widgetSchema.safeParse({ type: "agenda", props: { title: "Today", items: [{ time: "9:00", title: "x", state: "soon" }] } }).success).toBe(false);
   });
 });

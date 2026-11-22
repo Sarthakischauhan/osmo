@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
-import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
+import { EchoGuard } from "./echoGuard";
+import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type MusicState, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
 
@@ -31,6 +32,10 @@ export interface OsmoSession {
   sendBrowserInput: (id: string, input: BrowserInput) => void;
   /** Close the agent browser widget `id`'s browser. */
   closeBrowser: (id: string) => void;
+  /** Take the agent browser widget `id`'s browser over from the agent (`user`), or hand it back. */
+  takeOverBrowser: (id: string, user: boolean) => void;
+  /** Tell the server what the app's music player is doing (no-op while disconnected). */
+  reportMusic: (state: MusicState) => void;
   /** Symphony's voice model registry (`models` event); empty until connected. */
   voiceModels: VoiceModel[];
   /** The session's model/voice/effort as Symphony last confirmed it (picker commit or `set_voice`). */
@@ -133,9 +138,17 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
       client.send({ type: "session.start", voice, model, effort, threadId });
-      // A preview plays on the speakers: keep it out of the mic so it is not heard as the user.
+      // A preview plays on the speakers: keep it out of the mic so it is not heard as the user. Osmo's own voice is
+      // held back by the echo guard, which also cuts Osmo off here the moment the user talks over it.
+      const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
       await mic.start((frame) => {
-        if (!previewingRef.current) client.sendAudio(frame);
+        if (previewingRef.current) return;
+        const step = guard.push(frame, player.playing, player.rms(), performance.now());
+        if (step.bargeIn) {
+          player.flush();
+          client.send({ type: "interrupt" });
+        }
+        for (const held of step.send) client.sendAudio(held);
       });
       setConnection("connected");
       setStartedAt(Date.now());
@@ -172,6 +185,14 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
 
   const closeBrowser = useCallback((id: string) => {
     runtime.current?.client.send({ type: "browser.close", id });
+  }, []);
+
+  const takeOverBrowser = useCallback((id: string, user: boolean) => {
+    runtime.current?.client.send({ type: "browser.takeover", id, user });
+  }, []);
+
+  const reportMusic = useCallback((state: MusicState) => {
+    runtime.current?.client.send(state);
   }, []);
 
   const configure = useCallback((next: VoiceSelection) => {
@@ -219,6 +240,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     sendWidgetAction,
     sendBrowserInput,
     closeBrowser,
+    takeOverBrowser,
+    reportMusic,
     voiceModels,
     selection,
     configure,

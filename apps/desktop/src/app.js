@@ -1,13 +1,14 @@
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, components, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAudioPort } from './audio-port.js';
-import { allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
+import { allowMediaKeys, allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
 import { pythonExecutable, startServer } from './server.js';
 import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
+import { createAutomationTray } from './tray.js';
 import { SWITCH_ACCELERATOR, createWindowSwitch } from './window-mode.js';
 import { boxLayout, defaultOrbBounds, moveOrb } from './window-state.js';
 
@@ -35,6 +36,7 @@ export function runApp() {
   let busy = false;
   let worker;
   let backend;
+  let tray;
 
   const status = () => ({ enabled, platform: process.platform, stopShortcut: STOP_SHORTCUT });
   const live = contents => contents && !contents.isDestroyed();
@@ -172,6 +174,8 @@ export function runApp() {
   ipcMain.handle(CHANNELS.audioReady, event => { authorize(event, audioWindow); audio.ready(); });
   ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
   ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
+  // The audio renderer's echo guard heard the user talk over Osmo; it already stopped playback.
+  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.interrupt(); });
   // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got;
   // a drag moves the orb, and the window (with any open box) follows it.
   const place = () => {
@@ -217,11 +221,13 @@ export function runApp() {
       webPreferences: { ...webPreferences, preload: path.join(here, 'audio-preload.cjs'), autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
     });
     const contents = audioWindow.webContents;
-    // Every window shares the default session: its handlers allow the audio renderer's microphone and nothing else.
-    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
-      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin));
-    contents.session.setPermissionRequestHandler((wc, permission, callback, details) =>
-      callback(allowMicrophone(wc, contents, permission, '', details, origin)));
+    // Every window shares the default session: its handlers allow the audio renderer's microphone, Widevine for the
+    // workspace's music player, and nothing else.
+    const allow = (wc, permission, requestingOrigin, details) =>
+      allowMicrophone(wc, contents, permission, requestingOrigin, details, origin)
+      || allowMediaKeys(wc, workspace?.webContents, permission, requestingOrigin, details, origin);
+    contents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => allow(wc, permission, requestingOrigin, details));
+    contents.session.setPermissionRequestHandler((wc, permission, callback, details) => callback(allow(wc, permission, '', details)));
     secure(audioWindow, { revokeOnNavigation: false });
     // A crashed audio page ends the call rather than leaving a session that cannot hear or speak.
     contents.on('render-process-gone', () => { audio.lost(); session.end(); audioWindow.reload(); });
@@ -266,6 +272,10 @@ export function runApp() {
   else {
     app.on('second-instance', () => switcher?.toFull());
     app.whenReady().then(async () => {
+      // castLabs ECS installs Widevine as a component; Spotify in the music player needs it. Local files play without it,
+      // so a failed install is logged, not fatal.
+      try { await components.whenReady(); }
+      catch (error) { console.warn('Widevine is unavailable; Spotify playback will not work:', String(error)); }
       if (!process.env.OSMO_DESKTOP_URL) {
         try { backend = await startServer({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, origin, token: process.env.OSMO_DESKTOP_TOKEN || randomBytes(32).toString('hex') }); }
         catch (error) {
@@ -290,9 +300,24 @@ export function runApp() {
         void dialog.showMessageBox(workspace, { type: 'warning', message: 'The orb shortcut is unavailable', detail: 'Minimize the window to show the orb, and double-click the orb to come back.' });
       }
       app.on('activate', () => switcher.toFull());
+      // Automations run in the server for as long as the app runs; the tray shows them with the window closed.
+      // Osmo does not add itself to the login items: it runs only after the user opens it.
+      tray = createAutomationTray({
+        request: async (route, init) => {
+          const response = await fetch(`${origin}${route}`, init);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        },
+        createTray: () => new Tray(appIcon.isEmpty() ? appIcon : appIcon.resize({ width: 16, height: 16 })),
+        buildMenu: template => Menu.buildFromTemplate(template),
+        notify: ({ title, body }) => { if (Notification.isSupported()) new Notification({ title, body, silent: true }).show(); },
+        open: () => switcher.toFull(),
+        openCalendar: () => { switcher.toFull(); void workspace?.loadURL(`${origin}/#calendar`); },
+        quit: () => app.quit(),
+      });
     });
     app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-    app.on('before-quit', () => { quitting = true; revoke(); session.end(); backend?.stop(); });
+    app.on('before-quit', () => { quitting = true; revoke(); session.end(); tray?.stop(); backend?.stop(); });
     app.on('will-quit', () => globalShortcut.unregisterAll());
   }
 }

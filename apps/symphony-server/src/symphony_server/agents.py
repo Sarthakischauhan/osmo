@@ -18,7 +18,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -44,12 +44,14 @@ from symphony_server.protocol import (
     ApprovalRequest,
     ApprovalResolved,
     ServerEvent,
+    UsageEvent,
     widget_event_adapter,
 )
 from symphony_server.providers import provider_label
 from symphony_server.storage import DEFAULT_THREAD_TITLE, AgentRunRecord, AgentRunStatus, Storage
 from symphony_server.turn_events import RunFailedPayload, ToolStartedPayload, activity_label
 from symphony_server.upstream.durable import RUN_RESUMED, DurableRunBackend
+from symphony_server.usage import AgentUsagePayload, agent_usage
 from symphony_server.voices import provider_of
 
 log = logging.getLogger("symphony.agents")
@@ -114,6 +116,8 @@ class AgentRuns:
         self.asking: dict[str, ApprovalRequest] = {}
         # What each live run is doing now, by run id (what `agent_status` reports). Not persisted.
         self.phases: dict[str, str] = {}
+        # Told about every run that finishes (the calendar settles the automation that started it).
+        self.finished: list[Callable[[AgentRunRecord], object]] = []
 
     async def recover(self) -> list[str]:
         """Follow the runs the backend resumed after a restart; the ids of those it took back."""
@@ -216,6 +220,12 @@ class AgentRuns:
         self.spawn(self.follow(record.runId))
         return record
 
+    async def start_task(self, title: str, task: str) -> AgentRunRecord | str:
+        """Start `task` on a new thread called `title`, as if typed into Tasks (automations start theirs this way)."""
+        thread = self.storage.create_thread(title[:100])
+        self.storage.add_message(thread.id, "user", task)
+        return await self.start(thread.id, task)
+
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
         task: asyncio.Task[None] = asyncio.create_task(work)
         self.tasks.add(task)
@@ -282,6 +292,10 @@ class AgentRuns:
             delta = str(event.payload.get("delta") or "")
             if delta:
                 await self.show(record.threadId, AgentUpdate(runId=record.runId, task=record.task, status=record.status, reasoning=delta))
+        elif kind == "usage":
+            usage = agent_usage(record.threadId, run_id, AgentUsagePayload.model_validate(event.payload))
+            self.storage.add_usage(usage)
+            await self.show(record.threadId, UsageEvent(usage=usage))
         elif kind == OSMO_WIDGET:
             await self.show(record.threadId, widget_event_adapter.validate_python(event.payload))
         elif kind == APPROVAL_REQUIRED:
@@ -320,6 +334,12 @@ class AgentRuns:
         if status != "waiting_approval":
             self.asking.pop(record.runId, None)
         self.storage.save_run(changed)
+        if status in ("completed", "failed", "cancelled"):
+            for listener in self.finished:
+                try:
+                    listener(changed)
+                except Exception:  # a listener's bug must not lose the run's own update
+                    log.exception("a run listener failed for %s", changed.runId)
         await self.show(changed.threadId, AgentUpdate(runId=changed.runId, task=changed.task, status=status, phase=phase, result=changed.result))
 
     async def show(self, thread_id: str, event: ServerEvent) -> None:
