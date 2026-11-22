@@ -620,10 +620,10 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-agenda-label { font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
 .osmo-agenda-detail { font: 12px var(--font-mono); color: var(--muted-foreground); }
 
-/* Calendar (GUI's calendar-week mockup): 8 AM–10 PM at 36px an hour, the detail card on the right. */
-.osmo-calendar { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.osmo-week-tools { display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 0 4px; }
-.osmo-week-tools-gap { flex: 1; }
+/* Calendar (GUI's calendar-week mockup): 8 AM–10 PM, at least 36px an hour and stretched to the window, the detail card on the right. */
+.osmo-calendar { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.osmo-week-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 28px; margin: 0 0 4px; }
+.osmo-week-tools .osmo-btn, .osmo-calendar .osmo-view-tools .osmo-btn { flex: none; white-space: nowrap; }
 .osmo-week-range { min-width: 148px; text-align: center; font-size: 13px; font-weight: 500; }
 .osmo-week-nav { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-button); background: none; color: var(--foreground); cursor: pointer; }
 .osmo-week-nav:hover { background: var(--surface-1); }
@@ -634,16 +634,20 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-dow-name { display: block; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--muted-foreground); }
 .osmo-dow-num { display: block; margin-top: 2px; font: 500 14px/20px var(--font-mono); font-variant-numeric: tabular-nums; }
 .osmo-dow[data-today="true"] .osmo-dow-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 2px auto 0; border-radius: 50%; background: var(--foreground); color: var(--background); }
-.osmo-week-body { position: relative; flex: none; display: grid; grid-template-columns: 48px repeat(7, 1fr); border-top: 1px solid var(--border); }
+.osmo-week-body { position: relative; flex: 1 0 auto; display: grid; grid-template-columns: 48px repeat(7, 1fr); border-top: 1px solid var(--border); }
 .osmo-week-hours { position: relative; }
 .osmo-week-hours span { position: absolute; right: 8px; transform: translateY(-50%); font: 11px/16px var(--font-mono); color: var(--muted-foreground); }
 .osmo-week-lines { position: absolute; inset: 0 0 0 48px; pointer-events: none; }
 .osmo-week-lines i { position: absolute; left: 0; right: 0; border-top: 1px solid var(--surface-2); }
-.osmo-week-col { position: relative; border-left: 1px solid var(--surface-2); }
+.osmo-week-lines i[data-half="true"] { border-top-style: dashed; opacity: .5; }
+.osmo-week-col { position: relative; border-left: 1px solid var(--surface-2); cursor: pointer; }
+.osmo-slot-hover { position: absolute; left: 4px; right: 4px; padding: 0 8px; overflow: hidden; border-radius: 6px; background: var(--surface-1); color: var(--muted-foreground); font: 11px/18px var(--font-mono); white-space: nowrap; pointer-events: none; }
+.osmo-week-col[data-today="true"] .osmo-slot-hover { background: var(--surface-2); }
 .osmo-week-col[data-today="true"] { background: var(--surface-1); }
 .osmo-event { position: absolute; left: 4px; right: 4px; padding: 4px 6px 4px 8px; overflow: hidden; border: 0; border-radius: 6px; background: var(--surface-2); color: var(--foreground); text-align: left; font-size: 12px; line-height: 16px; font-weight: 500; cursor: pointer; }
 .osmo-event[data-past="true"] { background: var(--surface-1); color: var(--muted-foreground); font-weight: 400; }
 .osmo-event[data-selected="true"] { background: var(--foreground); color: var(--background); }
+.osmo-event[data-draft="true"] { z-index: 2; background: var(--surface-2); outline: 1px dashed var(--muted-foreground); outline-offset: -1px; white-space: nowrap; text-overflow: ellipsis; pointer-events: none; }
 .osmo-event-when { display: block; font: 11px/14px var(--font-mono); color: var(--muted-foreground); font-weight: 400; }
 .osmo-event[data-selected="true"] .osmo-event-when { color: color-mix(in srgb, var(--background) 70%, transparent); }
 .osmo-event-mark { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
@@ -652,7 +656,7 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-auto-tick i { width: 5px; height: 5px; flex: none; border-radius: 50%; background: var(--foreground); opacity: .7; }
 .osmo-week-now { position: absolute; left: 48px; right: 0; pointer-events: none; border-top: 1px solid var(--foreground); z-index: 3; }
 .osmo-week-now::before { content: ""; position: absolute; left: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--foreground); }
-.osmo-calendar-detail { width: 280px; flex: none; align-self: flex-start; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.osmo-calendar-detail { width: 280px; flex: none; display: flex; flex-direction: column; overflow-y: auto; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
 .osmo-calendar-detail h2 { margin: 0 0 2px; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -.01em; }
 .osmo-detail-meta { margin: 0 0 16px; font-size: 13px; color: var(--muted-foreground); }
 .osmo-detail-meta .mono { font-size: 12px; }
@@ -674,7 +678,21 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .light .osmo-badge[data-tone="amber"] { color: #a35200; }
 .light .osmo-badge[data-tone="red"] { color: #da2f35; }
 .osmo-calendar-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
-.osmo-tray-note { margin: 0; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-tray-note { margin: auto 0 0; padding-top: 16px; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.osmo-calendar-empty p { margin: 0; font-size: 13px; line-height: 20px; color: var(--muted-foreground); }
+.osmo-calendar-detail .osmo-segmented { align-self: flex-start; margin-bottom: 16px; background: var(--background); }
+/* Too narrow for the grid (it wants ~560px) and the card side by side: the card drops under the week,
+   and the week still fills the window, so the card sits just below the fold until something is picked. */
+@container (max-width: 920px) {
+  .osmo-calendar-pane { flex-direction: column; }
+  .osmo-week { flex: none; min-height: 100%; }
+  .osmo-calendar-detail { width: auto; align-self: stretch; }
+}
+@container (max-width: 480px) {
+  .osmo-calendar .osmo-view-head { padding: 0 16px; }
+  .osmo-calendar-pane { padding: 0 16px 8px; }
+  .osmo-week-range { min-width: 0; }
+}
 .osmo-calendar-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .osmo-calendar-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
 .osmo-calendar-form input, .osmo-calendar-form select, .osmo-calendar-form textarea { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 13px var(--font-sans); }

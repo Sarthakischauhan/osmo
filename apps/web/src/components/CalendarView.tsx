@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Automation,
   type AutomationInput,
@@ -32,10 +32,16 @@ export interface CalendarViewProps {
   onOpenTask?: (threadId: string) => void;
 }
 
-type Selection = { kind: "event"; occurrence: Occurrence } | { kind: "automation"; id: string } | { kind: "new-event" } | { kind: "new-automation"; eventId?: string };
+type Selection =
+  | { kind: "event"; occurrence: Occurrence }
+  | { kind: "automation"; id: string }
+  | { kind: "new-event"; at: Date }
+  | { kind: "new-automation"; at: Date; eventId?: string };
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const HOUR_LABELS = Array.from({ length: (GRID_LAST_HOUR - GRID_FIRST_HOUR) / 2 + 1 }, (_, i) => GRID_FIRST_HOUR + i * 2);
+const GRID_HOURS = GRID_LAST_HOUR - GRID_FIRST_HOUR;
+/** Clicks on the grid snap to half hours. */
+const SLOT_MINUTES = 30;
 const zoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const when = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
@@ -45,6 +51,11 @@ function hourLabel(hour: number): string {
   if (hour === 12) return "12 PM";
   return String(hour % 12 || 12);
 }
+
+const clock = (date: Date) => date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+/** The start of the next whole hour, for the toolbar's New buttons. */
+const nextHour = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours() + 1);
 
 /** The week grid from GUI's calendar-week mockup, with the selected event's or automation's detail on the right. */
 export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: CalendarViewProps) {
@@ -61,7 +72,24 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
     if (focus) setSelected({ kind: "automation", id: focus });
   }, [focus]);
   const [error, setError] = useState<string>();
-  const end = addDays(start, 7);
+  // The grid stretches to the window; hours are at least HOUR_PX tall and grow with the space.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLElement>(null);
+  const [hourPx, setHourPx] = useState(HOUR_PX);
+  const [hover, setHover] = useState<{ day: number; at: Date }>();
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setHourPx(Math.max(HOUR_PX, body.clientHeight / GRID_HOURS)));
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+
+  // Stacked under the grid on narrow windows, the card may be off screen when a slot is picked.
+  useEffect(() => {
+    if (selected) detailRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [selected]);
 
   useEffect(() => {
     if (fixedNow) return;
@@ -86,6 +114,23 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
   useEffect(() => void load(), [load]);
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const scale = hourPx / HOUR_PX;
+  const gridHeight = GRID_HOURS * hourPx;
+  const place = (from: Date, to: Date) => {
+    const { top, height } = placement(from, to);
+    return { top: top * scale, height: height * scale };
+  };
+  const hourLabels = Array.from({ length: GRID_HOURS + 1 }, (_, i) => GRID_FIRST_HOUR + i).filter((hour) => hourPx >= 44 || hour % 2 === 0);
+
+  /** The half-hour slot under the pointer in a day column. */
+  const slotAt = (event: MouseEvent<HTMLElement>, day: Date): Date => {
+    const y = event.clientY - event.currentTarget.getBoundingClientRect().top;
+    const minutes = Math.floor((y / hourPx) * (60 / SLOT_MINUTES)) * SLOT_MINUTES;
+    const clamped = Math.min(Math.max(minutes, 0), GRID_HOURS * 60 - SLOT_MINUTES);
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate(), GRID_FIRST_HOUR, clamped);
+  };
+  const onEmpty = (event: MouseEvent<HTMLElement>) => event.target === event.currentTarget;
+  const draft = selected?.kind === "new-event" || (selected?.kind === "new-automation" && !selected.eventId) ? selected : undefined;
   const linked = (eventId: string) => automations.filter((automation) => automation.eventId === eventId);
   const automation = selected?.kind === "automation" ? automations.find((a) => a.id === selected.id) : undefined;
   const eventAutomation = selected?.kind === "event" ? linked(selected.occurrence.eventId)[0] : undefined;
@@ -109,6 +154,10 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
     <div className="osmo-calendar">
       <header className="osmo-view-head">
         <h1>Calendar</h1>
+        <div className="osmo-view-tools">
+          <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-event", at: nextHour(now) })}>New event</button>
+          <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation", at: nextHour(now) })}>New automation</button>
+        </div>
       </header>
       {error && <p className="osmo-notes-error" role="alert">{error}</p>}
       <div className="osmo-calendar-pane">
@@ -122,9 +171,6 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
               <ChevronRight size={14} />
             </button>
             <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setStart(weekStart(now))}>Today</button>
-            <span className="osmo-week-tools-gap" />
-            <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-event" })}>New event</button>
-            <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation" })}>New automation</button>
           </div>
           <div className="osmo-week-head">
             <div />
@@ -135,20 +181,47 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
               </div>
             ))}
           </div>
-          <div className="osmo-week-body" style={{ height: (GRID_LAST_HOUR - GRID_FIRST_HOUR) * HOUR_PX }}>
+          <div ref={bodyRef} className="osmo-week-body" style={{ minHeight: GRID_HOURS * HOUR_PX }}>
             <div className="osmo-week-hours">
-              {HOUR_LABELS.map((hour) => (
-                <span key={hour} style={{ top: (hour - GRID_FIRST_HOUR) * HOUR_PX }}>{hourLabel(hour)}</span>
+              {hourLabels.map((hour) => (
+                <span key={hour} style={{ top: (hour - GRID_FIRST_HOUR) * hourPx }}>{hourLabel(hour)}</span>
               ))}
             </div>
             {days.some((day) => sameDay(day, now)) && now.getHours() >= GRID_FIRST_HOUR && now.getHours() < GRID_LAST_HOUR && (
-              <div className="osmo-week-now" style={{ top: placement(now, now).top }} />
+              <div className="osmo-week-now" style={{ top: place(now, now).top }} />
             )}
             <div className="osmo-week-lines" aria-hidden>
-              {Array.from({ length: GRID_LAST_HOUR - GRID_FIRST_HOUR + 1 }, (_, i) => <i key={i} style={{ top: i * HOUR_PX }} />)}
+              {Array.from({ length: GRID_HOURS * 2 + 1 }, (_, i) => <i key={i} data-half={i % 2 === 1} style={{ top: (i * hourPx) / 2 }} />)}
             </div>
             {days.map((day, i) => (
-              <div key={i} className="osmo-week-col" data-today={sameDay(day, now)}>
+              <div
+                key={i}
+                className="osmo-week-col"
+                data-today={sameDay(day, now)}
+                title="Click to add an event or automation"
+                onMouseMove={(event) => {
+                  if (!onEmpty(event)) return setHover(undefined);
+                  const at = slotAt(event, day);
+                  if (hover?.day !== i || hover.at.getTime() !== at.getTime()) setHover({ day: i, at });
+                }}
+                onMouseLeave={() => setHover(undefined)}
+                onClick={(event) => {
+                  if (!onEmpty(event)) return;
+                  const at = slotAt(event, day);
+                  setSelected(selected?.kind === "new-automation" && !selected.eventId ? { kind: "new-automation", at } : { kind: "new-event", at });
+                }}
+              >
+                {hover?.day === i && !(draft && sameDay(draft.at, day) && draft.at.getTime() === hover.at.getTime()) && (
+                  <div className="osmo-slot-hover" aria-hidden style={place(hover.at, new Date(hover.at.getTime() + SLOT_MINUTES * 60_000))}>
+                    + {clock(hover.at)}
+                  </div>
+                )}
+                {draft && sameDay(draft.at, day) && (
+                  <div className="osmo-event" data-draft="true" aria-hidden style={place(draft.at, new Date(draft.at.getTime() + (draft.kind === "new-event" ? 60 : SLOT_MINUTES) * 60_000))}>
+                    {draft.kind === "new-event" ? "New event" : "New automation"}
+                    <span className="osmo-event-when">{clock(draft.at)}</span>
+                  </div>
+                )}
                 {ticks
                   .filter((tick) => sameDay(new Date(tick.at), day) && automations.find((a) => a.id === tick.automationId)?.trigger === "time")
                   .map((tick) => (
@@ -156,7 +229,7 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
                       key={`${tick.automationId}-${tick.at}`}
                       type="button"
                       className="osmo-auto-tick"
-                      style={{ top: Math.min(placement(new Date(tick.at), new Date(tick.at)).top, (GRID_LAST_HOUR - GRID_FIRST_HOUR) * HOUR_PX - 14) }}
+                      style={{ top: Math.min(place(new Date(tick.at), new Date(tick.at)).top, gridHeight - 14) }}
                       onClick={() => setSelected({ kind: "automation", id: tick.automationId })}
                     >
                       <i aria-hidden /> {tick.title}
@@ -167,7 +240,7 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
                   .map((occurrence) => {
                     const begin = new Date(occurrence.start);
                     const finish = new Date(occurrence.end);
-                    const { top, height } = placement(begin, finish);
+                    const { top, height } = place(begin, finish);
                     const isSelected = selected?.kind === "event" && selected.occurrence.eventId === occurrence.eventId && selected.occurrence.start === occurrence.start;
                     return (
                       <button
@@ -189,8 +262,13 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
             ))}
           </div>
         </div>
-        <aside className="osmo-calendar-detail">
-          {selected === undefined && <p className="osmo-notes-empty">Pick an event or an automation.</p>}
+        <aside ref={detailRef} className="osmo-calendar-detail">
+          {selected === undefined && (
+            <div className="osmo-calendar-empty">
+              <h2>Nothing selected</h2>
+              <p>Click a time on the grid to add an event or an automation there, or pick one to see its details.</p>
+            </div>
+          )}
           {selected?.kind === "event" && (
             <EventDetail occurrence={selected.occurrence} event={events.find((e) => e.id === selected.occurrence.eventId)} />
           )}
@@ -206,14 +284,28 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
           )}
           {selected?.kind === "event" && eventAutomation === undefined && (
             <div className="osmo-calendar-actions">
-              <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation", eventId: selected.occurrence.eventId })}>
+              <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setSelected({ kind: "new-automation", at: new Date(selected.occurrence.start), eventId: selected.occurrence.eventId })}>
                 Add automation
               </button>
             </div>
           )}
-          {selected?.kind === "new-event" && <NewEvent day={now} onCreate={(input) => act(() => api.addEvent(input)).then(() => setSelected(undefined))} />}
+          {draft && (
+            <div className="osmo-segmented" role="group" aria-label="Create">
+              <button type="button" aria-pressed={draft.kind === "new-event"} onClick={() => setSelected({ kind: "new-event", at: draft.at })}>Event</button>
+              <button type="button" aria-pressed={draft.kind === "new-automation"} onClick={() => setSelected({ kind: "new-automation", at: draft.at })}>Automation</button>
+            </div>
+          )}
+          {selected?.kind === "new-event" && (
+            <NewEvent key={selected.at.getTime()} at={selected.at} onCancel={() => setSelected(undefined)} onCreate={(input) => act(() => api.addEvent(input)).then(() => setSelected(undefined))} />
+          )}
           {selected?.kind === "new-automation" && (
-            <NewAutomation eventId={selected.eventId} now={now} onCreate={(input) => act(() => api.addAutomation(input)).then(() => setSelected(undefined))} />
+            <NewAutomation
+              key={`${selected.eventId ?? ""}-${selected.at.getTime()}`}
+              eventId={selected.eventId}
+              at={selected.at}
+              onCancel={() => setSelected(undefined)}
+              onCreate={(input) => act(() => api.addAutomation(input)).then(() => setSelected(undefined))}
+            />
           )}
           <p className="osmo-tray-note">Automations run from the tray, also with the window closed; agent tasks show in Tasks. Osmo never starts at login.</p>
         </aside>
@@ -312,7 +404,7 @@ function localInput(date: Date): string {
   return isoWithOffset(date).slice(0, 16);
 }
 
-function NewEvent({ day, onCreate }: { day: Date; onCreate: (input: Omit<CalendarEvent, "id" | "uid">) => Promise<void> }) {
+function NewEvent({ at, onCreate, onCancel }: { at: Date; onCreate: (input: Omit<CalendarEvent, "id" | "uid">) => Promise<void>; onCancel: () => void }) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -328,20 +420,19 @@ function NewEvent({ day, onCreate }: { day: Date; onCreate: (input: Omit<Calenda
       notes: null,
     });
   };
-  const nextHour = new Date(day.getFullYear(), day.getMonth(), day.getDate(), day.getHours() + 1);
   return (
     <form className="osmo-calendar-form" onSubmit={submit}>
       <h2>New event</h2>
       <label>Title<input name="title" required autoFocus /></label>
-      <label>Starts<input name="start" type="datetime-local" required defaultValue={localInput(nextHour)} /></label>
+      <label>Starts<input name="start" type="datetime-local" required defaultValue={localInput(at)} /></label>
       <label>Minutes<input name="minutes" type="number" min={5} defaultValue={60} /></label>
       <label>Repeats (RRULE)<input name="rrule" placeholder="FREQ=WEEKLY;BYDAY=SA" /></label>
-      <button type="submit" className="osmo-btn osmo-btn-primary osmo-btn-sm">Add event</button>
+      <FormActions submit="Add event" onCancel={onCancel} />
     </form>
   );
 }
 
-function NewAutomation({ eventId, now, onCreate }: { eventId: string | undefined; now: Date; onCreate: (input: AutomationInput) => Promise<void> }) {
+function NewAutomation({ eventId, at, onCreate, onCancel }: { eventId: string | undefined; at: Date; onCreate: (input: AutomationInput) => Promise<void>; onCancel: () => void }) {
   const [action, setAction] = useState<AutomationInput["action"]>("agent_task");
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -361,7 +452,6 @@ function NewAutomation({ eventId, now, onCreate }: { eventId: string | undefined
       enabled: true,
     });
   };
-  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 8);
   return (
     <form className="osmo-calendar-form" onSubmit={submit}>
       <h2>New automation</h2>
@@ -373,7 +463,7 @@ function NewAutomation({ eventId, now, onCreate }: { eventId: string | undefined
         </>
       ) : (
         <>
-          <label>First run<input name="at" type="datetime-local" required defaultValue={localInput(tomorrow)} /></label>
+          <label>First run<input name="at" type="datetime-local" required defaultValue={localInput(at)} /></label>
           <label>Repeats (RRULE)<input name="rrule" placeholder="FREQ=DAILY" /></label>
         </>
       )}
@@ -386,7 +476,16 @@ function NewAutomation({ eventId, now, onCreate }: { eventId: string | undefined
       </label>
       {action === "note_append" && <label>Note<input name="note" required placeholder="Journal/2026.md" /></label>}
       <label>{action === "notify" ? "Message" : "Prompt"}<textarea name="prompt" required rows={4} /></label>
-      <button type="submit" className="osmo-btn osmo-btn-primary osmo-btn-sm">Create</button>
+      <FormActions submit="Create automation" onCancel={onCancel} />
     </form>
+  );
+}
+
+function FormActions({ submit, onCancel }: { submit: string; onCancel: () => void }) {
+  return (
+    <div className="osmo-calendar-actions">
+      <button type="submit" className="osmo-btn osmo-btn-primary osmo-btn-sm">{submit}</button>
+      <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={onCancel}>Cancel</button>
+    </div>
   );
 }
