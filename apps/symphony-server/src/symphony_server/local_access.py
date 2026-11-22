@@ -137,6 +137,7 @@ class LocalAccess:
             return send
 
         async def echo(message: Message) -> None:
+            """Send `message`, adding the token and no-store to the response's headers."""
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers["X-Osmo-Desktop-Token"] = token

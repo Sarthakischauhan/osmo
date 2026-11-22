@@ -44,6 +44,8 @@ TRACK_NUMBER = re.compile(r"^\d{1,3}[\s.\-_]+")
 
 @dataclass(frozen=True)
 class MusicRoot:
+    """A folder of the user's own music (OSMO_MUSIC_DIRS)."""
+
     path: Path
 
 
@@ -56,6 +58,8 @@ def parse_music_dirs(value: str | None, default: Path) -> tuple[MusicRoot, ...]:
 
 @dataclass(frozen=True)
 class LocalFile:
+    """A scanned audio file: the root it was found under, its path and the track it plays."""
+
     root: Path
     path: Path
     track: Track
@@ -164,6 +168,7 @@ class LocalLibrary:
 
     @staticmethod
     def describe(track_id: str, path: Path) -> Track:
+        """The track for the file at `path`: its tags, else what its file name says."""
         title, artist, album, duration = tags_of(path)
         named_title, named_artist = names_from_filename(path)
         return Track(
