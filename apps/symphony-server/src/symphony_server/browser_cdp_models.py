@@ -7,25 +7,25 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
-class CdpReply(BaseModel):
+class CdpMessage(BaseModel):
     """A CDP reply or event: the fields Osmo reads, ignoring the rest."""
 
     model_config = ConfigDict(extra="ignore")
 
 
-class CreatedTarget(CdpReply):
+class CreatedTarget(CdpMessage):
     """Target.createTarget's reply: the new page."""
 
     targetId: str
 
 
-class AttachedTarget(CdpReply):
+class AttachedTarget(CdpMessage):
     """Target.attachToTarget's reply: the CDP session on the page."""
 
     sessionId: str
 
 
-class NavigateResult(CdpReply):
+class NavigateResult(CdpMessage):
     """Page.navigate's reply: an error when the page could not be reached."""
 
     errorText: str | None = None
@@ -33,14 +33,14 @@ class NavigateResult(CdpReply):
     loaderId: str | None = None
 
 
-class FrameMetadata(CdpReply):
+class FrameMetadata(CdpMessage):
     """What Chrome says about the page a frame shows; the size is the viewport in CSS pixels, the unit of input events."""
 
     deviceWidth: float | None = None
     deviceHeight: float | None = None
 
 
-class ScreencastFrame(CdpReply):
+class ScreencastFrame(CdpMessage):
     """A Page.screencastFrame event: one frame as base64 image data, to acknowledge by its session id."""
 
     data: str
@@ -48,7 +48,7 @@ class ScreencastFrame(CdpReply):
     metadata: FrameMetadata = FrameMetadata()
 
 
-class NavigatedFrame(CdpReply):
+class NavigatedFrame(CdpMessage):
     """The frame of a Page.frameNavigated event (the main frame has no parent)."""
 
     id: str
@@ -56,19 +56,19 @@ class NavigatedFrame(CdpReply):
     url: str
 
 
-class FrameNavigated(CdpReply):
+class FrameNavigated(CdpMessage):
     """A Page.frameNavigated event."""
 
     frame: NavigatedFrame
 
 
-class RemoteObject(CdpReply):
+class RemoteObject(CdpMessage):
     """A JavaScript value returned by value."""
 
     value: Any = None
 
 
-class Evaluated(CdpReply):
+class Evaluated(CdpMessage):
     """Runtime.evaluate's (or callFunctionOn's) reply: the value, or the exception it threw."""
 
     result: RemoteObject
@@ -83,20 +83,20 @@ class PageText(BaseModel):
     text: str
 
 
-class AxValue(CdpReply):
+class AxValue(CdpMessage):
     """A value in the accessibility tree."""
 
     value: Any = None
 
 
-class AxProperty(CdpReply):
+class AxProperty(CdpMessage):
     """A named property of an accessibility node."""
 
     name: str
     value: AxValue
 
 
-class AxNode(CdpReply):
+class AxNode(CdpMessage):
     """One node of the accessibility tree: its role, name and the DOM node behind it."""
 
     ignored: bool = False
@@ -106,25 +106,25 @@ class AxNode(CdpReply):
     properties: list[AxProperty] = []
 
 
-class AxTree(CdpReply):
+class AxTree(CdpMessage):
     """Accessibility.getFullAXTree's reply."""
 
     nodes: list[AxNode]
 
 
-class BoxModel(CdpReply):
+class BoxModel(CdpMessage):
     """An element's content quad (four x, y corners in CSS pixels)."""
 
     content: list[float]
 
 
-class BoxModelResult(CdpReply):
+class BoxModelResult(CdpMessage):
     """DOM.getBoxModel's reply."""
 
     model: BoxModel
 
 
-class DescribedNode(CdpReply):
+class DescribedNode(CdpMessage):
     """A DOM node's name and attributes."""
 
     nodeName: str = ""
@@ -132,33 +132,47 @@ class DescribedNode(CdpReply):
     attributes: list[str] = []
 
 
-class Described(CdpReply):
+class Described(CdpMessage):
     """DOM.describeNode's reply."""
 
     node: DescribedNode = DescribedNode()
 
 
-class ResolvedObject(CdpReply):
+class ResolvedObject(CdpMessage):
     """The JavaScript object of a DOM node."""
 
     objectId: str
 
 
-class Resolved(CdpReply):
+class Resolved(CdpMessage):
     """DOM.resolveNode's reply."""
 
     object: ResolvedObject
 
 
-class HistoryEntry(CdpReply):
+class HistoryEntry(CdpMessage):
     """One entry of the page's history."""
 
     id: int
     url: str
 
 
-class NavigationHistory(CdpReply):
+class NavigationHistory(CdpMessage):
     """Page.getNavigationHistory's reply: the entries and where the page is among them."""
 
     currentIndex: int
     entries: list[HistoryEntry]
+
+
+class PausedRequest(CdpMessage):
+    """The request of a Fetch.requestPaused event."""
+
+    url: str
+
+
+class RequestPaused(CdpMessage):
+    """A Fetch.requestPaused event: a request (or a redirect hop of one) Chrome holds until it is continued or failed."""
+
+    requestId: str
+    request: PausedRequest
+    resourceType: str = ""

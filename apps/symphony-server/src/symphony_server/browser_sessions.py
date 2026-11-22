@@ -40,6 +40,7 @@ from typing import Any
 
 from core_harness import Addon
 
+from symphony_server.browser_guard import NetworkGuard
 from symphony_server.browser_rules import DomainRules
 from symphony_server.browser_session import BrowserSession, Show
 from symphony_server.canvas import WidgetBoard, render_event
@@ -76,9 +77,12 @@ class BrowserSessions:
         profile: Path | None = None,
         visible: bool = False,
         rules: DomainRules = DomainRules(),
+        guard: NetworkGuard | None = None,
     ) -> None:
         self.executable, self.board, self.clock = executable, board, clock
         self.profile, self.visible, self.rules = profile, visible, rules
+        # One guard for every thread's browser, so its verdicts on hosts are shared.
+        self.guard = guard if guard is not None else NetworkGuard()
         self.sessions: dict[str, BrowserSession] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         # The agent runs of each thread that are not over, which keep its browser open.
@@ -113,8 +117,9 @@ class BrowserSessions:
         # Osmo's persistent profile serves one browser at a time (Chrome locks it); the others get a throwaway one.
         in_use = any(session.keep_profile for session in self.sessions.values())
         profile = self.profile if self.profile is not None and not in_use else None
-        session = await BrowserSession.launch(executable, render.widget.id, show, profile, self.visible, self.rules)
+        session = await BrowserSession.launch(executable, render.widget.id, show, profile, self.visible, self.rules, self.guard)
         try:
+            await session.guard_network()
             await show(render)
             await session.start_screencast()
         except BaseException:
@@ -180,6 +185,9 @@ class BrowserSessions:
         session = self.sessions.get(thread_id)
         if session is not None and session.usable:
             session.taken_over = user
+            host = session.site_of(session.props.url)
+            if user and host is not None:
+                session.user_hosts.add(host)
             session.last_used = self.clock()
             await session.patch({"control": "user" if user else "agent"})
 

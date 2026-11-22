@@ -109,11 +109,27 @@ class BrowserTool(Tool, Generic[A]):
             session = await self.sessions.open(thread_id)
             if session.taken_over:
                 raise BrowserError("the user has taken over the browser: stop using it, and say what is left for when they hand it back")
-            if session.rules.decide(session.props.url) == "deny":
-                raise BrowserError(f"browsing {session.props.url} is not allowed by the user's site rules")
-            return json.dumps(await self.act(session, command))
+            # The page as it is now, not as the widget last heard: a redirect or a refresh may have moved it.
+            live = (await session.read_page()).url
+            if session.rules.decide(live) == "deny":
+                raise BrowserError(f"browsing {live} is not allowed by the user's site rules")
+            decided, session.decided_host = session.decided_host, None
+            if self.name in BROWSER_ACTION_TOOLS and decided is not None and session.site_of(live) != decided:
+                raise BrowserError(f"the page moved to {live} after this step was approved for {decided}: read the page again before acting")
+            result = await self.act(session, command)
+            if self.name in NAVIGATING_TOOLS:
+                await self.leave_if_denied(session)
+            return json.dumps(result)
         except (ValidationError, BrowserError) as exc:
             return json.dumps({"error": str(exc)})
+
+    async def leave_if_denied(self, session: BrowserSession) -> None:
+        """After a step that may have navigated (a click, a key, a dropdown, back or forward): when the page it
+        landed on is on a denied site, leave it at once (a page from the back/forward cache is not intercepted)."""
+        landed = (await session.read_page()).url
+        if session.rules.decide(landed) == "deny":
+            await session.navigate("about:blank")
+            raise BrowserError(f"that led to {urlsplit(landed).hostname}, which the user's site rules block")
 
     async def act(self, session: BrowserSession, command: A) -> dict[str, Any]:
         """What the tool does on the session, given its checked arguments."""
@@ -135,12 +151,11 @@ class OpenTool(BrowserTool[OpenArgs]):
             raise BrowserError("only http and https addresses can be opened")
         if session.rules.decide(command.url) == "deny":
             raise BrowserError(f"{urlsplit(command.url).hostname} is blocked by the user's site rules")
-        landed = await session.navigate(command.url)
-        if session.rules.decide(landed) == "deny":
-            # A redirect into a denied site: leave it at once.
-            await session.navigate("about:blank")
-            raise BrowserError(f"{command.url} led to {urlsplit(landed).hostname}, which the user's site rules block")
-        return {"url": landed}
+        refusal = await session.guard.refusal(command.url)
+        if refusal is not None:
+            raise BrowserError(refusal)
+        # Each redirect hop is screened again as Chrome makes it (BrowserSession.screen), and the landing by execute.
+        return {"url": await session.navigate(command.url)}
 
 
 class ReadTool(BrowserTool[ReadArgs]):
@@ -291,6 +306,8 @@ BROWSER_TOOL_NAMES = frozenset(
 )
 # The steps that act on a page (and so can submit, buy or send): the ones site rules allow without asking, or make ask.
 BROWSER_ACTION_TOOLS = frozenset({"browser_click", "browser_type", "browser_press"})
+# The tools after which the page may be somewhere else (their landing is checked against the rules).
+NAVIGATING_TOOLS = frozenset({"browser_open", "browser_click", "browser_type", "browser_press", "browser_select", "browser_back", "browser_forward"})
 
 
 class BrowserApprovalPolicy:
@@ -306,7 +323,12 @@ class BrowserApprovalPolicy:
         if tool_name not in BROWSER_ACTION_TOOLS or session is None:
             return None
         rule = session.rules.match(session.props.url)
+        # The tool checks that the page is still on this site just before it acts (BrowserTool.execute).
+        session.decided_host = session.site_of(session.props.url)
         if rule == "deny":
             # The tool itself refuses on a denied site; asking the user first would be a prompt for nothing.
             return "allow"
+        if rule == "allow" and session.decided_host in session.user_hosts:
+            # The user browsed here themselves: their login may be in the profile, so the agent asks first.
+            return "ask"
         return rule

@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from conftest import FakeGrok
 from test_agents import ScriptedAgent, Step, start_agent, told
-from test_session import call, say, tool_output
 from test_browser import (
     AX_NODES,
     PAGE,
@@ -29,11 +28,12 @@ from test_browser import (
     use,
     user_sends,
 )
+from test_session import call, say, tool_output
 
 from symphony_server.approvals import APPROVAL_REQUIRED, APPROVAL_RESOLVED, ApprovalAddon, ApprovalBroker
+from symphony_server.browser_rules import DomainRules
 from symphony_server.browser_sessions import RUN_BROWSER, BrowserSessions
 from symphony_server.browser_tools import BrowserApprovalPolicy
-from symphony_server.browser_rules import DomainRules
 from symphony_server.canvas import WidgetBoard
 from symphony_server.chrome import OWNER_FILE, find_chrome, reap_stale
 from symphony_server.settings import Settings, browser_profile
@@ -245,10 +245,17 @@ async def test_a_denied_site_cannot_be_opened_or_reached_by_a_redirect(chrome: F
     assert "blocked" in (await use(sessions, "browser_open", url="https://www.bank.test/login"))["error"]
     assert [p["url"] for p in chrome.params("Page.navigate")] == []
 
-    # shop.test redirects to the bank: Osmo leaves the page at once.
-    chrome.answers["Runtime.evaluate"] = {"result": {"value": {"url": "https://bank.test/", "title": "Bank", "text": ""}}}
+    # shop.test redirects to the bank: the redirect hop is refused before Chrome requests it.
+    chrome.redirects[PAGE] = "https://bank.test/"
+    assert "bank.test is blocked by the user's site rules" in (await use(sessions, "browser_open", url=PAGE))["error"]
+    assert [p["url"] for p in chrome.params("Page.navigate")] == [PAGE]
+    assert len(chrome.params("Fetch.continueRequest")) == 1 and len(chrome.params("Fetch.failRequest")) == 1
+
+    # A page that moves to the bank by itself (a script, a meta refresh) is left at once.
+    chrome.redirects.clear()
+    chrome.answers["Runtime.evaluate"] = lambda params: {"result": {"value": {"url": "https://bank.test/" if len(chrome.params("Page.navigate")) == 2 else PAGE, "title": "", "text": ""}}}
     assert "bank.test" in (await use(sessions, "browser_open", url=PAGE))["error"]
-    assert [p["url"] for p in chrome.params("Page.navigate")] == [PAGE, "about:blank"]
+    assert [p["url"] for p in chrome.params("Page.navigate")] == [PAGE, PAGE, "about:blank"]
     await sessions.close_all()
 
 
@@ -391,3 +398,22 @@ async def test_take_over_marks_the_widget_and_refuses_agent_tools(chrome: FakeCh
 def test_settings_carry_the_rules(tmp_path: Path) -> None:
     settings = Settings(browser_rules=DomainRules.parse("a.test=deny"), browser_profile=tmp_path, browser_visible=True)
     assert settings.browser_rules.decide("https://a.test") == "deny"
+
+
+def test_rules_match_a_trailing_dot_and_an_internationalised_name() -> None:
+    rules = DomainRules.parse("bank.example=deny,bücher.de=deny,Shop.Test.=allow")
+    assert rules.decide("https://bank.example./login") == "deny"
+    assert rules.decide("https://BANK.EXAMPLE../") == "deny"
+    assert rules.decide("https://bücher.de/") == "deny"
+    assert rules.decide("https://xn--bcher-kva.de/") == "deny"
+    assert rules.decide("https://www.BÜCHER.de./") == "deny"
+    assert rules.decide("https://shop.test/") == "allow"
+
+
+async def test_a_denied_site_spelt_another_way_is_not_opened(chrome: FakeChrome) -> None:
+    sessions = BrowserSessions(str(chrome.executable), WidgetBoard(), rules=DomainRules.parse("bank.example=deny,bücher.de=deny"))
+    RUN_BROWSER.set("thread-spelling")
+    for url in ("https://bank.example./", "https://www.xn--bcher-kva.de/", "https://BÜCHER.de/"):
+        assert "blocked" in (await use(sessions, "browser_open", url=url))["error"]
+    assert chrome.params("Page.navigate") == []
+    await sessions.close_all()

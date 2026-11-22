@@ -11,6 +11,7 @@ import time
 from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from symphony_server.browser_cdp_models import (
     AttachedTarget,
@@ -24,13 +25,16 @@ from symphony_server.browser_cdp_models import (
     NavigateResult,
     NavigationHistory,
     PageText,
+    RequestPaused,
     Resolved,
     ScreencastFrame,
 )
+from symphony_server.browser_guard import NetworkGuard
 from symphony_server.browser_page import ENTER_KEY_CODE, READ_EXPRESSION, SELECT_FUNCTION, TEXT_ROLES, frame_data_url, is_focusable, role_of, sensitive_kind
 from symphony_server.browser_rules import DomainRules
 from symphony_server.cdp import BrowserError, CdpConnection
 from symphony_server.chrome import OWNER_FILE, drain, kill_group, listening_url, start_chrome
+from symphony_server.host_names import normalize_host
 from symphony_server.protocol import BrowserClick, BrowserKey, BrowserScroll, RenderedWidget, ServerEvent, WidgetRender, WidgetUpdate
 from symphony_server.widgets import BrowserProps
 
@@ -40,6 +44,8 @@ log = logging.getLogger("symphony.browser")
 HISTORY_WAIT_SECONDS = 10.0
 WAIT_MAX_SECONDS = 10.0
 WAIT_POLL_SECONDS = 0.25
+# Every request Chrome makes, redirect hops included, is held until the guard has looked at it.
+INTERCEPT_ALL = {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]}
 Show = Callable[[str, ServerEvent], Awaitable[None]]
 
 
@@ -56,10 +62,19 @@ class BrowserSession:
         show: Callable[[ServerEvent], Awaitable[None]],
         keep_profile: bool = False,
         rules: DomainRules = DomainRules(),
+        guard: NetworkGuard | None = None,
     ) -> None:
         self.process, self.profile, self.cdp, self.target, self.widget_id, self.show = process, profile, cdp, target, widget_id, show
         # A persistent profile (Osmo's own) stays when the browser closes; a throwaway one is removed.
         self.keep_profile, self.rules = keep_profile, rules
+        self.guard = guard if guard is not None else NetworkGuard()
+        # Why the last page (a navigation or a redirect hop of one) was refused, for the error the tool returns.
+        self.refused: str | None = None
+        # The site an approval was decided for (BrowserApprovalPolicy), checked again just before the action.
+        self.decided_host: str | None = None
+        # Sites the user browsed while they had taken the browser over: their logins may be in the profile now, so
+        # an `allow` rule no longer lets the agent act there without asking.
+        self.user_hosts: set[str] = set()
         # The user took the browser over from the widget: agent tools refuse until they hand it back.
         self.taken_over = False
         self.drain: asyncio.Task[None] | None = None
@@ -83,6 +98,7 @@ class BrowserSession:
         profile: Path | None = None,
         visible: bool = False,
         rules: DomainRules = DomainRules(),
+        guard: NetworkGuard | None = None,
     ) -> BrowserSession:
         """Start Chrome (on `profile`, or a throwaway one) and open a blank page on it; kills it again if anything fails or is cancelled."""
         keep_profile = profile is not None
@@ -97,7 +113,7 @@ class BrowserSession:
             except BaseException:
                 await cdp.close()
                 raise
-            session = cls(process, profile, cdp, attached.sessionId, widget_id, show, keep_profile, rules)
+            session = cls(process, profile, cdp, attached.sessionId, widget_id, show, keep_profile, rules, guard)
             session.drain = asyncio.create_task(drain(process))
             return session
         except BaseException:
@@ -117,6 +133,42 @@ class BrowserSession:
     def render(self) -> WidgetRender:
         """The widget as it is now: what a client that connects to the thread again is shown."""
         return WidgetRender(widget=RenderedWidget(id=self.widget_id, type="browser", props=self.props.model_dump(mode="json", exclude_none=True)))
+
+    async def guard_network(self) -> None:
+        """Hold every request of the whole browser (pages, frames, workers, redirect hops) for `screen`.
+
+        Fetch is enabled on the browser target, not the page, so service workers and popups are covered too."""
+        self.cdp.on("Fetch.requestPaused", self.on_request)
+        await self.cdp.call("Fetch.enable", INTERCEPT_ALL)
+
+    def on_request(self, params: dict[str, Any], session_id: str | None) -> None:
+        """Screen one paused request beside the CDP reader."""
+        self.spawn(self.screen(RequestPaused.model_validate(params), session_id))
+
+    async def screen(self, paused: RequestPaused, session_id: str | None) -> None:
+        """Let a request through, or fail it when it goes to this machine or its network, or (a page the agent
+        opens) to a site the user's rules deny."""
+        url = paused.request.url
+        reason = await self.guard.refusal(url)
+        if reason is None and paused.resourceType == "Document" and not self.taken_over and self.rules.decide(url) == "deny":
+            reason = f"{urlsplit(url).hostname} is blocked by the user's site rules"
+        if reason is None:
+            await self.cdp.call("Fetch.continueRequest", {"requestId": paused.requestId}, session_id=session_id)
+            return
+        if paused.resourceType == "Document":
+            self.refused = reason
+        log.info("browser request refused: %s", reason)
+        await self.cdp.call("Fetch.failRequest", {"requestId": paused.requestId, "errorReason": "BlockedByClient"}, session_id=session_id)
+
+    def site_of(self, url: str | None) -> str | None:
+        """The normalised host of `url` (None without one, as about:blank)."""
+        if not url:
+            return None
+        try:
+            host = normalize_host(urlsplit(url).hostname or "")
+        except ValueError:
+            return None
+        return host or None
 
     async def start_screencast(self) -> None:
         """Start relaying the page's frames and address to the widget."""
@@ -169,6 +221,9 @@ class BrowserSession:
         """Show the main frame's new address and the rule for its site on the widget."""
         navigated = FrameNavigated.model_validate(params).frame
         if session_id == self.target and navigated.parentId is None:
+            host = self.site_of(navigated.url)
+            if self.taken_over and host is not None:
+                self.user_hosts.add(host)
             self.spawn(self.patch({"url": navigated.url, "rule": self.rules.decide(navigated.url)}))
 
     # ------------------------------------------------------------ what the tools do
@@ -176,10 +231,11 @@ class BrowserSession:
     async def navigate(self, url: str) -> str:
         """Go to `url` and wait for it to load; BrowserError when it cannot be reached."""
         loaded = self.cdp.expect("Page.loadEventFired", self.target)
+        self.refused = None
         try:
             result = NavigateResult.model_validate(await self.page("Page.navigate", {"url": url}))
             if result.errorText is not None:
-                raise BrowserError(f"could not open {url}: {result.errorText}")
+                raise BrowserError(f"could not open {url}: {self.refused or result.errorText}")
             if result.loaderId is not None:
                 await loaded
         finally:

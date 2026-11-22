@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import signal
@@ -15,6 +16,7 @@ import time
 from collections.abc import AsyncGenerator, Callable, Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from conftest import FakeGrok, make_client, xai_key_store
@@ -29,6 +31,7 @@ from test_session import call, next_event, say, tool_output
 from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
 
+from symphony_server import browser_guard
 from symphony_server.browser_rules import DomainRules
 from symphony_server.browser_sessions import RUN_BROWSER, BrowserSessions
 from symphony_server.browser_tools import browser_tools
@@ -43,6 +46,8 @@ FRAMES = ["/9j/AAAA", "/9j/BBBB", "/9j/CCCC"]
 # What Chrome reports about every frame's page (the viewport in CSS pixels).
 VIEWPORT = {"deviceWidth": 800, "deviceHeight": 600}
 PAGE = "http://shop.test/"
+# What the fake resolver answers for a host by default: a public address (example.com's).
+PUBLIC_ADDRESS = "93.184.215.14"
 STUB = """#!/bin/sh
 echo $$ > "$FAKE_CHROME_PID"
 # The arguments it was started with (the profile, headless or not).
@@ -117,6 +122,19 @@ class FakeChrome:
         # Answers a test sets for some methods: a result, or a function of the params that makes one.
         self.answers: dict[str, dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]]] = {}
         self.connections: set[ServerConnection] = set()
+        # Navigations go through Fetch interception as in Chrome: every hop (the page, then each redirect in
+        # `redirects`) is paused until the browser session continues or fails it.
+        self.redirects: dict[str, str] = {}
+        self.verdicts: dict[str, asyncio.Future[str]] = {}
+        self.request_ids = itertools.count(1)
+        self.navigations: set[asyncio.Future[None]] = set()
+        # What the guard's resolver answers per host: a public address unless a test says otherwise.
+        self.dns: dict[str, list[str]] = {}
+
+        async def resolve(host: str) -> list[str]:
+            return self.dns.get(host, [PUBLIC_ADDRESS])
+
+        monkeypatch.setattr(browser_guard, "system_resolve", resolve)
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
@@ -181,7 +199,16 @@ class FakeChrome:
                 self.calls.append((method, params))
                 if method in self.stall:
                     continue
+                if method in ("Fetch.continueRequest", "Fetch.failRequest"):
+                    verdict = self.verdicts.pop(params["requestId"], None)
+                    if verdict is not None:
+                        verdict.set_result(method)
                 found = self.answers.get(method)
+                # Chrome holds requests only once Fetch interception is on.
+                intercepting = "Fetch.enable" in self.methods()
+                if found is None and intercepting and method == "Page.navigate" and urlsplit(params["url"]).scheme in ("http", "https"):
+                    self.navigations.add(asyncio.ensure_future(self.navigate_through(connection, message["id"], params["url"])))
+                    continue
                 result, after = ((found(params) if callable(found) else found), []) if found is not None else self.answer(method, params)
                 await connection.send(json.dumps({"id": message["id"], "result": result}))
                 for event in after:
@@ -190,6 +217,48 @@ class FakeChrome:
             pass  # the browser's client hung up (the session closed) mid-send
         finally:
             self.connections.discard(connection)
+
+    def pause(self, url: str, resource_type: str) -> asyncio.Future[str]:
+        """Pause a request as Chrome's Fetch interception does; the future gets the method the session answered with."""
+        request_id = f"R{next(self.request_ids)}"
+        verdict: asyncio.Future[str] = self.loop.create_future()
+        self.verdicts[request_id] = verdict
+        body = {"method": "Fetch.requestPaused", "params": {"requestId": request_id, "request": {"url": url}, "resourceType": resource_type}}
+
+        async def send() -> None:
+            for connection in self.connections:
+                await connection.send(json.dumps(body))
+
+        self.loop.create_task(send())
+        return verdict
+
+    async def request(self, url: str, resource_type: str = "Image") -> str:
+        """A page's request of its own accord (a subresource, a worker's fetch): how the session answered it."""
+
+        async def wait() -> str:
+            if "Fetch.enable" not in self.methods():
+                return "not intercepted"
+            return await self.pause(url, resource_type)
+
+        async with asyncio.timeout(5):
+            return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(wait(), self.loop))
+
+    async def navigate_through(self, connection: ServerConnection, message_id: int, url: str) -> None:
+        """Page.navigate with each hop paused first; a failed hop ends it with Chrome's ERR_BLOCKED_BY_CLIENT."""
+        hop = url
+        while True:
+            async with asyncio.timeout(5):
+                verdict = await self.pause(hop, "Document")
+            if verdict == "Fetch.failRequest":
+                await connection.send(json.dumps({"id": message_id, "result": {"frameId": "F1", "loaderId": "L1", "errorText": "net::ERR_BLOCKED_BY_CLIENT"}}))
+                return
+            if hop not in self.redirects:
+                break
+            hop = self.redirects[hop]
+        result, after = self.answer("Page.navigate", {"url": hop})
+        await connection.send(json.dumps({"id": message_id, "result": result}))
+        for event in after:
+            await connection.send(json.dumps(event))
 
     def answer(self, method: str, params: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         def event(name: str, body: dict[str, Any]) -> dict[str, Any]:
