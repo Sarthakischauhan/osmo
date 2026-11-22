@@ -14,55 +14,33 @@ voice session (reconnect or model switch) is seeded from it.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import secrets
 from collections.abc import Coroutine, Sequence
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
-from core_ai.voice import (
-    AudioDelta,
-    ResponseDone,
-    SpeechStarted,
-    SpeechStopped,
-    TextDelta,
-    ToolCall,
-    UserTranscript,
-    VoiceConfig,
-    VoiceError,
-    VoiceEvent,
-    VoiceSession,
-)
-from core_harness import EventSink, Tool
+from core_ai.voice import ResponseDone, VoiceConfig, VoiceSession
+from core_harness import Tool
 from pydantic import ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
-from symphony_server import tracing
-from symphony_server.desktop import DesktopSession, RUN_DESKTOP
-from symphony_server.approvals import APPROVAL_REQUIRED, ApprovalAddon, ApprovalBroker, ApprovalPayload, ApprovalResolvedPayload
 from symphony_server.agents import AgentDesk, AgentRuns, AgentStatusTool, CancelAgentTool, Notice, RunAgentTool
-from symphony_server.browser import BrowserSession
-from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET, WidgetBoard
-from symphony_server.cdp import BrowserError
-from symphony_server.grok_compat import ReasoningDelta
+from symphony_server.approvals import ApprovalBroker
+from symphony_server.canvas import WidgetBoard
+from symphony_server.desktop import DesktopSession
 from symphony_server.model_access import ModelAccess
-from symphony_server.music import OSMO_MUSIC, MusicNow
-from symphony_server.providers import provider_label
+from symphony_server.music import MusicNow
 from symphony_server.protocol import (
     BrowserClick,
     BrowserClose,
-    BrowserTakeover,
     BrowserKey,
     BrowserScroll,
+    BrowserTakeover,
     DesktopConfigure,
     DesktopResult,
     Interrupt,
-    ApprovalRequest,
-    ApprovalResolved,
     ModelsEvent,
-    MusicCommand,
     MusicState,
     OsmoState,
     ServerEvent,
@@ -71,102 +49,29 @@ from symphony_server.protocol import (
     SessionStart,
     StateEvent,
     ThreadEvent,
-    TranscriptDelta,
     UsageEvent,
     VoiceConfigured,
     VoicePreviewRequest,
     WidgetAction,
     client_event_adapter,
-    widget_event_adapter,
 )
+from symphony_server.providers import provider_label
 from symphony_server.session_previews import SessionPreviews
-from symphony_server.storage import DEFAULT_THREAD_TITLE, MessageRole, Storage, ThreadRecord
-from symphony_server.turn_events import action_text, activity_label
+from symphony_server.storage import DEFAULT_THREAD_TITLE, Storage, ThreadRecord
+from symphony_server.turn_events import action_text
 from symphony_server.usage import voice_usage
-from symphony_server.voices import (
-    OSMO_VOICE,
-    PreviewCache,
-    Selection,
-    SetVoiceArgs,
-    VoiceModel,
-    default_selection,
-    find_model,
-    resolve_selection,
-)
+from symphony_server.voice_switch import VoiceSwitch
+from symphony_server.voice_tool_calls import VoiceToolCalls, VoiceToolSink
+from symphony_server.voice_transcript import Transcript, conversation_title
+from symphony_server.voice_turns import BARGE_IN, VoiceTurns
+from symphony_server.voices import PreviewCache, Selection, SetVoiceArgs, VoiceModel, default_selection, find_model, resolve_selection
 
 log = logging.getLogger("symphony.voice")
 
-# `state` detail telling the client to drop queued assistant audio immediately.
-BARGE_IN = "barge-in"
-# A picker model switch waits this long for the current answer to finish.
-SWAP_WAIT_S = 15.0
-# A thread is titled from its first utterance, cut to this length.
-TITLE_FROM_SPEECH_MAX = 60
-
-
-def conversation_title(text: str) -> str | None:
-    """A short title from the first line of a conversation, or None when there is nothing to name it with."""
-    line = " ".join(text.split())
-    if not line:
-        return None
-    cut = line[:TITLE_FROM_SPEECH_MAX].rsplit(" ", 1)[0] if len(line) > TITLE_FROM_SPEECH_MAX and " " in line[:TITLE_FROM_SPEECH_MAX] else line[:TITLE_FROM_SPEECH_MAX]
-    title = cut.strip(" \t.,;:!?-—–")
-    return title or None
-
-
-# An utterance's bubble waits this long for its transcript (some never come: noise, a failed
-# transcription, a closed voice session) before it is dropped.
-UNHEARD_WAIT_S = 10.0
-# Tools whose result needs no answer when the answer that called them already said something:
-# "I'll look into it" is enough, and a second line after run_agent returns only repeats it.
-ANNOUNCED_TOOLS = frozenset({"run_agent"})
-# The run id a voice tool's approval card carries: it belongs to the voice session, not to an agent run.
-VOICE_RUN = "voice"
-# A voice tool waits this long for the user's Approve / Deny; the voice turn is held meanwhile, so it is shorter than a run's.
-VOICE_APPROVAL_TIMEOUT_S = 120.0
-
-
-class VoiceToolSink(EventSink):
-    """The sink a voice tool runs with: widget and voice events go straight to the bridge."""
-
-    def __init__(self, bridge: VoiceBridge) -> None:
-        super().__init__()
-        self.bridge = bridge
-
-    async def deliver(self, event_type: str, payload: dict[str, Any]) -> None:
-        if event_type == OSMO_WIDGET:
-            await self.bridge.emit(widget_event_adapter.validate_python(payload))
-        elif event_type == OSMO_CODE:
-            markdown = str(payload.get("markdown") or "").strip()
-            if markdown:
-                await self.bridge.emit(TranscriptDelta(role="assistant", text=f"\n\n{markdown}\n"))
-                self.bridge.held.append((frozenset(self.bridge.unheard), markdown))
-                self.bridge.store_held()
-        elif event_type == OSMO_VOICE:
-            await self.bridge.configure(SetVoiceArgs.model_validate(payload), "tool")
-        elif event_type == OSMO_MUSIC:
-            await self.bridge.emit(MusicCommand.model_validate(payload))
-
-
-@dataclass
-class Response:
-    """One voice model response as read off the session."""
-
-    # The answer's bubble in the browser: its deltas carry this id, and a `final` one ends it.
-    item_id: str = field(default_factory=lambda: f"a-{secrets.token_hex(6)}")
-    text: list[str] = field(default_factory=list)
-    reasoning: list[str] = field(default_factory=list)
-    calls: list[ToolCall] = field(default_factory=list)
-    done: ResponseDone | None = None
-    # Utterances still awaiting their transcript when the response began; stored after them.
-    after: frozenset[str] | None = None
-
-
-def tool_output(result: Any) -> str:
-    return result if isinstance(result, str) else json.dumps(result, default=str)
-
 
 class VoiceBridge:
+    """One browser socket's voice session: its thread, its voice model session and what the browser asks of it."""
+
     def __init__(
         self,
         browser: WebSocket,
@@ -190,42 +95,31 @@ class VoiceBridge:
         self.agents, self.storage, self.access, self.board = agents, storage, access, board
         self.previews = SessionPreviews(access, previews)
         self.desk = AgentDesk(agents, desktop=self.desktop)
+        self.transcript = Transcript(storage, instructions)
+        self.switch = VoiceSwitch(self)
+        sink = VoiceToolSink(self.emit, self.transcript, self.switch.configure)
         voice_tools = [*tools, RunAgentTool(self.desk), AgentStatusTool(self.desk), CancelAgentTool(self.desk)]
-        self.tools = {tool.name: tool for tool in voice_tools}
-        self.sink = VoiceToolSink(self)
-        # The voice model's risky tools (vault_write, ...) wait on the user exactly as an agent run's do.
         self.broker = broker
-        self.approvals = ApprovalAddon(broker, f"voice-{secrets.token_hex(6)}", approval_tools, VOICE_APPROVAL_TIMEOUT_S)
+        self.calls = VoiceToolCalls(
+            voice_tools,
+            broker=broker,
+            approval_tools=approval_tools,
+            session_id=f"voice-{secrets.token_hex(6)}",
+            desktop=self.desktop,
+            sink=sink,
+            emit=self.emit,
+            set_state=self.set_state,
+        )
         self.thread: ThreadRecord | None = None
         self.voice: VoiceSession | None = None
         self.selection = default_selection(access.models(), default_voice)
         self.state: OsmoState = "idle"
         self.state_detail: str | None = None
-        # Set while no answer is under way: model switches wait for it.
-        self.idle = asyncio.Event()
-        self.idle.set()
-        # Bumped on every barge-in, so a tool round started before it does not ask for another answer.
-        self.barge_ins = 0
-        # Cancellation must also unblock a response reader if the provider omits response.done.
-        self.response_task: asyncio.Task[Response] | None = None
-        self.response_active = False
-        # A model switch asked for by set_voice mid-answer; applied once the answer ends.
-        self.swap_after_turn = False
-        # Ended utterances whose transcript has not arrived, oldest first. Transcription finishes
-        # after the answer has often started, so each utterance's bubble is opened when speech
-        # stops and filled in later, keeping it above that answer.
-        self.utterances = 0
-        self.unheard: list[str] = []
-        # The open Langfuse turn, keyed by utterance id. Closed when its transcript is stored.
-        self.traces: dict[str, Any] = {}
-        # Answers held back from storage until the utterances they reply to are stored.
-        self.held: list[tuple[frozenset[str], str]] = []
-        self.configure_lock = asyncio.Lock()
+        self.turns = VoiceTurns(self, browser, self.transcript, self.calls)
         self.tasks: set[asyncio.Task[None]] = set()
 
-    # ------------------------------------------------------------ browser side
-
     async def run(self) -> None:
+        """Serve the browser socket until it closes, then stop everything the session started."""
         models = self.access.models()
         await self.emit(ModelsEvent(models=list(models), selection=self.selection))
         try:
@@ -246,15 +140,17 @@ class VoiceBridge:
                 task.cancel()
             if self.thread is not None:
                 self.agents.unobserve(self.thread.id, self)
-            self.broker.deny_session(self.approvals.session_id)
+            self.broker.deny_session(self.calls.approvals.session_id)
             await self.close_voice()
 
     def spawn(self, work: Coroutine[Any, Any, None]) -> None:
+        """Run `work` beside the receive loop, cancelled when the socket closes."""
         task: asyncio.Task[None] = asyncio.create_task(work)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
     async def forward_audio(self, pcm: bytes) -> None:
+        """Send the browser's microphone audio to the voice session (not while a preview plays)."""
         if self.voice is None or self.previews.mic_paused():
             return
         try:
@@ -263,10 +159,12 @@ class VoiceBridge:
             await self.voice_lost()
 
     async def handle_client_text(self, text: str) -> None:
+        """Act on one JSON event from the browser."""
         try:
             event = client_event_adapter.validate_json(text)
         except ValidationError as exc:
-            log.warning("bad client event: %s", exc.errors()[:1])
+            # Where and what kind, never the input: a malformed browser.key would otherwise log what the user typed.
+            log.warning("bad client event: %s", [(error["loc"], error["type"]) for error in exc.errors()[:3]])
             return
         if isinstance(event, DesktopConfigure):
             self.desktop.configure(event.enabled)
@@ -282,13 +180,15 @@ class VoiceBridge:
             if self.thread is not None:
                 await self.agents.browsers.end(self.thread.id)
         elif isinstance(event, (BrowserClick, BrowserScroll, BrowserKey)):
-            self.spawn(self.drive_browser(event))
+            if self.thread is not None:
+                self.spawn(self.agents.browsers.drive(self.thread.id, event))
         elif isinstance(event, BrowserClose):
-            await self.close_browser(event)
+            if self.thread is not None and self.agents.browsers.widget_session(self.thread.id, event.id) is not None:
+                await self.agents.browsers.close(self.thread.id)
         elif isinstance(event, MusicState):
             self.music.state = event
         elif isinstance(event, BrowserTakeover):
-            if self.thread is not None and self.browser_widget(event.id) is not None:
+            if self.thread is not None and self.agents.browsers.widget_session(self.thread.id, event.id) is not None:
                 await self.agents.browsers.take_over(self.thread.id, event.user)
         elif isinstance(event, Interrupt):
             await self.interrupt()
@@ -296,23 +196,23 @@ class VoiceBridge:
             await self.widget_action(event)
         elif isinstance(event, SessionConfigure):
             # Beside the receive loop: a model switch may wait for the current answer to end.
-            self.spawn(self.configure_from_client(SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)))
+            self.spawn(self.switch.from_client(SetVoiceArgs(model=event.model, voice=event.voice, effort=event.effort)))
         elif isinstance(event, VoicePreviewRequest):
             self.spawn(self.preview(event))
 
     async def emit(self, event: ServerEvent) -> None:
+        """Send an event to the browser (dropped when it is gone)."""
         try:
             await self.browser.send_text(event.model_dump_json(exclude_none=True))
         except (WebSocketDisconnect, RuntimeError):
             log.info("browser gone while sending %s", event.type)
 
     async def set_state(self, state: OsmoState, detail: str | None = None) -> None:
+        """Tell the browser Osmo's state, when it changed."""
         if state == self.state and detail == self.state_detail:
             return
         self.state, self.state_detail = state, detail
         await self.emit(StateEvent(state=state, detail=detail))
-
-    # ------------------------------------------------------------ thread
 
     async def open_thread(self, thread_id: str | None) -> None:
         """Use the stored thread `thread_id` (a new one when unset or gone) and observe its agent runs."""
@@ -322,6 +222,7 @@ class VoiceBridge:
         if self.thread is not None:
             self.agents.unobserve(self.thread.id, self)
         self.thread = thread
+        self.transcript.thread_id = thread.id
         self.desk.thread_id = thread.id
         self.agents.observe(thread.id, self)
         await self.emit(ThreadEvent(thread=thread))
@@ -331,31 +232,8 @@ class VoiceBridge:
         if session is not None:
             await self.emit(session.render())
 
-    def browser_widget(self, widget_id: str) -> BrowserSession | None:
-        """The browser session of this thread, when `widget_id` is its widget (a client can only drive its own thread's)."""
-        session = self.agents.browsers.sessions.get(self.thread.id) if self.thread is not None else None
-        return session if session is not None and session.widget_id == widget_id else None
-
-    async def drive_browser(self, event: BrowserClick | BrowserScroll | BrowserKey) -> None:
-        """Pass the user's click, scroll or key on the thread's browser widget to the page (no approval: it is the user's own)."""
-        session = self.browser_widget(event.id)
-        if session is None or self.thread is None:
-            return
-        self.agents.browsers.touch(self.thread.id)
-        try:
-            await session.drive(event)
-        except BrowserError as exc:
-            log.warning("browser input failed: %s", exc)
-
-    async def close_browser(self, event: BrowserClose) -> None:
-        if self.thread is not None and self.browser_widget(event.id) is not None:
-            await self.agents.browsers.close(self.thread.id)
-
-    def record(self, role: MessageRole, text: str) -> None:
-        if self.thread is not None:
-            self.storage.add_message(self.thread.id, role, text)
-
     async def record_usage(self, done: ResponseDone) -> None:
+        """Store and show what an answer used."""
         if self.thread is None:
             return
         model = self.model()
@@ -363,68 +241,6 @@ class VoiceBridge:
         if usage is not None:
             self.storage.add_usage(usage)
             await self.emit(UsageEvent(usage=usage))
-
-    def next_utterance(self) -> str:
-        self.utterances += 1
-        return f"u{self.utterances}"
-
-    async def expire(self, utterance: str) -> None:
-        await asyncio.sleep(UNHEARD_WAIT_S)
-        if utterance in self.unheard:
-            self.unheard.remove(utterance)
-            await self.emit(TranscriptDelta(role="user", text="", itemId=utterance, final=True))
-            self.store_held()
-
-    def open_trace(self, utterance: str) -> None:
-        """Start the turn before its transcript exists. The transcript fills the input later."""
-        if not tracing.enabled() or utterance in self.traces:
-            return
-        model = self.model()
-        history = []
-        if self.thread is not None:
-            history = [(message.role, message.text) for message in self.storage.messages(self.thread.id)]
-        context = tracing.turn(
-            session_id=self.thread.id if self.thread is not None else None,
-            user_text="",
-            instructions=self.instructions,
-            history=history,
-            model=tracing.model_name(model),
-            voice=self.selection.voice,
-        )
-        span, generation = context.__enter__()
-        self.traces[utterance] = (context, span, generation)
-
-    def finish_trace(self, utterance: str, user_text: str) -> None:
-        open_trace = self.traces.pop(utterance, None)
-        if open_trace is None:
-            return
-        context, span, generation = open_trace
-        if span is not None:
-            span.update(input=user_text)
-        if generation is not None:
-            generation.update(input=tracing.messages(self.instructions, self.trace_history(), user_text))
-        context.__exit__(None, None, None)
-
-    def note_answer(self, after: frozenset[str] | None, text: str) -> None:
-        """The answer belongs to the utterance it replies to, which is still open."""
-        utterance = next((item for item in (after or ()) if item in self.traces), None)
-        if utterance is None:
-            return
-        _, span, generation = self.traces[utterance]
-        if span is not None:
-            span.update(output=text)
-        if generation is not None:
-            generation.update(output=text)
-
-    def trace_history(self) -> list[tuple[Any, str]]:
-        if self.thread is None:
-            return []
-        return [(message.role, message.text) for message in self.storage.messages(self.thread.id)]
-
-    def store_held(self) -> None:
-        """Store held answers, in order, once nothing they reply to is still unheard."""
-        while self.held and not self.held[0][0].intersection(self.unheard):
-            self.record("assistant", self.held.pop(0)[1])
 
     async def title_from(self, text: str) -> None:
         """Name an untitled thread after the first thing said in it."""
@@ -438,9 +254,8 @@ class VoiceBridge:
             self.thread = renamed
             await self.emit(ThreadEvent(thread=renamed))
 
-    # ------------------------------------------------------------ voice session
-
     async def start(self, event: SessionStart) -> None:
+        """Start the session: open the thread, apply the browser's picks and open the voice model."""
         if self.voice is not None:
             return
         await self.open_thread(event.threadId)
@@ -459,14 +274,16 @@ class VoiceBridge:
         await self.emit(VoiceConfigured(selection=self.selection, source="client"))
 
     def model(self) -> VoiceModel:
+        """The selected voice model (the first one when it is gone)."""
         models = self.access.models()
         return find_model(models, self.selection.model) or models[0]
 
     def voice_config(self) -> VoiceConfig:
+        """The voice session's settings: the voice, the instructions, the tools and the effort."""
         return VoiceConfig(
             voice=self.selection.voice,
             instructions=self.instructions,
-            tools=tuple(tool.get_schema() for tool in self.tools.values()),
+            tools=tuple(tool.get_schema() for tool in self.calls.tools.values()),
             reasoning_effort=self.selection.effort,
         )
 
@@ -483,300 +300,72 @@ class VoiceBridge:
             return False
         self.voice = voice
         log.info("voice session open (model %s)", model.id)
-        self.spawn(self.pump(voice))
-        self.spawn(self.answer(voice))
+        self.spawn(self.turns.pump(voice))
+        self.spawn(self.turns.answer(voice))
         return True
 
     async def replay(self, voice: VoiceSession) -> None:
+        """Seed a new voice session with the thread so far."""
         if self.thread is None:
             return
         for message in self.storage.messages(self.thread.id):
             await voice.add_message("assistant" if message.role == "assistant" else "user", message.text)
 
-    async def swap(self) -> bool:
-        """Move onto a newly selected model: the model is fixed per voice session, so open a new
-        one (seeded from the thread). The browser socket stays."""
-        old = self.voice
-        if not await self.open_voice():
-            return False
-        if old is not None:
-            await old.aclose()
-        return True
-
     async def close_voice(self) -> None:
+        """Close the voice session, storing the answers still held."""
         self.desktop.configure(False)
         voice, self.voice = self.voice, None
-        self.idle.set()
+        self.turns.idle.set()
         # Transcripts still owed will not come now; keep the answers anyway.
-        for _, text in self.held:
-            self.record("assistant", text)
-        self.held.clear()
+        self.transcript.flush_held()
         if voice is not None:
             await voice.aclose()
 
     async def voice_lost(self) -> None:
+        """The voice session ended on its own: close it and tell the browser."""
         await self.close_voice()
         await self.set_state("idle", "voice session ended")
 
-    async def pump(self, voice: VoiceSession) -> None:
-        async for event in voice.events():
-            await self.on_voice_event(voice, event)
-        if self.voice is voice:
-            await self.voice_lost()
-
-    async def cancel_response(self, voice: VoiceSession) -> None:
-        await voice.cancel()
-        if voice is self.voice and self.response_task is not None and self.response_active:
-            self.response_task.cancel()
-
-    async def on_voice_event(self, voice: VoiceSession, event: VoiceEvent) -> None:
-        if isinstance(event, SpeechStarted):
-            # Barge-in: stop the speech (never an agent run) and tell the client to flush its
-            # playback queue now (a plain `listening` at the end of a turn must not cut audio off).
-            self.barge_ins += 1
-            await self.cancel_response(voice)
-            await self.set_state("listening", BARGE_IN)
-        elif isinstance(event, SpeechStopped):
-            self.idle.clear()
-            utterance = self.next_utterance()
-            self.unheard.append(utterance)
-            self.open_trace(utterance)
-            await self.emit(TranscriptDelta(role="user", text="", itemId=utterance))
-            self.spawn(self.expire(utterance))
-            await self.set_state("thinking")
-        elif isinstance(event, UserTranscript):
-            utterance = self.unheard.pop(0) if self.unheard else self.next_utterance()
-            await self.emit(TranscriptDelta(role="user", text=event.text, itemId=utterance, final=True))
-            if event.text:
-                self.record("user", event.text)
-                await self.title_from(event.text)
-            self.finish_trace(utterance, event.text)
-            self.store_held()
-            if not event.text:
-                # Noise, not words: drop whatever the model started saying about it.
-                await self.cancel_response(voice)
-                await self.turn_over()
-        elif isinstance(event, AudioDelta):
-            await self.set_state("speaking")
-            try:
-                await self.browser.send_bytes(event.audio)
-            except (WebSocketDisconnect, RuntimeError):
-                log.info("browser gone while sending audio")
-        elif isinstance(event, VoiceError):
-            log.error("voice model error: %s", event.message)
-
-    # ------------------------------------------------------------ answers and tools
-
-    async def answer(self, voice: VoiceSession) -> None:
-        """Read the session's responses in order for as long as it is open: show and store each
-        answer, and run the tools it calls, asking for the next answer with their results."""
-        while self.voice is voice:
-            task = asyncio.create_task(self.read_response(voice))
-            self.response_task = task
-            try:
-                response = await task
-            except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if current is not None and current.cancelling():
-                    raise
-                continue
-            finally:
-                if self.response_task is task:
-                    self.response_task = None
-                    self.response_active = False
-            if response.done is None or self.voice is not voice:
-                return
-            await self.record_usage(response.done)
-            if response.text:
-                text = "".join(response.text)
-                self.note_answer(response.after, text)
-                self.held.append((response.after or frozenset(), text))
-                self.store_held()
-            if response.calls and response.done.error is None:
-                await self.run_tools(voice, response.calls, spoke=bool(response.text))
-            else:
-                await self.turn_over()
-
-    async def read_response(self, voice: VoiceSession) -> Response:
-        response = Response()
-        async for event in voice.response():
-            self.response_active = True
-            if response.after is None:
-                response.after = frozenset(self.unheard)
-            if isinstance(event, TextDelta):
-                response.text.append(event.text)
-                await self.emit(TranscriptDelta(role="assistant", text=event.text, itemId=response.item_id))
-            elif isinstance(event, ReasoningDelta):
-                response.reasoning.append(event.text)
-                await self.emit(TranscriptDelta(role="assistant", text="", reasoning=event.text, itemId=response.item_id))
-            elif isinstance(event, ToolCall):
-                response.calls.append(event)
-            else:
-                response.done = event
-        if response.text or response.reasoning:
-            await self.emit(
-                TranscriptDelta(
-                    role="assistant",
-                    text="".join(response.text),
-                    reasoning="".join(response.reasoning) or None,
-                    itemId=response.item_id,
-                    final=True,
-                )
-            )
-        return response
-
-    async def run_tools(self, voice: VoiceSession, calls: list[ToolCall], *, spoke: bool) -> None:
-        self.idle.clear()
-        barge_ins = self.barge_ins
-        for call in calls:
-            await voice.add_tool_result(call.call_id, await self.run_tool(call))
-        if self.barge_ins != barge_ins:
-            return  # the user spoke meanwhile: the answer server VAD starts for that sees the results
-        if spoke and all(call.name in ANNOUNCED_TOOLS for call in calls):
-            await self.turn_over()
-        else:
-            await voice.respond()
-
-    async def run_tool(self, call: ToolCall) -> str:
-        log.info("voice requested tool %s", call.name)
-        tool = self.tools.get(call.name)
-        if tool is None:
-            return json.dumps({"error": f"unknown tool {call.name}"})
-        try:
-            args = json.loads(call.arguments or "{}")
-        except json.JSONDecodeError:
-            return json.dumps({"error": "arguments must be a JSON object"})
-        if not isinstance(args, dict):
-            return json.dumps({"error": "arguments must be a JSON object"})
-        await self.set_state("working", activity_label(call.name, args))
-        refused = await self.approvals.before_tool(tool_name=call.name, arguments=args, emit=self.approval_event)
-        if refused is not None:
-            return json.dumps({"error": refused})
-        token = RUN_DESKTOP.set(self.desktop)
-        try:
-            with tracing.tool_call(call.name, args) as observation:
-                try:
-                    result = tool_output(await tool.execute(sink=self.sink, args=args))
-                except Exception as exc:  # a tool failure is the model's to explain, as in a harness run
-                    log.warning("voice tool %s failed: %s", call.name, exc)
-                    result = json.dumps({"error": str(exc) or type(exc).__name__})
-                    if observation is not None:
-                        observation.update(level="ERROR", status_message=type(exc).__name__)
-                if observation is not None:
-                    observation.update(output=result[:4000])
-                return result
-        finally:
-            RUN_DESKTOP.reset(token)
-
-    async def approval_event(self, kind: str, payload: dict[str, Any]) -> None:
-        """A voice tool's approval, as the same feed card an agent run's approval gets."""
-        if kind == APPROVAL_REQUIRED:
-            asked = ApprovalPayload.model_validate(payload)
-            await self.emit(ApprovalRequest(approvalId=asked.approval_id, runId=VOICE_RUN, tool=asked.tool, summary=asked.summary, arguments=asked.arguments))
-        else:
-            resolved = ApprovalResolvedPayload.model_validate(payload)
-            await self.emit(ApprovalResolved(approvalId=resolved.approval_id, runId=VOICE_RUN, approved=resolved.approved))
-
-    async def turn_over(self) -> None:
-        """No answer is under way: apply a deferred model switch, and go back to listening."""
-        self.idle.set()
-        if self.swap_after_turn:
-            self.swap_after_turn = False
-            await self.apply_swap("tool")
-        await self.set_state("listening")
-
-    async def ask(self, voice: VoiceSession) -> None:
-        self.idle.clear()
-        await voice.respond()
-
     async def interrupt(self) -> None:
+        """The user's stop button: cut the answer off and listen."""
         if self.voice is None:
             return
-        self.barge_ins += 1
-        await self.cancel_response(self.voice)
+        await self.turns.cut_off(self.voice)
         await self.set_state("listening", BARGE_IN)
 
     async def widget_action(self, action: WidgetAction) -> None:
+        """A click in a widget, as the user's turn (once per widget)."""
         widget = self.board.get(action.id)
         if self.voice is None or widget is None:
             return
         text = action_text(action, widget)
-        if text is None:
+        # One answer per widget: a second tap (or a frame script replaying one) is not another user turn.
+        if text is None or not self.board.answer(action.id):
             return
-        self.barge_ins += 1
-        await self.cancel_response(self.voice)
-        self.record("user", text)
+        await self.turns.cut_off(self.voice)
+        self.transcript.record("user", text)
         await self.set_state("thinking")
         await self.voice.add_message("user", text)
-        await self.ask(self.voice)
-
-    # ------------------------------------------------------------ agent runs (AgentObserver)
+        await self.turns.ask(self.voice)
 
     async def show(self, event: ServerEvent) -> None:
+        """Show an agent run's event in the browser (AgentObserver)."""
         await self.emit(event)
 
     async def tell(self, notice: Notice) -> None:
         """Relay an agent notice: `interrupt` now (cutting off any answer), `silent` into the
         conversation only."""
-        self.record("agent", notice.text)
+        self.transcript.record("agent", notice.text)
         voice = self.voice
         if voice is None:
             return
-        if notice.tag == "interrupt" and not self.idle.is_set():
-            self.barge_ins += 1
-            await self.cancel_response(voice)
+        if notice.tag == "interrupt" and not self.turns.idle.is_set():
+            await self.turns.cut_off(voice)
             await self.emit(StateEvent(state=self.state, detail=BARGE_IN))
         await voice.add_message("user", notice.text)
         if notice.tag != "silent":
-            await self.ask(voice)
-
-    # ------------------------------------------------------------ model, voice and effort
-
-    async def configure_from_client(self, change: SetVoiceArgs) -> None:
-        """A picker commit. A model switch waits for the current answer to finish (never
-        cutting it off), then swaps and tells the browser the session is listening."""
-        async with self.configure_lock:
-            swapping = self.voice is not None and (change.model or self.selection.model) != self.selection.model
-            if swapping:
-                try:
-                    async with asyncio.timeout(SWAP_WAIT_S):
-                        await self.idle.wait()
-                except TimeoutError:
-                    log.warning("model switch waited %.0fs for the answer to end; switching anyway", SWAP_WAIT_S)
-            before = self.voice
-            outcome = await self.configure(change, "client")
-            if isinstance(outcome, Selection) and self.voice is not before:
-                await self.set_state("listening")
-
-    async def configure(self, change: SetVoiceArgs, source: Literal["client", "tool"]) -> Selection | str:
-        """The one path for picker commits and `set_voice`: validate, apply, tell the browser.
-        The browser always hears back with the applied selection, or the one still in effect plus `error`."""
-        picked = resolve_selection(self.access.models(), change, self.selection)
-        if isinstance(picked, str):
-            log.warning("rejected voice change from %s: %s", source, picked)
-            await self.emit(VoiceConfigured(selection=self.selection, source=source, error=picked))
-            return picked
-        previous, self.selection = self.selection, picked
-        if self.voice is None:
-            await self.emit(VoiceConfigured(selection=picked, source=source))
-            return picked
-        if picked.model == previous.model:
-            await self.voice.update(self.voice_config())
-        elif source == "tool":
-            # The answer that asked is still speaking its confirmation on this session.
-            self.swap_after_turn = True
-            return picked
-        elif not await self.swap():
-            self.selection = previous
-            error = f"could not open {picked.model}; still on {previous.model}"
-            await self.emit(VoiceConfigured(selection=previous, source=source, error=error))
-            return error
-        await self.emit(VoiceConfigured(selection=picked, source=source))
-        return picked
-
-    async def apply_swap(self, source: Literal["client", "tool"]) -> None:
-        error = None if await self.swap() else f"could not open {self.selection.model}"
-        await self.emit(VoiceConfigured(selection=self.selection, source=source, error=error))
+            await self.turns.ask(voice)
 
     async def preview(self, request: VoicePreviewRequest) -> None:
+        """Play a voice preview in the browser."""
         await self.emit(await self.previews.play(request, self.state))

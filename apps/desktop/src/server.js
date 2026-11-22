@@ -20,7 +20,7 @@ export function pythonExecutable() {
 }
 
 async function responseAt(origin, path, token) {
-  const headers = token ? { 'X-Osmo-Desktop-Token': token } : undefined;
+  const headers = token ? { [TOKEN_HEADER]: token } : undefined;
   return fetch(`${origin}${path}`, { headers, signal: AbortSignal.timeout(500) });
 }
 
@@ -31,6 +31,37 @@ export async function trustedServer(origin, token) {
     const page = await responseAt(origin, '/', token);
     return page.ok && page.headers.get('content-type')?.includes('text/html') === true;
   } catch { return false; }
+}
+
+// The header, cookie and WebSocket subprotocol the server's LocalAccess accepts the token in (local_access.py).
+export const TOKEN_HEADER = 'X-Osmo-Desktop-Token';
+export const TOKEN_COOKIE = 'osmo_token';
+const SOCKET_PROTOCOL = 'osmo';
+const TOKEN_PROTOCOL_PREFIX = 'osmo-token.';
+
+/** The subprotocols main's voice socket offers: `osmo`, which the server picks, and the one carrying the token. */
+export function socketProtocols(token) {
+  return token ? [SOCKET_PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${token}`] : [];
+}
+
+/**
+ * The cookie that lets this app's windows (and only them) call the server: HttpOnly, so page scripts never see it.
+ * @returns {import('electron').CookiesSetDetails}
+ */
+export function tokenCookie(origin, token) {
+  return { url: origin, name: TOKEN_COOKIE, value: token, httpOnly: true, sameSite: 'strict' };
+}
+
+/** `init` for a request from main, with the token when there is one. */
+export function withToken(init, token) {
+  return token ? { ...init, headers: { ...init?.headers, [TOKEN_HEADER]: token } } : init;
+}
+
+/** The server's environment: the token is not in it (it goes on stdin, where other processes cannot read it), and the
+ * server is told to read it from there. */
+export function serverEnvironment(base, extra) {
+  const { OSMO_DESKTOP_TOKEN: _token, ...rest } = base;
+  return { ...rest, ...extra, OSMO_DESKTOP_TOKEN_STDIN: '1' };
 }
 
 /** Start a server this app owns. A server already on the port is trusted only when it proves this app's token. */
@@ -47,11 +78,12 @@ export async function startServer({ packaged, resourcesPath, origin, token = pro
   if (python.home) process.env.PYTHONHOME = python.home;
   const child = spawn(python.executable, ['-m', 'symphony_server', '--host', '127.0.0.1', '--port', '8787'], {
     cwd: server,
-    stdio: ['ignore', 'inherit', 'pipe'],
-    env: { ...process.env, ...(python.home ? { PYTHONHOME: python.home } : {}),
+    stdio: ['pipe', 'inherit', 'pipe'],
+    env: serverEnvironment(process.env, { ...(python.home ? { PYTHONHOME: python.home } : {}),
       PYTHONPATH: [path.join(server, 'src'), path.join(vendor, 'src'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-      OSMO_STATIC_DIR: web, OSMO_TOOLS: process.env.OSMO_TOOLS ?? 'osmo,search,image,desktop', OSMO_DESKTOP_TOKEN: token },
+      OSMO_STATIC_DIR: web, OSMO_TOOLS: process.env.OSMO_TOOLS ?? 'osmo,search,image,desktop' }),
   });
+  child.stdin.end(`${token}\n`);
   let error = '';
   let exited = false;
   child.stderr.on('data', chunk => { error = (error + chunk).slice(-4000); process.stderr.write(chunk); });

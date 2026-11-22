@@ -212,7 +212,9 @@ export const serverEventSchema = z.discriminatedUnion("type", [
     runId: z.string(),
     tool: z.string(),
     summary: z.string(),
+    // All of the step's arguments (JSON), never cut, and their SHA-256 (absent from servers before it was sent).
     arguments: z.string(),
+    digest: z.string().optional(),
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string(), runId: z.string(), approved: z.boolean() }),
   // A voice response or agent turn on this thread used tokens; the usage dialog ticks.

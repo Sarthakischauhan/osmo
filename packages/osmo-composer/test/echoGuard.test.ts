@@ -84,4 +84,29 @@ describe("echo guard", () => {
     // The pre-roll: the quiet frame before the speech too, so its start is never clipped.
     expect(step.send).toHaveLength(3);
   });
+
+  it("keeps music from the mini player away from the server's VAD, but lets the user talk over it", () => {
+    const guard = new EchoGuard(RATE);
+    // Music at the mic: louder than room noise (it would open a turn), quieter than someone talking over it.
+    const music = frame(0.05);
+    const step = guard.push(music, false, 0, 0, true);
+    expect(step.bargeIn).toBe(false);
+    expect(step.send).toHaveLength(1);
+    expect(step.send[0]).not.toBe(music);
+    expect(step.send[0]?.byteLength).toBe(music.byteLength);
+    expect(new Int16Array(step.send[0] as ArrayBuffer).every((sample) => sample === 0)).toBe(true);
+    // The user speaks up: after 150 ms it goes out with its pre-roll, and keeps going out for a moment after.
+    const first = frame(0.4);
+    expect(guard.push(first, false, 0, 100, true).send[0]).not.toBe(first);
+    const second = frame(0.4);
+    const heard = guard.push(second, false, 0, 200, true);
+    expect(heard.bargeIn).toBe(false);
+    expect(heard.send.slice(-2)).toEqual([first, second]);
+    const pause = frame(0.05);
+    expect(guard.push(pause, false, 0, 300, true).send).toEqual([pause]);
+    expect(guard.push(frame(0.05), false, 0, 1200, true).send[0]).not.toBe(pause);
+    // Music stopped: frames pass as they are.
+    const plain = frame(0.05);
+    expect(guard.push(plain, false, 0, 1300, false).send).toEqual([plain]);
+  });
 });

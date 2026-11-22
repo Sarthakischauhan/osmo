@@ -19,10 +19,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core_harness import EventSink, Tool
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from symphony_server.local_access import require_app
 from symphony_server.music_library import MEDIA_TYPES, SEARCH_LIMIT_MAX, LocalLibrary, art_of
 from symphony_server.protocol import MusicCommand, MusicState, Track
 from symphony_server.spotify import SpotifyAccount, SpotifyError
@@ -47,6 +48,8 @@ OSMO_MUSIC = "osmo.music"
 
 
 class PlayArgs(BaseModel):
+    """music_play's arguments."""
+
     model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=1, max_length=200, description="What to play: a song, artist, album or mood, as the user said it.")
     source: Literal["any", "spotify", "local"] = Field(
@@ -55,12 +58,16 @@ class PlayArgs(BaseModel):
 
 
 class ControlArgs(BaseModel):
+    """music_control's arguments."""
+
     model_config = ConfigDict(extra="forbid")
     action: Literal["pause", "resume", "next", "previous", "volume"]
     volume: int | None = Field(default=None, ge=0, le=100, description="0-100, with action 'volume'.")
 
 
 class MusicPlayTool(Tool):
+    """music_play: find tracks (Spotify, the local library or both) and play them in the app's player."""
+
     def __init__(self, library: LocalLibrary, spotify: SpotifyAccount) -> None:
         super().__init__(
             name="music_play",
@@ -70,6 +77,7 @@ class MusicPlayTool(Tool):
         self.library, self.spotify = library, spotify
 
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        """Find what was asked for and send the player the tracks."""
         try:
             command = PlayArgs.model_validate(args)
         except ValidationError as exc:
@@ -82,6 +90,7 @@ class MusicPlayTool(Tool):
         return json.dumps({"playing": tracks[0].label(), "source": tracks[0].source, "queued": len(tracks) - 1, "notes": notes})
 
     async def find(self, command: PlayArgs) -> tuple[list[Track], list[str]]:
+        """The tracks for a request, and notes on the sources that could not be searched."""
         notes: list[str] = []
         if command.source in ("any", "spotify"):
             if self.spotify.connected:
@@ -100,6 +109,8 @@ class MusicPlayTool(Tool):
 
 
 class MusicControlTool(Tool):
+    """music_control: pause, resume, skip or set the player's volume."""
+
     def __init__(self) -> None:
         super().__init__(
             name="music_control",
@@ -108,6 +119,7 @@ class MusicControlTool(Tool):
         )
 
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        """Send the player the command."""
         try:
             command = ControlArgs.model_validate(args)
         except ValidationError as exc:
@@ -119,6 +131,8 @@ class MusicControlTool(Tool):
 
 
 class MusicStatusTool(Tool):
+    """music_status: what the app's player plays now."""
+
     def __init__(self, now: MusicNow) -> None:
         super().__init__(
             name="music_status",
@@ -128,6 +142,7 @@ class MusicStatusTool(Tool):
         self.now = now
 
     async def execute(self, *, sink: EventSink, args: dict[str, Any]) -> str:
+        """Describe the player's state."""
         del sink, args
         state = self.now.state
         if state.track is None:
@@ -138,6 +153,7 @@ class MusicStatusTool(Tool):
 
 
 def music_tools(library: LocalLibrary, spotify: SpotifyAccount, now: MusicNow) -> list[Tool]:
+    """The music tools."""
     return [MusicPlayTool(library, spotify), MusicControlTool(), MusicStatusTool(now)]
 
 
@@ -148,6 +164,8 @@ MUSIC_TOOL_NAMES = frozenset({"music_play", "music_control", "music_status"})
 
 
 class MusicStatus(BaseModel):
+    """The music sources: the local folders and tracks, and whether Spotify is set up and connected."""
+
     localFolders: list[str]
     localTracks: int
     localReady: bool
@@ -156,10 +174,14 @@ class MusicStatus(BaseModel):
 
 
 class LibraryResponse(BaseModel):
+    """Tracks from the local library."""
+
     tracks: list[Track]
 
 
 class LoginResponse(BaseModel):
+    """Where to send the user to connect Spotify."""
+
     url: str
 
 
@@ -169,14 +191,17 @@ CALLBACK_PAGE = """<!doctype html><meta charset="utf-8"><title>Osmo</title>
 
 
 def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect_uri: str | None) -> APIRouter:
+    """The music API: the local library, its files and covers, and the Spotify connection."""
     router = APIRouter(prefix="/api/music")
 
     def callback_uri(request: Request) -> str:
+        """The Spotify redirect URI: the configured one, else this server's callback."""
         # Spotify wants the exact registered redirect; loopback apps register http://127.0.0.1:<port>/api/music/spotify/callback.
         return redirect_uri or str(request.url_for("spotify_callback"))
 
     @router.get("/status")
     async def status() -> MusicStatus:
+        """The music sources' status."""
         return MusicStatus(
             localFolders=[str(root.path) for root in library.roots],
             localTracks=len(library.files),
@@ -187,17 +212,20 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
 
     @router.get("/library")
     async def search(q: str = Query("", max_length=200), limit: int = Query(10, ge=1, le=SEARCH_LIMIT_MAX)) -> LibraryResponse:
+        """Search the local library."""
         await library.ready.wait()
         return LibraryResponse(tracks=library.search(q, limit))
 
     @router.get("/local/{track_id}")
     async def stream(track_id: str) -> FileResponse:
+        """A local track's file (Range requests work, so the player can seek)."""
         entry = library.file(track_id)
         # FileResponse answers Range requests, so the player can seek.
         return FileResponse(entry.path, media_type=MEDIA_TYPES.get(entry.path.suffix.lower(), "application/octet-stream"))
 
     @router.get("/local/{track_id}/art")
     async def art(track_id: str) -> Response:
+        """A local track's embedded cover."""
         entry = library.file(track_id)
         cover = await asyncio.to_thread(art_of, entry.path)
         if cover is None:
@@ -207,12 +235,14 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
 
     @router.post("/rescan")
     async def rescan() -> MusicStatus:
+        """Scan the local folders again."""
         await asyncio.to_thread(library.scan)
         library.ready.set()
         return await status()
 
     @router.get("/spotify/login")
     async def login(request: Request) -> LoginResponse:
+        """Start connecting Spotify (PKCE): the authorization URL."""
         try:
             return LoginResponse(url=spotify.login_url(callback_uri(request)))
         except SpotifyError as exc:
@@ -220,6 +250,7 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
 
     @router.get("/spotify/callback", name="spotify_callback", response_class=HTMLResponse)
     async def callback(code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:
+        """Finish connecting Spotify, from its redirect."""
         if error is not None or code is None or state is None:
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         try:
@@ -229,8 +260,9 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         return HTMLResponse(CALLBACK_PAGE.format(message="Spotify is connected."))
 
-    @router.get("/spotify/token")
+    @router.get("/spotify/token", dependencies=[Depends(require_app)])
     async def token() -> dict[str, Any]:
+        """A fresh Spotify access token for the app's player, and nothing else (local_access.require_app)."""
         try:
             access, expires = await spotify.access_token()
         except SpotifyError as exc:
@@ -240,6 +272,7 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
 
     @router.post("/spotify/logout", status_code=204)
     async def logout() -> None:
+        """Disconnect Spotify."""
         spotify.logout()
 
     return router

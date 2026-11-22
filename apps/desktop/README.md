@@ -18,8 +18,13 @@ OSMO_DESKTOP_VISION_MODEL=openai:gpt-4.1 bun run desktop
 ```
 
 The app starts a loopback Python server, serves the built web UI, and stops its server on quit.
-It generates `OSMO_DESKTOP_TOKEN` for that process. A server already running on the port is reused
-only when it echoes that same token; another healthy local server is not trusted with native access.
+It generates a secret token per launch and hands it to that process on stdin (never in its environment,
+never logged). A server already running on the port is reused only when it echoes that same token; another
+healthy local server is not trusted with native access. The server then answers only requests carrying the
+token: the windows get it as an HttpOnly, SameSite=Strict session cookie set before they load, main's voice
+socket as a WebSocket subprotocol and its tray requests as the `X-Osmo-Desktop-Token` header. So neither a web
+page, a page in the agent's browser nor a script the agent runs can call the API. With `OSMO_DESKTOP_URL` the
+app uses `OSMO_DESKTOP_TOKEN` if you set it for both.
 Connect the voice and vision providers through the existing Providers UI. No keys go into Electron.
 `openai:gpt-4.1` is an example image-capable text model; any compatible connected core_ai model can
 be selected. A realtime voice model is not a vision model.

@@ -112,8 +112,13 @@ def test_search_needs_every_word_and_ranks_title_hits_first(music_dir: Path) -> 
     assert len(library.search("", limit=2)) == 2
 
 
-def music_client(music_dir: Path, handler: Any = None, client_id: str | None = None, grok: FakeGrok | None = None) -> TestClient:
-    settings = Settings(music_dirs=(MusicRoot(music_dir),), spotify_client_id=client_id, xai_base_url=grok.base_url if grok else DEFAULT_XAI_BASE_URL)
+# The desktop app's token: the Spotify token route refuses anything without it.
+APP_TOKEN = "launch-secret"
+FROM_THE_APP = {"x-osmo-desktop-token": APP_TOKEN}
+
+
+def music_client(music_dir: Path, handler: Any = None, client_id: str | None = None, grok: FakeGrok | None = None, app_token: str | None = None) -> TestClient:
+    settings = Settings(music_dirs=(MusicRoot(music_dir),), spotify_client_id=client_id, xai_base_url=grok.base_url if grok else DEFAULT_XAI_BASE_URL, app_token=app_token)
     if handler is None:
         return make_client(settings, secret_store=xai_key_store())
     return make_client(settings, handler, secret_store=xai_key_store())
@@ -252,10 +257,11 @@ async def test_an_old_sign_in_is_refused_and_without_a_client_id_there_is_none()
 
 def test_the_spotify_routes_sign_in_and_hand_the_app_a_token(music_dir: Path) -> None:
     spotify_api = FakeSpotify()
-    with music_client(music_dir, spotify_api, client_id="client-123") as client:
+    with music_client(music_dir, spotify_api, client_id="client-123", app_token=APP_TOKEN) as client:
+        client.headers.update(FROM_THE_APP)
         url = client.get("/api/music/spotify/login").json()["url"]
         query = parse_qs(urlsplit(url).query)
-        assert query["redirect_uri"] == ["http://testserver/api/music/spotify/callback"]
+        assert query["redirect_uri"] == ["http://127.0.0.1:8787/api/music/spotify/callback"]
         assert client.get("/api/music/spotify/token").status_code == 409
         page = client.get("/api/music/spotify/callback", params={"code": "c", "state": query["state"][0]})
         assert page.status_code == 200 and "Spotify is connected" in page.text

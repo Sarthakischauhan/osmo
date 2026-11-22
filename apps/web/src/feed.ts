@@ -34,6 +34,7 @@ export interface ApprovalTurn {
   tool: string;
   summary: string;
   arguments: string;
+  digest?: string;
   resolved?: { approved: boolean; at: number };
 }
 
@@ -190,6 +191,7 @@ export function reduceFeed(feed: Feed, event: ServerEvent, now: number = Date.no
         tool: event.tool,
         summary: event.summary,
         arguments: event.arguments,
+        digest: event.digest,
       };
       return { seq: feed.seq + 1, turns: [...feed.turns, turn] };
     }

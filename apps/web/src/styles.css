@@ -299,6 +299,8 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-approval { padding: 16px; border-radius: var(--radius, 3px); background: var(--accent); }
 .osmo-approval-title { margin-bottom: 4px; font-size: 14px; font-weight: 500; }
 .osmo-approval-call { margin-bottom: 12px; overflow-wrap: anywhere; font: 12px/16px var(--font-mono); color: var(--muted-foreground); }
+.osmo-approval-call summary { cursor: pointer; }
+.osmo-approval-arguments { max-height: 240px; margin: 6px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .osmo-approval-actions { display: flex; align-items: center; gap: 8px; }
 .osmo-approval-hint { margin-left: auto; font-size: 12px; color: var(--fg-tertiary); }
 .osmo-approval-resolved { font-size: 12px; line-height: 16px; color: var(--fg-tertiary); }

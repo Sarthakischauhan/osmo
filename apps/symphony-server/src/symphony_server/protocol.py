@@ -279,7 +279,9 @@ class ApprovalRequest(_Event):
     runId: str
     tool: str
     summary: str
+    # All of the step's arguments (JSON) and their SHA-256.
     arguments: str
+    digest: str
 
 
 class ApprovalResolved(_Event):

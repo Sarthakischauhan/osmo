@@ -1,11 +1,11 @@
-import { app, BrowserWindow, components, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
+import { app, BrowserWindow, components, session as electronSession, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, Tray } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAudioPort } from './audio-port.js';
 import { allowMediaKeys, allowMicrophone, localAppUrl, trustedFrame, validateAction } from './policy.js';
-import { pythonExecutable, startServer } from './server.js';
+import { pythonExecutable, socketProtocols, startServer, tokenCookie, withToken } from './server.js';
 import { CHANNELS, validateAudioFrame, validateBoxHeight, validateCaptureResult, validateClientEvent, validateOpenThread, validateOrbMove, validateStart } from './session-contract.js';
 import { createSessionController } from './session-controller.js';
 import { createAutomationTray } from './tray.js';
@@ -36,6 +36,8 @@ export function runApp() {
   let busy = false;
   let worker;
   let backend;
+  // This launch's secret for the server (see server.js): kept in memory, never logged or written anywhere.
+  let token;
   let tray;
 
   const status = () => ({ enabled, platform: process.platform, stopShortcut: STOP_SHORTCUT });
@@ -58,7 +60,8 @@ export function runApp() {
   };
   const session = createSessionController({
     url: `${origin.replace(/^http/, 'ws')}/ws`,
-    createSocket: url => new WebSocket(url),
+    // The token is known once the server is up; the socket opens only after that.
+    createSocket: url => new WebSocket(url, socketProtocols(token)),
     audio: port,
     desktop: { execute: value => execute(value) },
     onEvent: event => broadcast(CHANNELS.event, event),
@@ -175,7 +178,7 @@ export function runApp() {
   ipcMain.handle(CHANNELS.audioStarted, (event, result) => { authorize(event, audioWindow); audio.captured(validateCaptureResult(result)); });
   ipcMain.handle(CHANNELS.audioFrame, (event, pcm16) => { authorize(event, audioWindow); audio.frame(validateAudioFrame(pcm16)); });
   // The audio renderer's echo guard heard the user talk over Osmo; it already stopped playback.
-  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.interrupt(); });
+  ipcMain.handle(CHANNELS.audioBargeIn, event => { authorize(event, audioWindow); session.bargedIn(); });
   // The orb window's own: double-click opens the workspace; the hover box asks for room and learns which side it got;
   // a drag moves the orb, and the window (with any open box) follows it.
   const place = () => {
@@ -284,6 +287,10 @@ export function runApp() {
           return;
         }
       }
+      // A server the user runs (OSMO_DESKTOP_URL) has the token only if they gave both the same OSMO_DESKTOP_TOKEN.
+      token = backend?.token ?? process.env.OSMO_DESKTOP_TOKEN;
+      // Before any window loads: every request the windows make carries it, and no page script can read it.
+      if (token) await electronSession.defaultSession.cookies.set(tokenCookie(origin, token));
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { label: 'Osmo', submenu: [{ label: 'Stop computer support', accelerator: STOP_SHORTCUT, click: revoke }, { role: 'quit' }] },
         { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
@@ -304,7 +311,7 @@ export function runApp() {
       // Osmo does not add itself to the login items: it runs only after the user opens it.
       tray = createAutomationTray({
         request: async (route, init) => {
-          const response = await fetch(`${origin}${route}`, init);
+          const response = await fetch(`${origin}${route}`, withToken(init, token));
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
         },

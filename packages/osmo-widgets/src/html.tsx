@@ -21,12 +21,14 @@ const DEFAULT_ZOOM = 1;
 export const CSP_POLICY =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
-/** The CSP, kit and bridge inside <head> (or right after the doctype) so the document keeps standards mode
- * and its own scripts find `osmo` already defined. */
+/**
+ * The CSP, kit and bridge as the very first thing in the document: right after the doctype (which keeps standards
+ * mode), or at the start. Never after a searched-for `<head>`: that match can be a `<header>` in the body, where a CSP
+ * meta is ignored, and a script before `<head>` would run before the policy exists. The parser puts these elements in
+ * the implied head, so the document's own scripts find `osmo` already defined and run under the policy.
+ */
 export function withKit(html: string, theme: KitTheme): string {
   const kit = `<meta http-equiv="Content-Security-Policy" content="${CSP_POLICY}"><style>${OSMO_UI_CSS}</style><script>${bridgeScript(theme)}</script>`;
-  const head = /<head[^>]*>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + kit + html.slice(head.index + head[0].length);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   if (doctype) return doctype[0] + kit + html.slice(doctype[0].length);
   return kit + html;
@@ -97,6 +99,44 @@ function HtmlFrame({ srcDoc, title, state, height, frame, theme }: HtmlBodyProps
   );
 }
 
+/**
+ * The frame the user last moved focus into with a real click, tap or Tab (trusted focus events on its element, or
+ * this window blurring onto it), or null once focus leaves it. A frame script cannot fake these: its own events stay
+ * in its document, and an opaque-origin frame cannot take focus without the user.
+ */
+function useUserFocusedFrame(frame: RefObject<HTMLIFrameElement | null>): RefObject<HTMLIFrameElement | null> {
+  const focused = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => {
+    const enter = (event: Event) => {
+      const own = frame.current;
+      if (event.isTrusted && own !== null && document.activeElement === own) focused.current = own;
+    };
+    const leave = (event: Event) => {
+      if (event.isTrusted && document.activeElement !== frame.current) focused.current = null;
+    };
+    document.addEventListener("focusin", enter, true);
+    window.addEventListener("blur", enter);
+    document.addEventListener("focusout", leave, true);
+    window.addEventListener("focus", leave);
+    return () => {
+      document.removeEventListener("focusin", enter, true);
+      window.removeEventListener("blur", enter);
+      document.removeEventListener("focusout", leave, true);
+      window.removeEventListener("focus", leave);
+    };
+  }, [frame]);
+  return focused;
+}
+
+/**
+ * Whether a message from the frame can be the user's answer: the user is interacting right now (transient activation)
+ * and that interaction is inside this widget's own frame, which they focused themselves. Activation alone is not
+ * enough: typing or clicking in Osmo itself activates this window too, and a widget's timer could post then.
+ */
+function userGesturedIn(own: HTMLIFrameElement | null, focused: HTMLIFrameElement | null): boolean {
+  return navigator.userActivation?.isActive === true && own !== null && focused === own && document.activeElement === own;
+}
+
 interface HeaderProps {
   title: string;
   zoom: number;
@@ -150,14 +190,21 @@ export function HtmlWidget({ html, title = "Widget", actions, onAction }: HtmlWi
   const srcDoc = withKit(html, startTheme);
   const frame = useRef<HTMLIFrameElement>(null);
 
+  // One answer per widget: after the first accepted action the frame cannot send another.
+  const answered = useRef(false);
+  const focused = useUserFocusedFrame(frame);
+
   useEffect(() => {
     if (onAction === undefined || !actions?.length) return;
     const listen = (event: MessageEvent) => {
       const source = frame.current?.contentWindow;
-      if (!source || event.source !== source) return;
+      if (!source || event.source !== source || answered.current) return;
       const parsed = bridgeMessageSchema.safeParse(event.data);
       const action = parsed.success ? actions.find((declared) => declared.id === parsed.data.id) : undefined;
-      if (parsed.success && action) onAction(action, parsed.data.value);
+      if (!parsed.success || !action) return;
+      if (!userGesturedIn(frame.current, focused.current)) return;
+      answered.current = true;
+      onAction(action, parsed.data.value);
     };
     window.addEventListener("message", listen);
     return () => window.removeEventListener("message", listen);

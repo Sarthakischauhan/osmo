@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AudioBridge } from "../src/audioBridge";
 import { type AudioRuntime, runAudioRenderer } from "../src/audioRenderer";
 
-type Callbacks = { start?: () => void; stop?: () => void; play?: (pcm: ArrayBuffer) => void; flush?: () => void };
+type Callbacks = { start?: () => void; stop?: () => void; play?: (pcm: ArrayBuffer) => void; flush?: () => void; music?: (playing: boolean) => void };
 
 /** A bridge the test drives as main would, recording what the page sends back. */
 function setup() {
@@ -17,6 +17,7 @@ function setup() {
     onStop: (callback) => ((callbacks.stop = callback), () => undefined),
     onPlay: (callback) => ((callbacks.play = callback), () => undefined),
     onFlush: (callback) => ((callbacks.flush = callback), () => undefined),
+    onMusic: (callback) => ((callbacks.music = callback), () => undefined),
   };
   const runtimes: FakeRuntime[] = [];
   const open = () => {
@@ -47,6 +48,9 @@ class FakeRuntime implements AudioRuntime {
   }
   flush() {
     this.log.push("flush");
+  }
+  music(playing: boolean) {
+    this.log.push(`music ${playing}`);
   }
 }
 
@@ -130,5 +134,15 @@ describe("the audio renderer's barge-in", () => {
     await Promise.resolve();
     runtimes[0]?.onBargeIn?.();
     expect(sent.at(-1)).toBe("barge-in");
+  });
+
+  it("tells the echo guard whether music plays, during a call and at the start of the next", async () => {
+    const { callbacks, runtimes } = setup();
+    callbacks.music?.(true);
+    callbacks.start?.();
+    await settled();
+    expect(runtimes[0]?.log.slice(0, 2)).toEqual(["music true", "start"]);
+    callbacks.music?.(false);
+    expect(runtimes[0]?.log.at(-1)).toBe("music false");
   });
 });

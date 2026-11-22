@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Fetcher } from "./usage";
 
-/** The Calendar screen's side of `/api/calendar` and `/api/automations` (symphony_server/local_calendar.py). */
+/** The Calendar screen's side of `/api/calendar` and `/api/automations` (symphony_server/calendar_api.py). */
 export const occurrenceSchema = z.object({
   eventId: z.string(),
   title: z.string(),
@@ -179,7 +179,7 @@ export function triggerLabel(automation: Pick<Automation, "trigger" | "offsetMin
   return automation.rrule ? "On a schedule" : "Once";
 }
 
-// The note local_calendar.automation_task adds after an automation's prompt, for the agent; Tasks shows the chip instead.
+// The note scheduler.automation_task adds after an automation's prompt, for the agent; Tasks shows the chip instead.
 const ORIGIN_NOTE = /\n\n\(This is the Osmo automation [\s\S]*\)$/;
 
 /** What Tasks shows as an automation task's title: its prompt, without the note the agent got about where it came from. */

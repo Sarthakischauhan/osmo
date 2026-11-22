@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Fetcher } from "./usage";
 
-/** The editor's side of `/api/vault` (symphony_server/vault.py): the user's own reads and saves. */
+/** The editor's side of `/api/vault` (symphony_server/vault_api.py): the user's own reads and saves. */
 export const vaultListSchema = z.object({ vaults: z.array(z.object({ name: z.string(), root: z.string() })) });
 export const noteEntrySchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), modified: z.number(), size: z.number() });
 export const noteHitSchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), snippet: z.string() });

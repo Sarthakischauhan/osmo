@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -270,6 +273,20 @@ def test_widget_action_becomes_a_user_turn(client: TestClient, grok: FakeGrok) -
         assert asked(grok) == f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"
 
 
+def test_a_widget_takes_one_answer(client: TestClient, grok: FakeGrok) -> None:
+    """Review S4: a repeated (or frame-forged) tap on an answered widget is not another user turn."""
+    with client.websocket_connect("/ws") as ws:
+        start(ws, grok)
+        first = render(ws, grok, DINNER, "c3")
+        second = render(ws, grok, DINNER, "c4")
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "ramen"}))
+        assert asked(grok) == f"[Tapped on screen] options widget {first}: select -> option 2, Ramen counter"
+        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "tacos"}))
+        ws.send_text(json.dumps({"type": "widget.action", "id": second, "action": "select", "value": "ramen"}))
+        # The next turn the model hears is the second widget's: the repeat on the first was dropped.
+        assert asked(grok) == f"[Tapped on screen] options widget {second}: select -> option 2, Ramen counter"
+
+
 def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
@@ -435,11 +452,23 @@ def test_core_server_routes_are_mounted(client: TestClient) -> None:
     assert response.json()["ok"] is True
 
 
-def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok, monkeypatch) -> None:
-    monkeypatch.setenv("OSMO_DESKTOP_TOKEN", "desktop-secret")
-    with make_client(Settings(xai_base_url=grok.base_url)) as client:
+def test_desktop_token_is_echoed_only_to_its_holder(grok: FakeGrok) -> None:
+    with make_client(Settings(xai_base_url=grok.base_url, app_token="desktop-secret")) as client:
         anonymous = client.get("/api/health", headers={"X-Osmo-Desktop-Token": "wrong"})
         trusted = client.get("/", headers={"X-Osmo-Desktop-Token": "desktop-secret"})
     assert "x-osmo-desktop-token" not in anonymous.headers
     assert trusted.headers["x-osmo-desktop-token"] == "desktop-secret"
     assert trusted.headers["cache-control"] == "no-store"
+
+
+def test_a_malformed_client_event_is_logged_without_what_was_typed(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    with client.websocket_connect("/ws") as ws:
+        # A browser.key without its `code`: pydantic's error would carry the whole event, the typed key included.
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "keyCode": 65}))
+        ws.send_text(json.dumps({"type": "browser.key", "id": "w1", "key": "hunter2-secret", "code": "KeyA", "keyCode": -1}))
+    deadline = time.monotonic() + 2
+    while caplog.text.count("bad client event") < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert caplog.text.count("bad client event") == 2
+    assert "hunter2-secret" not in caplog.text and "'input'" not in caplog.text

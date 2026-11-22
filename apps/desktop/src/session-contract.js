@@ -30,6 +30,8 @@ export const CHANNELS = Object.freeze({
   audioStop: 'audio:stop',
   audioPlay: 'audio:play',
   audioFlush: 'audio:flush',
+  // Whether the workspace's music player is playing (its echo guard keeps music from opening turns).
+  audioMusic: 'audio:music',
 });
 
 /**

@@ -38,6 +38,7 @@ const approvalRequestSchema = z.object({
   tool: z.string(),
   summary: z.string(),
   arguments: z.string(),
+  digest: z.string().optional(),
 });
 const runListSchema = z.object({ runs: z.array(agentRunSchema), approvals: z.array(approvalRequestSchema), phases: z.record(z.string()).default({}) });
 export type RunList = z.infer<typeof runListSchema>;

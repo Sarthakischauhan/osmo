@@ -25,6 +25,9 @@ dependencies = [
     "tzdata>=2024.1",
     # Tags and cover art of the user's music files.
     "mutagen>=1.47",
+    # Host names as Chrome encodes them (IDNA2008, UTS #46), for the browser's site rules and network guard.
+    # 3.7 is the first release without the quadratic-time encode (CVE-2024-3651).
+    "idna>=3.7,<4",
 ]
 
 [project.scripts]

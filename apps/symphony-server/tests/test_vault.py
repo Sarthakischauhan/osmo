@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,18 +15,11 @@ from watchfiles import Change
 
 from conftest import FakeGrok, make_client, xai_key_store
 from test_session import call, next_event, say, start, tool_output
+from symphony_server import vault_index, vault_paths
 from symphony_server.settings import DEFAULT_APPROVAL_TOOLS, Settings
-from symphony_server.vault import (
-    Vault,
-    VaultError,
-    VaultIndex,
-    VaultReadTool,
-    VaultSearchTool,
-    VaultWriteTool,
-    fts_query,
-    parse_vaults,
-    resolve_note,
-)
+from symphony_server.vault_index import VaultIndex, fts_query
+from symphony_server.vault_paths import Vault, VaultError, parse_vaults, resolve_note
+from symphony_server.vault_tools import VaultReadTool, VaultSearchTool, VaultWriteTool
 
 
 @pytest.fixture
@@ -202,11 +196,56 @@ def test_vault_write_waits_for_approval_by_default() -> None:
     assert "vault_read" not in DEFAULT_APPROVAL_TOOLS and "vault_search" not in DEFAULT_APPROVAL_TOOLS
 
 
+def test_a_hard_link_is_neither_written_nor_read(tmp_path: Path, index: VaultIndex, vault: Vault) -> None:
+    outside = tmp_path / "secret.md"
+    outside.write_text("orig\n")
+    os.link(outside, vault.root / "linked.md")
+    for mode in ("replace", "append"):
+        with pytest.raises(VaultError, match="hard links"):
+            index.write("linked.md", "pwned\n", mode)
+    with pytest.raises(VaultError, match="hard links"):
+        index.read("linked.md")
+    assert outside.read_text() == "orig\n"
+
+
+class SwappingFolder:
+    """An attacker who wins every race: `Projects` is a real folder whenever the vault checks a path, and a symlink
+    out of the vault right after."""
+
+    def __init__(self, vault: Vault, outside: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.folder, self.kept, self.outside = vault.root / "Projects", vault.root / "Projects.kept", outside
+        self.check = vault_paths.resolve_note
+        monkeypatch.setattr(vault_paths, "resolve_note", self.resolve)
+        monkeypatch.setattr(vault_index, "resolve_note", self.resolve)
+
+    def resolve(self, root: Path, relative: str) -> Path:
+        if self.folder.is_symlink():
+            self.folder.unlink()
+            self.kept.rename(self.folder)
+        checked = self.check(root, relative)
+        self.folder.rename(self.kept)
+        self.folder.symlink_to(self.outside, target_is_directory=True)
+        return checked
+
+
+def test_a_folder_swapped_for_a_symlink_after_the_check_is_refused_at_open(tmp_path: Path, index: VaultIndex, vault: Vault, monkeypatch: pytest.MonkeyPatch) -> None:
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "osmo.md").write_text("private\n")
+    SwappingFolder(vault, outside, monkeypatch)
+    with pytest.raises(VaultError):
+        index.write("Projects/osmo.md", "pwned\n", "replace")
+    assert (outside / "osmo.md").read_text() == "private\n"
+    with pytest.raises(VaultError):
+        index.read("Projects/osmo.md")
+
+
 # ------------------------------------------------------------ the editor's API and the voice approval gate
 
 
 def test_the_editor_lists_reads_saves_and_refuses_escapes(vault: Vault) -> None:
-    with make_client(Settings(vaults=(vault,))) as client:
+    with make_client(Settings(vaults=(vault,), app_token="launch-secret")) as client:
+        client.headers["X-Osmo-Desktop-Token"] = "launch-secret"
         assert client.get("/api/vault").json() == {"vaults": [{"name": "notes", "root": str(vault.root)}]}
         notes = client.get("/api/vault/notes").json()["notes"]
         assert [n["path"] for n in notes] == ["Projects/osmo.md", "groceries.md"]
@@ -247,6 +286,20 @@ def test_a_denied_voice_vault_write_changes_nothing(grok: FakeGrok, vault: Vault
         output, _ = voice_write(client, grok, approve=False)
     assert "did not approve vault_write" in str(output["error"])
     assert (vault.root / "groceries.md").read_text() == before
+
+
+def test_the_approval_card_shows_every_argument_and_their_digest(grok: FakeGrok, vault: Vault) -> None:
+    # Past what the card used to show (400 characters): the end is what a sneaky write would hide.
+    text = "Milk\n" + "padding " * 100 + "and then: wire $500 to the account in this note"
+    with make_client(Settings(xai_base_url=grok.base_url, vaults=(vault,)), secret_store=xai_key_store()) as client:
+        with client.websocket_connect("/ws") as ws:
+            start(ws, grok)
+            say(grok, "add milk to my groceries")
+            call(grok, "vault_write", {"path": "groceries.md", "text": text, "mode": "append"}, "c1")
+            request = next_event(ws, "approval.request")
+            assert client.post(f"/api/approvals/{request['approvalId']}", json={"approved": False}).status_code == 204
+    assert json.loads(request["arguments"]) == {"path": "groceries.md", "text": text, "mode": "append"}
+    assert request["digest"] == hashlib.sha256(request["arguments"].encode()).hexdigest()
 
 
 def test_reads_need_no_approval_on_voice(grok: FakeGrok, vault: Vault) -> None:

@@ -10,6 +10,7 @@ An `ApprovalPolicy` (the agent browser's per-domain rules) can let a step throug
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import secrets
 from collections.abc import Awaitable, Callable, Mapping
@@ -25,7 +26,6 @@ from symphony_server.turn_events import activity_label
 APPROVAL_TIMEOUT_S = 600.0
 APPROVAL_REQUIRED = "approval_required"
 APPROVAL_RESOLVED = "approval_resolved"
-ARGUMENTS_SHOWN_MAX = 400
 
 Emit = Callable[[str, dict[str, Any]], Awaitable[None]]
 
@@ -36,7 +36,9 @@ class ApprovalPayload(BaseModel):
     approval_id: str
     tool: str
     summary: str
+    # Every argument, never cut: what is approved is exactly what runs. The card folds long ones behind their digest.
     arguments: str
+    digest: str
 
 
 class ApprovalResolvedPayload(BaseModel):
@@ -86,8 +88,13 @@ class ApprovalBroker:
 
 
 def shown_arguments(arguments: Mapping[str, Any]) -> str:
-    text = json.dumps(dict(arguments), ensure_ascii=False)
-    return text if len(text) <= ARGUMENTS_SHOWN_MAX else text[: ARGUMENTS_SHOWN_MAX - 1] + "…"
+    """A step's arguments as the approval card shows them: all of them, as JSON."""
+    return json.dumps(dict(arguments), ensure_ascii=False)
+
+
+def arguments_digest(shown: str) -> str:
+    """The SHA-256 of the shown arguments, so two long cards that look alike can be told apart."""
+    return hashlib.sha256(shown.encode()).hexdigest()
 
 
 class ApprovalPolicy(Protocol):
@@ -119,11 +126,13 @@ class ApprovalAddon(Addon):
             return None
         emit: Emit = payload["emit"]
         approval_id = self.broker.open(self.session_id)
+        shown = shown_arguments(arguments)
         request = ApprovalPayload(
             approval_id=approval_id,
             tool=tool_name,
             summary=activity_label(tool_name, arguments),
-            arguments=shown_arguments(arguments),
+            arguments=shown,
+            digest=arguments_digest(shown),
         )
         await emit(APPROVAL_REQUIRED, request.model_dump())
         approved = await self.broker.wait(approval_id, self.timeout_s)

@@ -76,6 +76,8 @@ export class PcmPlayer {
   private nextTime = 0;
   private readonly sources = new Set<AudioBufferSourceNode>();
   private remainder: Uint8Array | null = null;
+  // After `cut`, chunks of the answer that was cut off are still on their way: they are dropped until `flush`.
+  private holding = false;
   readonly analyser: AnalyserNode;
 
   constructor(
@@ -106,6 +108,7 @@ export class PcmPlayer {
   }
 
   enqueue(frame: ArrayBuffer): void {
+    if (this.holding) return;
     let bytes = new Uint8Array(frame);
     if (this.remainder) {
       const joined = new Uint8Array(this.remainder.length + bytes.length);
@@ -135,8 +138,18 @@ export class PcmPlayer {
     };
   }
 
-  /** Stop everything queued, right now. */
+  /**
+   * The user barged in here: stop now, and drop the rest of the cut-off answer still arriving until the server says
+   * it stopped it (its barge-in state, which flushes again); what comes after that is a new answer.
+   */
+  cut(): void {
+    this.flush();
+    this.holding = true;
+  }
+
+  /** Stop everything queued, right now; playback takes new speech again. */
   flush(): void {
+    this.holding = false;
     for (const source of this.sources) {
       source.onended = null;
       source.stop();

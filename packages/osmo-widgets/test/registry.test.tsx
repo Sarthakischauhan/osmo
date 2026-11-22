@@ -79,10 +79,14 @@ describe("osmo widget registry on chat-sdk", () => {
       </WidgetProvider>,
     );
     const frame = container.querySelector("iframe");
+    // The user clicked in the frame: it took focus, and activation is active (jsdom has none of its own).
+    act(() => frame?.focus());
+    Object.defineProperty(navigator, "userActivation", { value: { isActive: true, hasBeenActive: true }, configurable: true });
     await act(async () => {
       window.dispatchEvent(new MessageEvent("message", { data: { osmo: "action", id: "approve", value: "now" }, source: frame?.contentWindow ?? null }));
     });
     expect(answered).toHaveBeenCalledWith(expect.objectContaining({ widgetId: "w9", actionId: "approve", value: "now", label: "Approve" }));
+    Object.defineProperty(navigator, "userActivation", { value: { isActive: false, hasBeenActive: true }, configurable: true });
   });
 
   it("drops widgets that fail the schema", () => {

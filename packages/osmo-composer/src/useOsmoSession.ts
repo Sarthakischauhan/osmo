@@ -68,6 +68,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
   const previewRequest = useRef<{ id: string; model: string; voice: string } | undefined>();
   const previewCount = useRef(0);
   const speakingRef = useRef(false);
+  // Whether the music player is playing (it reports through reportMusic): the echo guard keeps it from the server's VAD.
+  const musicPlaying = useRef(false);
   // Previews only while the session is idle or listening (the server enforces the same).
   const previewStateRef = useRef(true);
   const previewingRef = useRef(false);
@@ -143,9 +145,9 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
       await mic.start((frame) => {
         if (previewingRef.current) return;
-        const step = guard.push(frame, player.playing, player.rms(), performance.now());
+        const step = guard.push(frame, player.playing, player.rms(), performance.now(), musicPlaying.current);
         if (step.bargeIn) {
-          player.flush();
+          player.cut();
           client.send({ type: "interrupt" });
         }
         for (const held of step.send) client.sendAudio(held);
@@ -192,6 +194,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
   }, []);
 
   const reportMusic = useCallback((state: MusicState) => {
+    musicPlaying.current = state.playing;
     runtime.current?.client.send(state);
   }, []);
 

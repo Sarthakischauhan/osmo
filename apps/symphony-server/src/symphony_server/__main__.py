@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from dataclasses import replace
 
 import certifi
 from dotenv import load_dotenv
@@ -16,6 +17,7 @@ import httpx
 import uvicorn
 
 from symphony_server.app import create_app
+from symphony_server.local_access import read_app_token
 from symphony_server.settings import Settings
 
 
@@ -26,7 +28,7 @@ def main() -> None:
     args = parser.parse_args()
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
-    settings = Settings.from_env()
+    settings = replace(Settings.from_env(), app_token=read_app_token())
     app = create_app(settings, http_client=httpx.AsyncClient(timeout=10))
     uvicorn.run(app, host=args.host, port=args.port)
 

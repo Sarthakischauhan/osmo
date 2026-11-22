@@ -10,10 +10,11 @@ from pydantic import SecretStr
 
 from symphony_server.browser_rules import DomainRules
 from symphony_server.chrome import find_chrome
+from symphony_server.local_access import LOCAL_HOSTS, allowed_hosts
 from symphony_server.infisical_client import DEFAULT_CACHE_TTL_S, DEFAULT_SITE_URL, InfisicalConfig
-from symphony_server.local_calendar import local_zone_name
+from symphony_server.calendar_models import local_zone_name
 from symphony_server.music_library import MusicRoot, parse_music_dirs
-from symphony_server.vault import Vault, parse_vaults
+from symphony_server.vault_paths import Vault, parse_vaults
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok:grok-imagine-image-2.0"
@@ -212,6 +213,10 @@ class Settings:
     music_dirs: tuple[MusicRoot, ...] = ()
     spotify_client_id: str | None = None
     spotify_redirect_uri: str | None = None
+    # Hosts the API answers to (local ones plus OSMO_ALLOWED_HOSTS), and the desktop app's secret for this launch
+    # (read by `python -m symphony_server`, never from the environment of the server's children; see local_access).
+    allowed_hosts: frozenset[str] = LOCAL_HOSTS
+    app_token: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -248,6 +253,7 @@ class Settings:
             music_dirs=parse_music_dirs(os.getenv("OSMO_MUSIC_DIRS"), Path(DEFAULT_MUSIC_DIR)),
             spotify_client_id=os.getenv("OSMO_SPOTIFY_CLIENT_ID") or None,
             spotify_redirect_uri=os.getenv("OSMO_SPOTIFY_REDIRECT_URI") or None,
+            allowed_hosts=allowed_hosts(os.getenv("OSMO_ALLOWED_HOSTS")),
         )
 
 

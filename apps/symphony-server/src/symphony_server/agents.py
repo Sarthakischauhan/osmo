@@ -27,7 +27,7 @@ from core_server import RunCapacityError, RunContext, RunRequest, RunSubmission
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from symphony_server.browser import THREAD_ID, BrowserSessions
+from symphony_server.browser_sessions import THREAD_ID, BrowserSessions
 from symphony_server.desktop import DesktopSession
 from symphony_server.approvals import (
     APPROVAL_REQUIRED,
@@ -301,7 +301,7 @@ class AgentRuns:
         elif kind == APPROVAL_REQUIRED:
             asked = ApprovalPayload.model_validate(event.payload)
             await self.update(record, "waiting_approval", phase=asked.summary)
-            request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments)
+            request = ApprovalRequest(approvalId=asked.approval_id, runId=run_id, tool=asked.tool, summary=asked.summary, arguments=asked.arguments, digest=asked.digest)
             self.asking[run_id] = request
             await self.show(record.threadId, request)
             text = f"[agent {run_id}] needs approval to: {asked.summary}. Ask the user to tap Approve or Deny on screen."

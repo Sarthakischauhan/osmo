@@ -233,7 +233,7 @@ async def test_agent_automatically_selects_subscription_and_respects_override() 
     from typing import Any, cast
     from core_ai.providers.defaults import DEFAULT_MODELS
     from symphony_server.agents import AgentRuns
-    from symphony_server.browser import BrowserSessions
+    from symphony_server.browser_sessions import BrowserSessions
     from symphony_server.canvas import WidgetBoard
     from symphony_server.storage import SQLiteStorage
 
@@ -304,7 +304,7 @@ async def test_a_voice_only_xai_key_does_not_run_agents_and_a_text_key_keeps_the
     from typing import Any, cast
     from core_ai.providers.defaults import DEFAULT_MODELS
     from symphony_server.agents import AgentRuns
-    from symphony_server.browser import BrowserSessions
+    from symphony_server.browser_sessions import BrowserSessions
     from symphony_server.canvas import WidgetBoard
     from symphony_server.storage import SQLiteStorage
 

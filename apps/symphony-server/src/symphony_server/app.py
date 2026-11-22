@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import tempfile
 import time
 from collections.abc import AsyncIterator, Mapping
@@ -37,7 +36,8 @@ from core_server import (
 from fastapi import FastAPI, Request, Response, WebSocket
 from fastapi.staticfiles import StaticFiles
 
-from symphony_server.browser import BROWSER_TOOL_NAMES, THREAD_ID, BrowserApprovalPolicy, BrowserRunLink, BrowserSessions, browser_tools
+from symphony_server.browser_sessions import THREAD_ID, BrowserRunLink, BrowserSessions
+from symphony_server.browser_tools import BROWSER_TOOL_NAMES, BrowserApprovalPolicy, browser_tools
 from symphony_server.chrome import reap_stale
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession
 from symphony_server.agent_model import create_agent_model_router
@@ -59,6 +59,7 @@ from symphony_server.music import MUSIC_TOOL_NAMES, MusicNow, create_music_route
 from symphony_server.music_library import LocalLibrary
 from symphony_server.secret_backends import open_secret_store
 from symphony_server.secret_store import SecretStore
+from symphony_server.local_access import SOCKET_PROTOCOL, LocalAccess, socket_protocols
 from symphony_server.settings import TOOL_CATEGORIES, Settings
 from symphony_server.tools import StockTool, WeatherTool
 from symphony_server.upstream.durable import DurableRunBackend, SQLiteDatabase, SQLitePersistence, SQLiteRunStore
@@ -69,14 +70,13 @@ from symphony_server.storage import SQLiteStorage
 from symphony_server.threads import create_thread_router
 from symphony_server.voice_bridge import VoiceBridge
 from symphony_server.web_search import WebSearchTool
-from symphony_server.local_calendar import (
-    CALENDAR_TOOL_NAMES,
-    CalendarStore,
-    Scheduler,
-    calendar_tools,
-    create_calendar_router,
-)
-from symphony_server.vault import VAULT_TOOL_NAMES, VaultIndex, create_vault_router, vault_tools
+from symphony_server.calendar_api import create_calendar_router
+from symphony_server.calendar_store import CalendarStore
+from symphony_server.calendar_tools import CALENDAR_TOOL_NAMES, calendar_tools
+from symphony_server.scheduler import Scheduler
+from symphony_server.vault_api import create_vault_router
+from symphony_server.vault_index import VaultIndex
+from symphony_server.vault_tools import VAULT_TOOL_NAMES, vault_tools
 from symphony_server.voices import (
     PREVIEW_CLIENTS_MAX,
     PREVIEW_RATE_LIMIT,
@@ -291,18 +291,10 @@ def create_app(
         tracing.flush()
 
     app = FastAPI(title="symphony-server", lifespan=lifespan)
-    desktop_token = os.getenv("OSMO_DESKTOP_TOKEN") or ""
-
-    @app.middleware("http")
-    async def identify_desktop(request: Request, call_next):  # type: ignore[no-untyped-def]
-        response = await call_next(request)
-        presented = request.headers.get("x-osmo-desktop-token", "")
-        if desktop_token and presented == desktop_token:
-            response.headers["X-Osmo-Desktop-Token"] = desktop_token
-            response.headers["Cache-Control"] = "no-store"
-        return response
-
     install_middlewares(app, core_config, prefix="/api")
+    # Added last, so it runs first: nothing (CORS preflights included) reaches a route from another host or site.
+    app.add_middleware(LocalAccess, hosts=settings.allowed_hosts, token=settings.app_token)
+    app.state.app_token = settings.app_token
     app.include_router(create_router(core_config, run_backend=backend, prefix="/api"))
     app.include_router(create_provider_router(credentials, http_client, storage, settings.oauth_clients))
     app.include_router(create_subscription_router(subscription_store, logins, subscription_removed, subscriptions))
@@ -311,7 +303,7 @@ def create_app(
     app.include_router(create_run_router(agents))
     app.include_router(create_agent_model_router(agents))
     app.include_router(create_usage_router(storage))
-    app.include_router(create_vault_router(vaults))
+    app.include_router(create_vault_router(vaults, writes_approved="vault_write" in settings.approval_tools))
     app.include_router(create_calendar_router(calendar, scheduler))
     app.include_router(create_music_router(library, spotify, settings.spotify_redirect_uri))
 
@@ -338,7 +330,9 @@ def create_app(
 
     @app.websocket("/ws")
     async def osmo_socket(websocket: WebSocket) -> None:
-        await websocket.accept()
+        # The desktop app offers `osmo` beside the subprotocol carrying its token; a client that offers one must get one back.
+        offered = socket_protocols(websocket.headers)
+        await websocket.accept(subprotocol=SOCKET_PROTOCOL if SOCKET_PROTOCOL in offered else None)
         bridge = VoiceBridge(
             websocket,
             instructions=settings.instructions,

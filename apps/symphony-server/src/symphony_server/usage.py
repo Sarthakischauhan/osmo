@@ -64,15 +64,19 @@ def voice_usage(thread_id: str, model: str, done: ResponseDone) -> UsageRecord |
 
 
 class UsageList(BaseModel):
+    """Usage records since `since` (epoch seconds), for the usage dialog."""
+
     since: float
     usage: list[UsageRecord]
 
 
 def create_usage_router(storage: Storage) -> APIRouter:
+    """`GET /api/usage`: what voice answers and agent turns used."""
     router = APIRouter(prefix="/api/usage")
 
     @router.get("")
     async def list_usage(days: int = Query(default=30, ge=1, le=RANGE_DAYS_MAX), thread: str | None = None) -> UsageList:
+        """Usage of the last `days` days, for one thread or all of them."""
         since = time.time() - days * DAY_S
         return UsageList(since=since, usage=storage.usage_since(since, thread))
 
