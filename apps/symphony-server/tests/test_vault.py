@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -240,6 +241,20 @@ def test_a_denied_voice_vault_write_changes_nothing(grok: FakeGrok, vault: Vault
         output, _ = voice_write(client, grok, approve=False)
     assert "did not approve vault_write" in str(output["error"])
     assert (vault.root / "groceries.md").read_text() == before
+
+
+def test_the_approval_card_shows_every_argument_and_their_digest(grok: FakeGrok, vault: Vault) -> None:
+    # Past what the card used to show (400 characters): the end is what a sneaky write would hide.
+    text = "Milk\n" + "padding " * 100 + "and then: wire $500 to the account in this note"
+    with make_client(Settings(xai_base_url=grok.base_url, vaults=(vault,)), secret_store=xai_key_store()) as client:
+        with client.websocket_connect("/ws") as ws:
+            start(ws, grok)
+            say(grok, "add milk to my groceries")
+            call(grok, "vault_write", {"path": "groceries.md", "text": text, "mode": "append"}, "c1")
+            request = next_event(ws, "approval.request")
+            assert client.post(f"/api/approvals/{request['approvalId']}", json={"approved": False}).status_code == 204
+    assert json.loads(request["arguments"]) == {"path": "groceries.md", "text": text, "mode": "append"}
+    assert request["digest"] == hashlib.sha256(request["arguments"].encode()).hexdigest()
 
 
 def test_reads_need_no_approval_on_voice(grok: FakeGrok, vault: Vault) -> None:

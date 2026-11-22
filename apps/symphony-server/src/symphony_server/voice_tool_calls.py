@@ -117,7 +117,7 @@ class VoiceToolCalls:
         """A voice tool's approval, as the same feed card an agent run's approval gets."""
         if kind == APPROVAL_REQUIRED:
             asked = ApprovalPayload.model_validate(payload)
-            await self.emit(ApprovalRequest(approvalId=asked.approval_id, runId=VOICE_RUN, tool=asked.tool, summary=asked.summary, arguments=asked.arguments))
+            await self.emit(ApprovalRequest(approvalId=asked.approval_id, runId=VOICE_RUN, tool=asked.tool, summary=asked.summary, arguments=asked.arguments, digest=asked.digest))
         else:
             resolved = ApprovalResolvedPayload.model_validate(payload)
             await self.emit(ApprovalResolved(approvalId=resolved.approval_id, runId=VOICE_RUN, approved=resolved.approved))
