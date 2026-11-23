@@ -99,7 +99,8 @@ export type MusicState = z.infer<typeof musicStateSchema>;
 
 export const musicCommandSchema = z.object({
   type: z.literal("music.command"),
-  action: z.enum(["play", "pause", "resume", "next", "previous", "volume"]),
+  action: z.enum(["play", "pause", "resume", "next", "previous", "volume", "handoff"]),
+  query: z.string().max(200).optional(),
   tracks: z.array(trackSchema).default([]),
   volume: z.number().int().min(0).max(100).nullish(),
 });
