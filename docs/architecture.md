@@ -26,6 +26,18 @@ Talking over Osmo ends its speech, not its background work. The client detects r
 
 `packages/osmo-composer/src/echoGuard.ts` keeps playback from being mistaken for user speech: microphone frames are held back unless they stand out from the assistant's audio. While music plays, only speech that stands out from it reaches server turn detection; other frames become silence. The client also ducks music during spoken responses.
 
+## Local Silero VAD
+
+Osmo uses **Silero VAD v5 locally** for speech evidence during assistant playback and music. It shares the microphone stream with the 24 kHz PCM capture, and uses the bundled ONNX model, worklet, and WASM assets under \`/vad/\`. No model weights or microphone audio need to be downloaded or uploaded for local VAD.
+
+- **Osmo silent:** audio flows to the provider continuously. Silero does not decide whether a user turn ends and does not suppress quiet speech.
+- **Osmo speaking:** the echo guard buffers pre-roll. Silero-positive frames enable an interruption when they also clear a conservative acoustic-level check. Osmo immediately cuts playback.
+- **Music:** Silero-positive speech passes with pre-roll; music-only frames are replaced by silence. Provider VAD still decides turn boundaries.
+- **Unavailable model/WASM:** falls back to the existing RMS echo guard without stopping the voice session.
+- **Permissions:** one \`getUserMedia\` stream is shared; stopping a session closes it once.
+
+The realtime provider still handles transcription, text responses, and turn detection. Silero **does not** perform speech-to-text. For production testing, compare quiet voice, music, speaker leakage, barge-ins, and lost-model startup in both browser and packaged desktop builds.
+
 ## Voice diagnostics and missing transcription
 
 Audio is captured in 100 ms PCM16 frames. EchoGuard gates during assistant playback to avoid self-interruption, but it must **never** suppress the first words after playback stops. When playing music, the guard can still suppress low-volume speech; pause music if debugging quiet speech.
