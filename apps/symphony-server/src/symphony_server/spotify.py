@@ -26,7 +26,7 @@ SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API = "https://api.spotify.com/v1"
 # What the Web Playback SDK and playback control need, and nothing else.
-SPOTIFY_SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state"
+SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 SPOTIFY_CREDENTIAL = "spotify"
 # An access token this close to expiry is refreshed before it is handed out.
 TOKEN_MARGIN_S = 60.0
