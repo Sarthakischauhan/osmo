@@ -1,12 +1,15 @@
 import { FilePlus2, RotateCw, Search } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
-import { type Note, type NoteEntry, type NoteHit, type VaultApi, type VaultInfo, notePath, snippetRuns, vaultApi } from "@/lib/vault";
+import { type Note, type NoteEntry, type NoteHit, type VaultIssue, type VaultApi, type VaultInfo, notePath, noteReferences, snippetRuns, vaultApi } from "@/lib/vault";
 
 export interface NotesViewProps {
   api?: VaultApi;
   /** Open this note first (screenshots, links from a thread). */
   initialPath?: string;
+  onOpenThread?: (id: string) => void;
+  onOpenAutomation?: (id: string) => void;
+  onOpenEvent?: (id: string) => void;
 }
 
 type Listed = { kind: "notes"; notes: NoteEntry[] } | { kind: "hits"; hits: NoteHit[] };
@@ -14,12 +17,15 @@ type Listed = { kind: "notes"; notes: NoteEntry[] } | { kind: "hits"; hits: Note
 const DAY = { month: "short", day: "numeric" } as const;
 
 /** The vault: its notes (or search hits) on the left, the open note in a CodeMirror editor on the right. */
-export function NotesView({ api: given, initialPath }: NotesViewProps) {
+export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomation, onOpenEvent }: NotesViewProps) {
   const api = useMemo(() => given ?? vaultApi(), [given]);
   const [vaults, setVaults] = useState<VaultInfo[]>([]);
   const [vault, setVault] = useState<string>();
   const [listed, setListed] = useState<Listed>({ kind: "notes", notes: [] });
   const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"notes" | "issues">("notes");
+  const [issueFilter, setIssueFilter] = useState<"open" | "done" | "all">("open");
+  const [issues, setIssues] = useState<VaultIssue[]>([]);
   const [note, setNote] = useState<Note>();
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -39,12 +45,13 @@ export function NotesView({ api: given, initialPath }: NotesViewProps) {
   const refresh = useCallback(async () => {
     if (vault === undefined) return;
     try {
-      setListed(query.trim() ? { kind: "hits", hits: await api.search(vault, query.trim()) } : { kind: "notes", notes: await api.notes(vault) });
+      if (mode === "issues") setIssues(await api.issues(vault, issueFilter));
+      else setListed(query.trim() ? { kind: "hits", hits: await api.search(vault, query.trim()) } : { kind: "notes", notes: await api.notes(vault) });
       setError(undefined);
     } catch (cause) {
       fail(cause);
     }
-  }, [api, vault, query]);
+  }, [api, vault, query, mode, issueFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), query ? 150 : 0);
@@ -111,16 +118,25 @@ export function NotesView({ api: given, initialPath }: NotesViewProps) {
     <div className="osmo-notes">
       <header className="osmo-view-head">
         <h1>Notes</h1>
+        <div className="osmo-notes-modes" role="group" aria-label="Notes view">
+          <button type="button" aria-pressed={mode === "notes"} data-active={mode === "notes"} onClick={() => setMode("notes")}>All notes</button>
+          <button type="button" aria-pressed={mode === "issues"} data-active={mode === "issues"} onClick={() => setMode("issues")}>Issues</button>
+        </div>
         {vaults.length > 1 && (
           <select className="osmo-view-select" aria-label="Vault" value={vault} onChange={(event) => { setVault(event.target.value); setNote(undefined); }}>
             {vaults.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
           </select>
         )}
         <div className="osmo-view-tools">
-          <label className="osmo-notes-search">
+          {mode === "issues" && (
+            <select className="osmo-view-select" aria-label="Issue status" value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as "open" | "done" | "all")}>
+              <option value="open">Open</option><option value="done">Done</option><option value="all">All</option>
+            </select>
+          )}
+          {mode === "notes" && <label className="osmo-notes-search">
             <Search size={14} aria-hidden />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />
-          </label>
+          </label>}
           <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setCreating((on) => !on)}>
             <FilePlus2 size={14} aria-hidden /> New note
           </button>
@@ -134,7 +150,27 @@ export function NotesView({ api: given, initialPath }: NotesViewProps) {
       )}
       {error && <p className="osmo-notes-error" role="alert">{error}</p>}
       <div className="osmo-notes-pane">
-        <nav className="osmo-notes-list" aria-label={listed.kind === "hits" ? "Search results" : "Notes"}>
+        <nav className="osmo-notes-list" aria-label={mode === "issues" ? "Issues" : listed.kind === "hits" ? "Search results" : "Notes"}>
+          {mode === "issues" ? (
+            <>
+              <p className="osmo-notes-section-caption">Markdown tasks · {issues.length} shown</p>
+              {issues.length === 0 && <p className="osmo-notes-empty">No matching issues. Add - [ ] to a note or a status: todo field.</p>}
+              {issues.map((issue, index) => (
+                <button key={`${issue.vault}/${issue.path}/${issue.line ?? 0}/${index}`} type="button"
+                  className="osmo-notes-row osmo-issue-row" data-active={note?.path === issue.path}
+                  onClick={() => void open(issue.path)}>
+                  <span className="osmo-issue-row-main">
+                    <span className="osmo-issue-marker" data-done={issue.status === "done"}>{issue.status === "done" ? "✓" : "○"}</span>
+                    <span className="osmo-notes-row-title">{issue.task}</span>
+                  </span>
+                  <span className="osmo-notes-row-meta">
+                    <span className="mono">{issue.path}</span>
+                    <span>{issue.priority ?? issue.status}</span>
+                  </span>
+                </button>
+              ))}
+            </>
+          ) : <>
           {rows.length === 0 && <p className="osmo-notes-empty">{listed.kind === "hits" ? "No notes match." : "No notes yet. Osmo keeps them as markdown files in your vault folder."}</p>}
           {rows.map((row) => (
             <button
@@ -157,6 +193,7 @@ export function NotesView({ api: given, initialPath }: NotesViewProps) {
               )}
             </button>
           ))}
+          </>}
         </nav>
         <section className="osmo-notes-doc" aria-label="Note">
           {note === undefined ? (
@@ -174,6 +211,21 @@ export function NotesView({ api: given, initialPath }: NotesViewProps) {
                 </button>
               </div>
               <MarkdownEditor docKey={`${note.vault}/${note.path}@${note.modified}`} value={note.text} onChange={setDraft} onSave={() => void save()} />
+              {noteReferences(draft).length > 0 && (
+                <footer className="osmo-notes-backlinks osmo-notes-references">
+                  <span>References</span>
+                  {noteReferences(draft).map((ref) => (
+                    <button key={ref.kind + ":" + ref.id} type="button" className="osmo-notes-link"
+                      onClick={() => {
+                        if (ref.kind === "chat") onOpenThread?.(ref.id);
+                        else if (ref.kind === "automation") onOpenAutomation?.(ref.id);
+                        else onOpenEvent?.(ref.id);
+                      }}>
+                      {ref.kind === "chat" ? "Chat" : ref.kind === "automation" ? "Automation" : "Event"} · {ref.id.slice(0, 14)}
+                    </button>
+                  ))}
+                </footer>
+              )}
               {note.backlinks.length > 0 && (
                 <footer className="osmo-notes-backlinks">
                   <span>Linked from</span>
