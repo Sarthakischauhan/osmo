@@ -89,7 +89,7 @@ class VaultReadTool(Tool):
         except (ValidationError, VaultError) as exc:
             return json.dumps({"error": str(exc)})
         text = note.text if len(note.text) <= READ_CHARS_MAX else note.text[:READ_CHARS_MAX] + "\n…(cut)"
-        return json.dumps({"vault": note.vault, "path": note.path, "title": note.title, "text": text, "backlinks": note.backlinks})
+        return json.dumps({"vault": note.vault, "path": note.path, "title": note.title, "text": text, "backlinks": note.backlinks, "tags": note.tags})
 
 
 class VaultWriteTool(Tool):
