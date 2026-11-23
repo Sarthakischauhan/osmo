@@ -14,9 +14,7 @@ from symphony_server.reference_tools import (
     ConversationReadTool,
     ConversationSearchTool,
     EventSearchTool,
-    VaultIssuesTool,
     VaultListTool,
-    issues,
 )
 from symphony_server.storage import SQLiteStorage
 from symphony_server.calendar_store import CalendarStore
@@ -41,30 +39,13 @@ def index_for(tmp_path: Path) -> VaultIndex:
     return index
 
 
-def test_markdown_notes_are_usable_as_read_only_issues(tmp_path: Path) -> None:
-    index = index_for(tmp_path)
-    try:
-        opened = issues(index, status="open")
-        assert [i["task"] for i in opened] == ["Planning", "Fix transcription pipeline"]
-        assert opened[0]["priority"] == "high"
-        assert opened[1]["line"] == 5
-        done = issues(index, status="done")
-        assert [i["task"] for i in done] == ["Test microphone"]
-        assert issues(index, status="all", limit=2) == (opened + done)[:2]
-        assert index.read("Planning.md", "notes").text.startswith("# Planning")
-    finally:
-        index.close()
-
-
 @pytest.mark.asyncio
-async def test_vault_list_and_issues_are_available_without_write_approval(tmp_path: Path) -> None:
+async def test_vault_list_is_available_without_write_approval(tmp_path: Path) -> None:
     index = index_for(tmp_path)
     try:
         sink = cast(EventSink, None)
         listed = json.loads(await VaultListTool(index).execute(sink=sink, args={}))
         assert [i["path"] for i in listed["notes"]] == ["Planning.md", "Reading.md"]
-        found = json.loads(await VaultIssuesTool(index).execute(sink=sink, args={}))
-        assert len(found["issues"]) == 2
         assert "vault_write" in DEFAULT_APPROVAL_TOOLS
         assert all(name in TOOL_CATEGORIES for name in REFERENCE_TOOL_NAMES)
         assert {"vault", "calendar", "osmo"}.issubset(DEFAULT_TOOL_CATEGORIES)
