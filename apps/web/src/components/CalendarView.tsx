@@ -67,10 +67,18 @@ export function CalendarView({ api: given, now: fixedNow, focus, onOpenTask }: C
   const [ticks, setTicks] = useState<Tick[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [tasks, setTasks] = useState<TaskLink[]>([]);
-  const [selected, setSelected] = useState<Selection | undefined>(() => (focus ? { kind: "automation", id: focus } : undefined));
+  const [selected, setSelected] = useState<Selection | undefined>(() => (focus && !focus.startsWith("event:") ? { kind: "automation", id: focus } : undefined));
   useEffect(() => {
-    if (focus) setSelected({ kind: "automation", id: focus });
-  }, [focus]);
+    if (!focus) return;
+    if (focus.startsWith("event:")) {
+      void api.event(focus.slice(6)).then((event) => setStart(weekStart(new Date(event.start)))).catch(() => setError("Referenced event could not be found"));
+    } else setSelected({ kind: "automation", id: focus });
+  }, [focus, api]);
+  useEffect(() => {
+    if (!focus?.startsWith("event:")) return;
+    const occurrence = occurrences.find((item) => item.eventId === focus.slice(6));
+    if (occurrence) setSelected({ kind: "event", occurrence });
+  }, [focus, occurrences]);
   const [error, setError] = useState<string>();
   // The grid stretches to the window; hours are at least HOUR_PX tall and grow with the space.
   const bodyRef = useRef<HTMLDivElement>(null);
