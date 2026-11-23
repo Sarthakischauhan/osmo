@@ -16,6 +16,9 @@ registerProcessor("osmo-mic-tap", OsmoMicTap);
 /** Mic capture at 24 kHz, delivered as 100 ms PCM16 frames. */
 export class MicCapture {
   private stream: MediaStream | null = null;
+
+  /** Reuse the exact stream for on-device VAD; MicCapture alone manages track lifetime. */
+  get mediaStream(): MediaStream | null { return this.stream; }
   private node: AudioWorkletNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   readonly analyser: AnalyserNode;
