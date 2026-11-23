@@ -71,7 +71,7 @@ class MusicPlayTool(Tool):
     def __init__(self, library: LocalLibrary, spotify: SpotifyAccount) -> None:
         super().__init__(
             name="music_play",
-            description="Find music and play it in the Osmo app (Spotify when connected, or the user's own files). Say what is playing in one short line.",
+            description="Search music and request playback in Osmo; if Spotify is unavailable, offer a Spotify search link. Never claim playback started until confirmed by the player.",
             parameters=PlayArgs.model_json_schema(),
         )
         self.library, self.spotify = library, spotify
@@ -84,10 +84,13 @@ class MusicPlayTool(Tool):
             return json.dumps({"error": str(exc)})
         found, notes = await self.find(command)
         if not found:
+            if command.source != "local":
+                await sink.emit(OSMO_MUSIC, MusicCommand(action="handoff", query=command.query).model_dump(mode="json"))
+                return json.dumps({"handoff": "spotify", "query": command.query, "message": "Open Spotify from the music player to find this. Playback has not started.", "notes": notes})
             return json.dumps({"error": "nothing found to play", "notes": notes})
         tracks = found[: PLAY_QUEUE + 1]
         await sink.emit(OSMO_MUSIC, MusicCommand(action="play", tracks=tracks).model_dump(mode="json"))
-        return json.dumps({"playing": tracks[0].label(), "source": tracks[0].source, "queued": len(tracks) - 1, "notes": notes})
+        return json.dumps({"requested": tracks[0].label(), "source": tracks[0].source, "queued": len(tracks) - 1, "status": "pending_player_confirmation", "notes": notes})
 
     async def find(self, command: PlayArgs) -> tuple[list[Track], list[str]]:
         """The tracks for a request, and notes on the sources that could not be searched."""
