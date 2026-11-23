@@ -1,8 +1,7 @@
-"""The user's Spotify: their own Spotify app (OSMO_SPOTIFY_CLIENT_ID), signed in with authorization code + PKCE.
+"""Spotify OAuth PKCE, search and Connect control of the user's existing Spotify device.
 
-It is a public client, so there is no secret. The tokens live in the encrypted credential store; the app gets a
-short-lived access token for the Web Playback SDK, and Osmo searches the Web API with it. Spotify playback in the
-app needs Widevine (castLabs ECS in the desktop app) and a Premium account.
+Tokens stay in the encrypted credential store and never reach the browser renderer.
+Connect playback needs Spotify Premium and a controllable client device.
 """
 
 from __future__ import annotations
