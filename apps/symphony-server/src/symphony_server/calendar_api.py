@@ -139,6 +139,14 @@ def create_calendar_router(store: CalendarStore, scheduler: Scheduler) -> APIRou
         planned = await asyncio.to_thread(ticks, store, start, end)
         return EventList(occurrences=occurrences, events=[event for event in store.events() if event.id in ids], ticks=planned)
 
+    @router.get("/calendar/events/{event_id}")
+    async def read_event(event_id: str) -> CalendarEvent:
+        """Resolve a calendar event referenced from a markdown note."""
+        event = store.event(event_id)
+        if event is None:
+            raise missing("event", event_id)
+        return event
+
     @router.post("/calendar/events", status_code=201)
     async def add_event(body: EventInput) -> CalendarEvent:
         """Add an event and replan the automations around events."""

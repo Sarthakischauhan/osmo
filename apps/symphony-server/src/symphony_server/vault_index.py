@@ -10,6 +10,7 @@ nor the voice model changes a note without the user's OK. The user's own edits i
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import threading
@@ -40,6 +41,42 @@ def note_links(text: str) -> list[str]:
     return sorted({link.strip() for link in WIKI_LINK.findall(text) if link.strip()})
 
 
+
+FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
+TAG_LINE = re.compile(r"^tags:[ \t]*(.*)$", re.MULTILINE)
+TAG_ITEM = re.compile(r"^[ \t]*-[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+
+
+def frontmatter_tags(text: str) -> list[str]:
+    """Bounded YAML frontmatter tags, inline or dash list (no YAML execution)."""
+    head = FRONTMATTER.match(text)
+    if head is None:
+        return []
+    rows = head.group(1).splitlines()
+    start = next((i for i, line in enumerate(rows) if TAG_LINE.fullmatch(line)), None)
+    if start is None:
+        return []
+    value = rows[start].partition(":")[2].strip()
+    if value.startswith("[") and value.endswith("]"):
+        raw = value[1:-1].split(",")
+    elif value:
+        raw = [value]
+    else:
+        raw = []
+        for line in rows[start + 1:]:
+            matched = TAG_ITEM.fullmatch(line)
+            if not matched:
+                break
+            raw.append(matched.group(1))
+    result: list[str] = []
+    for entry in raw:
+        tag = entry.strip().strip("'\"").strip().lstrip("#").strip()
+        if tag and len(tag) <= 64 and tag not in result:
+            result.append(tag)
+        if len(result) >= 32:
+            break
+    return result
+
 def fts_query(text: str) -> str | None:
     """User words as an FTS5 query: each word quoted (so `-`, `:` and quotes are plain text), the last a prefix."""
     words = [word for word in re.findall(r"\w+", text, flags=re.UNICODE)]
@@ -57,6 +94,7 @@ class NoteHit(BaseModel):
     path: str
     title: str
     snippet: str
+    tags: list[str] = []
 
 
 class NoteEntry(BaseModel):
@@ -67,6 +105,7 @@ class NoteEntry(BaseModel):
     title: str
     modified: float
     size: int
+    tags: list[str] = []
 
 
 class Note(BaseModel):
@@ -78,6 +117,7 @@ class Note(BaseModel):
     text: str
     modified: float
     backlinks: list[str] = []
+    tags: list[str] = []
 
 
 SCHEMA = """
@@ -87,6 +127,7 @@ CREATE TABLE IF NOT EXISTS notes (
     title TEXT NOT NULL,
     mtime REAL NOT NULL,
     size INTEGER NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (vault, path)
 );
 CREATE TABLE IF NOT EXISTS links (
@@ -111,6 +152,10 @@ class VaultIndex:
         self.ready = asyncio.Event()
         with self.db.transaction() as db:
             db.executescript(SCHEMA)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
+            if "tags" not in columns:
+                db.execute("ALTER TABLE notes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+                db.execute("UPDATE notes SET mtime = -1")
 
     def close(self) -> None:
         """Stop a sync or watcher reindex still running, wait for it (shared_db.STOP_WAIT_S at most), then close the
@@ -201,8 +246,8 @@ class VaultIndex:
             db.execute("DELETE FROM notes_fts WHERE vault = ? AND path = ?", (vault.name, relative))
             db.execute("DELETE FROM links WHERE vault = ? AND source = ?", (vault.name, relative))
             db.execute(
-                "INSERT OR REPLACE INTO notes (vault, path, title, mtime, size) VALUES (?, ?, ?, ?, ?)",
-                (vault.name, relative, title, stat.st_mtime, stat.st_size),
+                "INSERT OR REPLACE INTO notes (vault, path, title, mtime, size, tags) VALUES (?, ?, ?, ?, ?, ?)",
+                (vault.name, relative, title, stat.st_mtime, stat.st_size, json.dumps(frontmatter_tags(text))),
             )
             db.execute("INSERT INTO notes_fts (vault, path, title, body) VALUES (?, ?, ?, ?)", (vault.name, relative, title, text))
             db.executemany("INSERT INTO links (vault, source, target) VALUES (?, ?, ?)", [(vault.name, relative, link) for link in note_links(text)])
@@ -258,14 +303,16 @@ class VaultIndex:
         params: tuple[Any, ...] = (match, vault, limit) if vault else (match, limit)
         with self.db.transaction() as db:
             rows = db.execute(sql, params).fetchall()
-        return [NoteHit(vault=row[0], path=row[1], title=row[2], snippet=row[3]) for row in rows]
+        with self.db.transaction() as db:
+            metadata = {(row[0], row[1]): json.loads(row[2]) for row in db.execute("SELECT vault, path, tags FROM notes")}
+        return [NoteHit(vault=row[0], path=row[1], title=row[2], snippet=row[3], tags=metadata.get((row[0], row[1]), [])) for row in rows]
 
     def entries(self, vault: str | None = None) -> list[NoteEntry]:
         """Every indexed note of a vault, by path."""
         name = self.vault(vault).name
         with self.db.transaction() as db:
-            rows = db.execute("SELECT path, title, mtime, size FROM notes WHERE vault = ? ORDER BY path", (name,)).fetchall()
-        return [NoteEntry(vault=name, path=row[0], title=row[1], modified=row[2], size=row[3]) for row in rows]
+            rows = db.execute("SELECT path, title, mtime, size, tags FROM notes WHERE vault = ? ORDER BY path", (name,)).fetchall()
+        return [NoteEntry(vault=name, path=row[0], title=row[1], modified=row[2], size=row[3], tags=json.loads(row[4])) for row in rows]
 
     def backlinks(self, vault: Vault, relative: str) -> list[str]:
         """The notes that link to `relative` by its name."""
@@ -290,7 +337,7 @@ class VaultIndex:
         except FileNotFoundError as exc:
             raise VaultError(f"no note {relative!r} in vault {chosen.name!r}") from exc
         clean = relative_name(chosen.root, path)
-        return Note(vault=chosen.name, path=clean, title=note_title(clean, text), text=text, modified=status.st_mtime, backlinks=self.backlinks(chosen, clean))
+        return Note(vault=chosen.name, path=clean, title=note_title(clean, text), text=text, modified=status.st_mtime, backlinks=self.backlinks(chosen, clean), tags=frontmatter_tags(text))
 
     def write(self, relative: str, text: str, mode: WriteMode, vault: str | None = None) -> Note:
         """Create, replace or append to a note, opened through `open_note` (no symlink anywhere, no hard link)."""
