@@ -2,6 +2,7 @@ export * from "./protocol";
 export { OsmoClient, sameOriginSocketUrl } from "./client";
 export { MicCapture, PcmPlayer } from "./audio";
 export { ECHO_GUARD, EchoGuard, isUserSpeech, rms, type EchoGuardOptions, type GuardStep } from "./echoGuard";
+export { SileroVad } from "./sileroVad";
 export { useOsmoSession } from "./useOsmoSession";
 export type { OsmoConnection, OsmoSession, OsmoSessionOptions } from "./useOsmoSession";
 export { OrbComposer } from "./OrbComposer";
