@@ -5,6 +5,7 @@ import type { Runs } from "@/lib/runs";
 import type { DecideApproval } from "./CompactAgentActivity";
 import { type AgentActivity, hasPreview } from "./compact";
 import type { Turn } from "./feed";
+import type { OrbVoiceState } from "./OrbPreview";
 import { OrbPreview } from "./OrbPreview";
 import { HoverPanel, type Scheduler } from "./hoverPanel";
 import { OrbDrag } from "./orbDrag";
@@ -14,6 +15,8 @@ const windowTimers: Scheduler<number> = { after: (callback, ms) => window.setTim
 
 export interface FloatingOrbProps {
   mode: OrbMode;
+  voiceState?: OrbVoiceState;
+  detail?: string;
   outputLevel: () => number;
   /** Mic level 0..1, so the floating orb reacts while the user talks. */
   inputLevel?: () => number;
@@ -41,7 +44,7 @@ export interface FloatingOrbProps {
  * with its approvals. It only shows what the session owner passes in;
  * it never opens a connection or a microphone.
  */
-export function FloatingOrb({ mode, outputLevel, inputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight, onMove }: FloatingOrbProps) {
+export function FloatingOrb({ mode, voiceState, detail, outputLevel, inputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight, onMove }: FloatingOrbProps) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const hover = useRef<HoverPanel<number>>();
@@ -68,7 +71,7 @@ export function FloatingOrb({ mode, outputLevel, inputLevel, runs, turns, activi
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
   // The box reports its own height, so the window is exactly as tall as it needs.
-  const hasBox = open && hasPreview(turns, activity);
+  const hasBox = open && (hasPreview(turns, activity) || voiceState === "thinking" || voiceState === "working");
   useLayoutEffect(() => {
     const element = box.current;
     if (!hasBox || !element) {
@@ -82,12 +85,16 @@ export function FloatingOrb({ mode, outputLevel, inputLevel, runs, turns, activi
     const observer = new ResizeObserver(report);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [hasBox, onBoxHeight, turns, activity]);
+  }, [hasBox, onBoxHeight, turns, activity, voiceState, detail]);
+  // Follow live text only when already near the bottom. Do not steal the scroll position
+  // while someone is reviewing older messages in the hover transcript.
+  const latest = turns[turns.length - 1];
+  const liveText = latest?.role === "assistant" ? (latest.text + (latest.reasoning ?? "")) : latest?.role === "user" ? latest.text : "";
   useEffect(() => {
     const element = box.current;
     if (!hasBox || !element) return;
-    element.scrollTop = element.scrollHeight;
-  }, [hasBox, turns.length]);
+    if (element.scrollHeight - element.scrollTop - element.clientHeight < 64) element.scrollTop = element.scrollHeight;
+  }, [hasBox, turns.length, liveText]);
   const track = (region: "orb" | "panel") => ({
     onPointerEnter: () => hover.current?.enter(region),
     onPointerLeave: () => hover.current?.leave(region),
@@ -130,7 +137,7 @@ export function FloatingOrb({ mode, outputLevel, inputLevel, runs, turns, activi
       </button>
       {open && (
         <div ref={box} className="osmo-floating-box osmo-scroll" data-placed={placement.placed > 0 || undefined} {...track("panel")} onPointerDown={() => hover.current?.pin()}>
-          <OrbPreview turns={turns} runs={runs} activity={activity} onDecide={onDecide} />
+          <OrbPreview turns={turns} runs={runs} activity={activity} onDecide={onDecide} voiceState={voiceState} detail={detail} />
         </div>
       )}
     </div>
