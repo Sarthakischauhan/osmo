@@ -207,7 +207,7 @@ async def test_spotify_sign_in_uses_pkce_keeps_tokens_in_the_store_and_refreshes
     url = urlsplit(account.login_url("http://127.0.0.1:8787/api/music/spotify/callback"))
     query = {key: values[0] for key, values in parse_qs(url.query).items()}
     assert url.netloc == "accounts.spotify.com" and query["response_type"] == "code" and query["client_id"] == "client-123"
-    assert query["code_challenge_method"] == "S256" and "streaming" in query["scope"].split()
+    assert query["code_challenge_method"] == "S256" and "user-modify-playback-state" in query["scope"].split()
     verifier = account.pending[query["state"]].verifier
     assert query["code_challenge"] == base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode() == pkce_challenge(verifier)
 
@@ -296,12 +296,12 @@ async def test_music_play_prefers_connected_spotify_falls_back_to_files_and_cont
     now = MusicNow()
 
     result, [command] = await run("music_play", library, offline, now, query="the xx")
-    assert result["playing"] == "Angels by The xx" and result["source"] == "local" and result["queued"] == 1
+    assert result["requested"] == "Angels by The xx" and result["source"] == "local" and result["queued"] == 1
     assert command.action == "play" and [t.title for t in command.tracks] == ["Angels", "Crystalised"]
     result, commands = await run("music_play", library, offline, now, query="the xx", source="spotify")
-    assert commands == [] and "not connected" in result["notes"][0]
+    assert commands[0].action == "handoff" and commands[0].query == "the xx" and "not connected" in result["notes"][0]
     result, commands = await run("music_play", library, offline, now, query="nothing like this")
-    assert result["error"] == "nothing found to play" and commands == []
+    assert result["handoff"] == "spotify" and commands[0].action == "handoff"
 
     store = FileSecretStore(None)
     online = SpotifyAccount("client-123", CredentialStore(store), httpx.AsyncClient(transport=httpx.MockTransport(FakeSpotify())))
@@ -335,7 +335,7 @@ def test_the_voice_model_plays_music_in_the_app_and_hears_what_it_plays(grok: Fa
         call(grok, "music_play", {"query": "bonobo"}, "m1")
         command = next_event(ws, "music.command")
         assert command["action"] == "play" and command["tracks"][0]["title"] == "Kerala"
-        assert tool_output(grok)["playing"] == "Kerala by Bonobo"
+        assert tool_output(grok)["requested"] == "Kerala by Bonobo"
 
         # The app reports its player; the next status reads it.
         ws.send_text(json.dumps({"type": "music.state", "playing": True, "track": command["tracks"][0], "positionMs": 5000, "volume": 70}))
