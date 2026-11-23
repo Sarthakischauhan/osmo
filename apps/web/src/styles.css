@@ -704,3 +704,26 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-note-tags-add { padding:2px 8px; border:1px solid var(--border); border-radius:6px; font-size:11px; color:var(--muted-foreground); background:none; cursor:pointer; }
 .osmo-note-filter { max-width:150px; height:28px; font-size:12px; }
 .osmo-note-row-tags { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0; }
+
+/* Orb hover: compact transcript and continuously updating voice progress.
+   Uses existing monochrome tokens, not the full workspace chat layout. */
+.osmo-orb-transcript { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.osmo-orb-panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border); padding:2px 2px 9px; }
+.osmo-orb-panel-label { font-size:12px; font-weight:600; letter-spacing:.01em; }
+.osmo-orb-panel-meta, .osmo-orb-live-label { font-size:10px; color:var(--muted-foreground); }
+.osmo-orb-lines { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.osmo-orb-line { display:grid; grid-template-columns:38px minmax(0,1fr); gap:8px; align-items:start; }
+.osmo-orb-speaker { padding-top:2px; font-size:10px; font-weight:600; color:var(--muted-foreground); }
+.osmo-orb-line[data-role="assistant"] .osmo-orb-speaker { color:var(--foreground); }
+.osmo-orb-line p { margin:0; font-size:12px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--foreground); }
+.osmo-orb-line[data-role="user"] p { color:var(--muted-foreground); }
+.osmo-orb-empty { margin:0; font-size:12px; line-height:18px; color:var(--muted-foreground); }
+.osmo-orb-live { display:flex; flex-direction:column; gap:7px; padding:10px 11px; background:var(--surface-1); border:1px solid var(--border); border-radius:8px; }
+.osmo-orb-live-head { display:flex; align-items:center; gap:7px; min-width:0; font-size:11px; font-weight:600; }
+.osmo-orb-live-head > span:nth-child(2) { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.osmo-orb-live-label { margin-left:auto; text-transform:uppercase; letter-spacing:.08em; }
+.osmo-orb-live-text { margin:0; max-height:104px; overflow:auto; font-size:12px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted-foreground); }
+.osmo-orb-live-indicator { width:6px; height:6px; flex:none; border-radius:50%; background:var(--foreground); animation:osmo-orb-live-pulse 1.4s ease-in-out infinite; }
+.osmo-orb-caret { display:inline-block; width:4px; height:12px; margin-left:3px; vertical-align:-2px; background:var(--foreground); animation:osmo-orb-live-pulse .9s steps(1,end) infinite; }
+@keyframes osmo-orb-live-pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .osmo-orb-live-indicator, .osmo-orb-caret { animation:none; opacity:1; } }
