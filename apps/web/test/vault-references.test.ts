@@ -15,20 +15,20 @@ describe("note references", () => {
 
 
   it("parses inline and list YAML frontmatter tags", () => {
-    expect(frontmatterTags("---\\ntags: [osmo, agent, bug]\\nstatus: open\\n---\\n# Note")).toEqual(["osmo", "agent", "bug"]);
-    expect(frontmatterTags("---\\nstatus: open\\ntags:\\n  - voice\\n  - latency\\n---\\n# Note")).toEqual(["voice", "latency"]);
-    expect(frontmatterTags("# No frontmatter\\ntags: ignored")).toEqual([]);
+    expect(frontmatterTags("---\ntags: [osmo, agent, bug]\nstatus: open\n---\n# Note")).toEqual(["osmo", "agent", "bug"]);
+    expect(frontmatterTags("---\nstatus: open\ntags:\n  - voice\n  - latency\n---\n# Note")).toEqual(["voice", "latency"]);
+    expect(frontmatterTags("# No frontmatter\ntags: ignored")).toEqual([]);
   });
 
   it("updates tags without destroying other frontmatter fields or note content", () => {
-    const original = "---\\nstatus: doing\\ntags:\\n  - old\\n  - beta\\npriority: high\\n---\\n# Work\\nText";
+    const original = "---\nstatus: doing\ntags:\n  - old\n  - beta\npriority: high\n---\n# Work\nText";
     const updated = withFrontmatterTags(original, ["agent", "voice"]);
     expect(frontmatterTags(updated)).toEqual(["agent", "voice"]);
     expect(updated).toContain("status: doing");
     expect(updated).toContain("priority: high");
-    expect(updated).toContain("# Work\\nText");
+    expect(updated).toContain("# Work\nText");
     expect(updated).not.toContain("  - old");
-    expect(withFrontmatterTags("# Plain note", ["work"])).toBe("---\\ntags: [work]\\n---\\n# Plain note");
+    expect(withFrontmatterTags("# Plain note", ["work"])).toBe("---\ntags: [work]\n---\n# Plain note");
     expect(withFrontmatterTags(updated, [])).not.toContain("tags:");
   });
 
