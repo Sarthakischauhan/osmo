@@ -1,7 +1,7 @@
 import { FilePlus2, RotateCw, Search } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { MarkdownEditor } from "@/components/MarkdownEditor";
-import { type Note, type NoteEntry, type NoteHit, type VaultIssue, type VaultApi, type VaultInfo, notePath, noteReferences, snippetRuns, vaultApi } from "@/lib/vault";
+import { type Note, type NoteEntry, type NoteHit, type VaultApi, type VaultInfo, frontmatterTags, withFrontmatterTags, notePath, noteReferences, snippetRuns, vaultApi } from "@/lib/vault";
 
 export interface NotesViewProps {
   api?: VaultApi;
@@ -23,9 +23,8 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
   const [vault, setVault] = useState<string>();
   const [listed, setListed] = useState<Listed>({ kind: "notes", notes: [] });
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<"notes" | "issues">("notes");
-  const [issueFilter, setIssueFilter] = useState<"open" | "done" | "all">("open");
-  const [issues, setIssues] = useState<VaultIssue[]>([]);
+  const [selectedTag, setSelectedTag] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
   const [note, setNote] = useState<Note>();
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -45,13 +44,12 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
   const refresh = useCallback(async () => {
     if (vault === undefined) return;
     try {
-      if (mode === "issues") setIssues(await api.issues(vault, issueFilter));
-      else setListed(query.trim() ? { kind: "hits", hits: await api.search(vault, query.trim()) } : { kind: "notes", notes: await api.notes(vault) });
+      setListed(query.trim() ? { kind: "hits", hits: await api.search(vault, query.trim()) } : { kind: "notes", notes: await api.notes(vault) });
       setError(undefined);
     } catch (cause) {
       fail(cause);
     }
-  }, [api, vault, query, mode, issueFilter]);
+  }, [api, vault, query]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), query ? 150 : 0);
@@ -112,31 +110,40 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
     }
   };
 
-  const rows = listed.kind === "notes" ? listed.notes : listed.hits;
+  const allRows = listed.kind === "notes" ? listed.notes : listed.hits;
+  const tags = [...new Set(allRows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
+  const rows = selectedTag ? allRows.filter((row) => row.tags.includes(selectedTag)) : allRows;
+  const editTags = (next: string[]) => setDraft((current) => withFrontmatterTags(current, next));
+  const addTag = () => {
+    const tag = tagDraft.trim().replace(/^#/, "");
+    if (!/^[\p{L}\p{N}_/-]{1,64}$/u.test(tag)) {
+      if (tag) setError("Tags can contain letters, numbers, /, - and _ (up to 64 characters).");
+      return;
+    }
+    editTags([...frontmatterTags(draft), tag]);
+    setTagDraft("");
+    setError(undefined);
+  };
 
   return (
     <div className="osmo-notes">
       <header className="osmo-view-head">
         <h1>Notes</h1>
-        <div className="osmo-notes-modes" role="group" aria-label="Notes view">
-          <button type="button" aria-pressed={mode === "notes"} data-active={mode === "notes"} onClick={() => setMode("notes")}>All notes</button>
-          <button type="button" aria-pressed={mode === "issues"} data-active={mode === "issues"} onClick={() => setMode("issues")}>Issues</button>
-        </div>
         {vaults.length > 1 && (
           <select className="osmo-view-select" aria-label="Vault" value={vault} onChange={(event) => { setVault(event.target.value); setNote(undefined); }}>
             {vaults.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
           </select>
         )}
         <div className="osmo-view-tools">
-          {mode === "issues" && (
-            <select className="osmo-view-select" aria-label="Issue status" value={issueFilter} onChange={(event) => setIssueFilter(event.target.value as "open" | "done" | "all")}>
-              <option value="open">Open</option><option value="done">Done</option><option value="all">All</option>
-            </select>
-          )}
-          {mode === "notes" && <label className="osmo-notes-search">
+          <select className="osmo-view-select osmo-note-filter" aria-label="Filter notes by tag" value={selectedTag}
+            onChange={(event) => setSelectedTag(event.target.value)}>
+            <option value="">All tags</option>
+            {tags.map((tag) => <option key={tag} value={tag}>#{tag}</option>)}
+          </select>
+          <label className="osmo-notes-search">
             <Search size={14} aria-hidden />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes" aria-label="Search notes" />
-          </label>}
+          </label>
           <button type="button" className="osmo-btn osmo-btn-ghost osmo-btn-sm" onClick={() => setCreating((on) => !on)}>
             <FilePlus2 size={14} aria-hidden /> New note
           </button>
@@ -150,28 +157,9 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
       )}
       {error && <p className="osmo-notes-error" role="alert">{error}</p>}
       <div className="osmo-notes-pane">
-        <nav className="osmo-notes-list" aria-label={mode === "issues" ? "Issues" : listed.kind === "hits" ? "Search results" : "Notes"}>
-          {mode === "issues" ? (
-            <>
-              <p className="osmo-notes-section-caption">Markdown tasks · {issues.length} shown</p>
-              {issues.length === 0 && <p className="osmo-notes-empty">No matching issues. Add - [ ] to a note or a status: todo field.</p>}
-              {issues.map((issue, index) => (
-                <button key={`${issue.vault}/${issue.path}/${issue.line ?? 0}/${index}`} type="button"
-                  className="osmo-notes-row osmo-issue-row" data-active={note?.path === issue.path}
-                  onClick={() => void open(issue.path)}>
-                  <span className="osmo-issue-row-main">
-                    <span className="osmo-issue-marker" data-done={issue.status === "done"}>{issue.status === "done" ? "✓" : "○"}</span>
-                    <span className="osmo-notes-row-title">{issue.task}</span>
-                  </span>
-                  <span className="osmo-notes-row-meta">
-                    <span className="mono">{issue.path}</span>
-                    <span>{issue.priority ?? issue.status}</span>
-                  </span>
-                </button>
-              ))}
-            </>
-          ) : <>
-          {rows.length === 0 && <p className="osmo-notes-empty">{listed.kind === "hits" ? "No notes match." : "No notes yet. Osmo keeps them as markdown files in your vault folder."}</p>}
+        <nav className="osmo-notes-list" aria-label={listed.kind === "hits" ? "Search results" : "Notes"}>
+
+          {rows.length === 0 && <p className="osmo-notes-empty">{selectedTag ? "No notes with that tag." : listed.kind === "hits" ? "No notes match." : "No notes yet. Osmo keeps them as markdown files in your vault folder."}</p>
           {rows.map((row) => (
             <button
               key={row.path}
@@ -181,6 +169,11 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
               onClick={() => void open(row.path)}
             >
               <span className="osmo-notes-row-title">{row.title}</span>
+              {row.tags.length > 0 && (
+                <span className="osmo-note-row-tags">
+                  {row.tags.slice(0, 3).map((tag) => <span key={tag} className="osmo-note-tag">#{tag}</span>)}
+                </span>
+              )}
               {"snippet" in row ? (
                 <span className="osmo-notes-row-snippet">
                   {snippetRuns(row.snippet).map((run, i) => (run.hit ? <mark key={i}>{run.text}</mark> : <span key={i}>{run.text}</span>))}
@@ -193,7 +186,6 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
               )}
             </button>
           ))}
-          </>}
         </nav>
         <section className="osmo-notes-doc" aria-label="Note">
           {note === undefined ? (
@@ -209,6 +201,16 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
                 <button type="button" className="osmo-btn osmo-btn-primary osmo-btn-sm" disabled={!dirty || saving} onClick={() => void save()}>
                   Save <kbd>⌘S</kbd>
                 </button>
+              </div>
+              <div className="osmo-note-tags" aria-label="Note tags">
+                {frontmatterTags(draft).map((tag) => (
+                  <button key={tag} type="button" className="osmo-note-tag" title="Remove tag" aria-label={`Remove tag ${tag}`}
+                    onClick={() => editTags(frontmatterTags(draft).filter((item) => item !== tag))}>#{tag} ×</button>
+                ))}
+                <input className="osmo-note-tags-input" aria-label="New tag" placeholder="Add a tag…"
+                  value={tagDraft} onChange={(event) => setTagDraft(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} />
+                <button type="button" className="osmo-note-tags-add" onClick={addTag} disabled={!tagDraft.trim()}>Add tag</button>
               </div>
               <MarkdownEditor docKey={`${note.vault}/${note.path}@${note.modified}`} value={note.text} onChange={setDraft} onSave={() => void save()} />
               {noteReferences(draft).length > 0 && (
