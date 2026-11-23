@@ -47,6 +47,7 @@ export interface FloatingOrbProps {
 export function FloatingOrb({ mode, voiceState, detail, outputLevel, inputLevel, runs, turns, activity, theme, onDecide, onTalk, onExpand, placement, onBoxHeight, onMove }: FloatingOrbProps) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const reportedHeight = useRef<number>(-1);
   const hover = useRef<HoverPanel<number>>();
   hover.current ??= new HoverPanel<number>(windowTimers, setOpen);
   const talk = useRef(onTalk);
@@ -75,11 +76,12 @@ export function FloatingOrb({ mode, voiceState, detail, outputLevel, inputLevel,
   useLayoutEffect(() => {
     const element = box.current;
     if (!hasBox || !element) {
-      onBoxHeight(0);
+      if (reportedHeight.current !== 0) { reportedHeight.current = 0; onBoxHeight(0); }
       return;
     }
     const report = () => {
-      onBoxHeight(Math.min(400, element.offsetHeight));
+      const height = Math.min(400, element.offsetHeight);
+      if (height !== reportedHeight.current) { reportedHeight.current = height; onBoxHeight(height); }
     };
     report();
     const observer = new ResizeObserver(report);
