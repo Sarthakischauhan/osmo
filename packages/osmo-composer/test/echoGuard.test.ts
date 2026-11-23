@@ -26,6 +26,30 @@ describe("echo guard", () => {
     expect(isUserSpeech(0.05, 0.05, { ...ECHO_GUARD, ratio: 2 })).toBe(false);
   });
 
+  it("requires Silero evidence for interruption when the local detector is ready", () => {
+    const guard = new EchoGuard(RATE);
+    expect(guard.push(frame(0.4), true, 0.1, 0, false, false).send).toEqual([]);
+    const said = frame(0.06);
+    const result = guard.push(said, true, 0.1, 100, false, true);
+    expect(result.bargeIn).toBe(true);
+    expect(result.send.at(-1)).toBe(said);
+  });
+
+  it("does not gate ordinary user speech with Silero when Osmo is silent", () => {
+    const guard = new EchoGuard(RATE);
+    const quiet = frame(0.002);
+    expect(guard.push(quiet, false, 0, 0, false, false).send).toEqual([quiet]);
+  });
+
+  it("lets Silero-positive voice through when music is playing", () => {
+    const guard = new EchoGuard(RATE);
+    const quiet = frame(0.004);
+    expect(new Int16Array(guard.push(quiet, false, 0, 0, true, false).send[0]!).every(v => v === 0)).toBe(true);
+    const words = frame(0.02);
+    const result = guard.push(words, false, 0, 100, true, true);
+    expect(result.send.at(-1)).toBe(words);
+  });
+
   it("passes frames straight through while Osmo is silent", () => {
     const guard = new EchoGuard(RATE);
     const quiet = frame(0.001);

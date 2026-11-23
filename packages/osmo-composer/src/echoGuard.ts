@@ -77,7 +77,13 @@ export class EchoGuard {
    * One 100 ms PCM16 frame from the microphone, with whether Osmo's voice is playing, its output RMS right now,
    * the time (ms, any monotonic clock), and whether the music player is playing.
    */
-  push(frame: ArrayBuffer, playing: boolean, output: number, now: number, music = false): GuardStep {
+  push(frame: ArrayBuffer, playing: boolean, output: number, now: number, music = false, sileroSpeech?: boolean): GuardStep {
+    // Silero only arbitrates local interruption and music suppression. The provider
+    // still receives continuous audio while Osmo is otherwise silent.
+    if (!playing && sileroSpeech !== undefined) {
+      if (!music) return this.pass(frame);
+      return this.overMusicSilero(frame, now, sileroSpeech);
+    }
     // Never gate audio after playback has stopped: the first quiet words of a new turn must reach provider VAD.
     const guarded = playing;
     if (!guarded && music) return this.overMusic(frame, now);
@@ -85,13 +91,38 @@ export class EchoGuard {
       if (!playing) this.open = false;
       return this.pass(frame);
     }
-    const tripped = this.judge(frame, playing ? output : 0, this.options);
+    // Silero-positive speech is the primary voice detector while playback is active;
+    // keep a conservative acoustic-level check against assistant echo. When Silero is
+    // unavailable, retain the original RMS fallback rather than stopping the call.
+    const options = sileroSpeech === undefined
+      ? this.options
+      : sileroSpeech
+        ? { ...this.options, floor: 0.006, ratio: 0.20, blocks: 1 }
+        : { ...this.options, floor: Number.POSITIVE_INFINITY };
+    const tripped = this.judge(frame, playing ? output : 0, options);
     if (!tripped) return { send: [], bargeIn: false };
     const send = this.held;
     this.held = [];
     this.run = 0;
     this.open = playing;
     return { send, bargeIn: playing };
+  }
+
+  /** Silero music gate: preserve pre-roll and send silence for non-speech music. */
+  private overMusicSilero(frame: ArrayBuffer, now: number, speaking: boolean): GuardStep {
+    this.open = false;
+    if (speaking) {
+      this.heardOverMusic = now;
+      const send = [...this.held, frame];
+      this.held = [];
+      return { send, bargeIn: false };
+    }
+    if (now - this.heardOverMusic < this.options.musicHangMs) {
+      return { send: [frame], bargeIn: false };
+    }
+    this.held.push(frame);
+    if (this.held.length > this.options.preroll) this.held.shift();
+    return { send: [new ArrayBuffer(frame.byteLength)], bargeIn: false };
   }
 
   /** Music, no Osmo: the user's speech goes out, everything else as silence. */
