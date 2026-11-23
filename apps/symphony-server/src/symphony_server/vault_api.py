@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from symphony_server.local_access import require_app
+from symphony_server.reference_tools import issues
 from symphony_server.vault_index import Note, NoteEntry, NoteHit, VaultIndex
 from symphony_server.vault_paths import VaultError
 
@@ -80,6 +81,15 @@ def create_vault_router(index: VaultIndex, *, writes_approved: bool) -> APIRoute
         await index.ready.wait()
         try:
             return SearchResults(results=await asyncio.to_thread(index.search, q, vault, limit))
+        except VaultError as exc:
+            raise refused(exc) from exc
+
+    @router.get("/issues")
+    async def list_issues(vault: str | None = None, status: Literal["open", "done", "all"] = "open", limit: int = Query(100, ge=1, le=100)) -> dict[str, list[dict[str, object]]]:
+        """Read-only issue tracker view over markdown checkboxes and note statuses."""
+        await index.ready.wait()
+        try:
+            return {"issues": await asyncio.to_thread(issues, index, vault, status, limit)}
         except VaultError as exc:
             raise refused(exc) from exc
 
