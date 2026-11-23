@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
@@ -11,9 +12,21 @@ const http = process.env.SYMPHONY_HTTP_URL ?? "http://127.0.0.1:8787";
  * Development serves the same assets from node_modules on the same origin.
  */
 function localVadAssets(): Plugin {
-  const modules = fileURLToPath(new URL("../../node_modules/", import.meta.url));
-  const vad = path.join(modules, "@ricky0123/vad-web/dist");
-  const ort = path.join(modules, "onnxruntime-web/dist");
+  // Bun can install dependencies under a workspace's node_modules instead of hoisting.
+  // Resolve from the composer package that actually declares these dependencies.
+  const fromComposer = createRequire(fileURLToPath(new URL("../../packages/osmo-composer/package.json", import.meta.url)));
+  function assetDir(module: string, test: (name: string) => boolean): string {
+    let directory = path.dirname(fromComposer.resolve(module));
+    for (let i = 0; i < 5; i++) {
+      try {
+        if (readdirSync(directory).some(test)) return directory;
+      } catch { /* try its parent */ }
+      directory = path.dirname(directory);
+    }
+    throw new Error("Could not find bundled VAD assets for " + module);
+  }
+  const vad = assetDir("@ricky0123/vad-web", name => name === "silero_vad_v5.onnx");
+  const ort = assetDir("onnxruntime-web", name => /^ort.*\.wasm$/.test(name));
   const assets = new Map<string, string>();
   assets.set("silero_vad_v5.onnx", path.join(vad, "silero_vad_v5.onnx"));
   assets.set("vad.worklet.bundle.min.js", path.join(vad, "vad.worklet.bundle.min.js"));
