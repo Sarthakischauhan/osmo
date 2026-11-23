@@ -124,7 +124,7 @@ class MusicControlTool(Tool):
         if command.action == "volume" and command.volume is None:
             return json.dumps({"error": "volume needs a value from 0 to 100"})
         await sink.emit(OSMO_MUSIC, MusicCommand(action=command.action, volume=command.volume).model_dump(mode="json"))
-        return json.dumps({"done": command.action, **({"volume": command.volume} if command.action == "volume" else {})})
+        return json.dumps({"requested": command.action, "status": "pending_player_confirmation", **({"volume": command.volume} if command.action == "volume" else {})})
 
 
 class MusicStatusTool(Tool):
