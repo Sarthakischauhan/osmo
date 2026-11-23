@@ -130,7 +130,7 @@ describe("the mini player", () => {
   });
 
   it("says why Spotify cannot play in plain words", () => {
-    expect(spotifyProblem("initialization_error", "no EME")).toMatch(/Widevine/);
+    expect(spotifyProblem("initialization_error", "no device")).toMatch(/Spotify app/);
     expect(spotifyProblem("authentication_error", "")).toMatch(/connect Spotify again/);
   });
 });
