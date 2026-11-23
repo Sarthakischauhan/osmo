@@ -1,4 +1,4 @@
-import { AUDIO_SAMPLE_RATE, EchoGuard, MicCapture, PcmPlayer } from "@osmo/osmo-composer";
+import { AUDIO_SAMPLE_RATE, EchoGuard, MicCapture, PcmPlayer, SileroVad } from "@osmo/osmo-composer";
 import type { AudioBridge } from "./audioBridge";
 
 /** What the hidden audio page does for a call: capture the microphone, play what Osmo says, and drop it on barge-in. */
@@ -22,6 +22,7 @@ export function browserRuntime(): AudioRuntime {
   const mic = new MicCapture(context);
   const player = new PcmPlayer(context, () => undefined);
   const guard = new EchoGuard(AUDIO_SAMPLE_RATE);
+  const silero = new SileroVad();
   let music = false;
   const debugAudio = new URLSearchParams(window.location.search).has("debugAudio");
   let captured = 0;
@@ -32,7 +33,8 @@ export function browserRuntime(): AudioRuntime {
     async start(onFrame, onBargeIn) {
       await context.resume();
       await mic.start((frame) => {
-        const step = guard.push(frame, player.playing, player.rms(), performance.now(), music);
+        const now = performance.now();
+        const step = guard.push(frame, player.playing, player.rms(), now, music, silero.ready ? silero.speaking(now) : undefined);
         captured++;
         forwarded += step.send.length;
         if (step.send.length === 0) guarded++;
@@ -48,8 +50,11 @@ export function browserRuntime(): AudioRuntime {
         }
         for (const held of step.send) onFrame(held);
       });
+      const stream = mic.mediaStream;
+      if (stream) void silero.start(stream);
     },
     stop() {
+      silero.stop();
       mic.stop();
       player.flush();
       void context.close();
