@@ -65,10 +65,12 @@ describe("the orb's preview box", () => {
     expect(html.indexOf("Looking at three shops now")).toBeLessThan(html.indexOf("task r1"));
   });
 
-  it("renders the lines as the workspace does: the user's bubble and the assistant's avatar", () => {
-    expect(html).toContain('class="turn user"');
-    expect(html).toContain('class="turn assistant"');
-    expect(html).toContain('class="avatar"');
+  it("renders a speaker-labelled compact transcript rather than full-size chat bubbles", () => {
+    expect(html).toContain('class="osmo-orb-line" data-role="user"');
+    expect(html).toContain('class="osmo-orb-line" data-role="assistant"');
+    expect(html).toContain("You");
+    expect(html).toContain("Osmo");
+    expect(html).not.toContain('class="avatar"');
   });
 
   it("keeps Approve / Deny, once, inside the waiting agent's entry", () => {
