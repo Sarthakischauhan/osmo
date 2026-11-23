@@ -343,7 +343,7 @@ async def test_music_play_prefers_connected_spotify_falls_back_to_files_and_cont
     assert command.tracks[0].source == "local"
 
     result, [command] = await run("music_control", library, online, now, action="volume", volume=30)
-    assert result == {"done": "volume", "volume": 30} and command.action == "volume" and command.volume == 30
+    assert result == {"requested": "volume", "status": "pending_player_confirmation", "volume": 30} and command.action == "volume" and command.volume == 30
     assert (await run("music_control", library, online, now, action="volume"))[0]["error"].startswith("volume needs")
     assert (await run("music_control", library, online, now, action="next"))[1][0].action == "next"
 
