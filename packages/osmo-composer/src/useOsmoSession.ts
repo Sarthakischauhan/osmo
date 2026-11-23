@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MicCapture, PcmPlayer } from "./audio";
 import { OsmoClient } from "./client";
 import { EchoGuard } from "./echoGuard";
+import { SileroVad } from "./sileroVad";
 import { AUDIO_SAMPLE_RATE, BARGE_IN, type BrowserInput, type Effort, type MusicState, type OsmoState, type ServerEvent, type VoiceModel, type VoiceSelection } from "./protocol";
 
 export type OsmoConnection = "disconnected" | "connecting" | "connected";
@@ -57,6 +58,7 @@ interface Runtime {
   client: OsmoClient;
   context: AudioContext;
   mic: MicCapture;
+  silero: SileroVad;
   player: PcmPlayer;
   preview: PcmPlayer;
 }
@@ -87,6 +89,7 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
     const current = runtime.current;
     runtime.current = null;
     if (!current) return;
+    current.silero.stop();
     current.mic.stop();
     current.player.flush();
     current.preview.flush();
@@ -135,7 +138,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       },
     });
     const mic = new MicCapture(context);
-    runtime.current = { client, context, mic, player, preview };
+    const silero = new SileroVad();
+    runtime.current = { client, context, mic, silero, player, preview };
     try {
       // Mic and socket start in parallel, as the xAI latency guide recommends.
       await Promise.all([client.connect(), context.resume()]);
@@ -150,7 +154,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
       let bargeIns = 0;
       await mic.start((frame) => {
         if (previewingRef.current) return;
-        const step = guard.push(frame, player.playing, player.rms(), performance.now(), musicPlaying.current);
+        const now = performance.now();
+        const step = guard.push(frame, player.playing, player.rms(), now, musicPlaying.current, silero.ready ? silero.speaking(now) : undefined);
         captured++;
         forwarded += step.send.length;
         if (step.send.length === 0) guarded++;
@@ -164,6 +169,8 @@ export function useOsmoSession({ url, voice, model, effort, threadId, onEvent }:
         }
         for (const held of step.send) client.sendAudio(held);
       });
+      const stream = mic.mediaStream;
+      if (stream) void silero.start(stream);
       setConnection("connected");
       setStartedAt(Date.now());
     } catch (cause) {
