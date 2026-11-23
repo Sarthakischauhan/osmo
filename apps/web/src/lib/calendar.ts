@@ -91,6 +91,9 @@ export function calendarApi(fetcher: Fetcher = browserFetch) {
       const schema = z.object({ occurrences: z.array(occurrenceSchema), events: z.array(calendarEventSchema), ticks: z.array(tickSchema) });
       return read(await fetcher(`/api/calendar/events?${query}`), schema);
     },
+    async event(id: string): Promise<CalendarEvent> {
+      return read(await fetcher("/api/calendar/events/" + encodeURIComponent(id)), calendarEventSchema);
+    },
     async addEvent(event: Omit<CalendarEvent, "id" | "uid">): Promise<CalendarEvent> {
       return read(await fetcher("/api/calendar/events", json("POST", event)), calendarEventSchema);
     },
