@@ -1,8 +1,7 @@
-"""The user's Spotify: their own Spotify app (OSMO_SPOTIFY_CLIENT_ID), signed in with authorization code + PKCE.
+"""Spotify OAuth PKCE, search and Connect control of the user's existing Spotify device.
 
-It is a public client, so there is no secret. The tokens live in the encrypted credential store; the app gets a
-short-lived access token for the Web Playback SDK, and Osmo searches the Web API with it. Spotify playback in the
-app needs Widevine (castLabs ECS in the desktop app) and a Premium account.
+Tokens stay in the encrypted credential store and never reach the browser renderer.
+Connect playback needs Spotify Premium and a controllable client device.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API = "https://api.spotify.com/v1"
 # What the Web Playback SDK and playback control need, and nothing else.
-SPOTIFY_SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state"
+SPOTIFY_SCOPES = "user-read-playback-state user-modify-playback-state"
 SPOTIFY_CREDENTIAL = "spotify"
 # An access token this close to expiry is refreshed before it is handed out.
 TOKEN_MARGIN_S = 60.0
@@ -230,3 +229,47 @@ class SpotifyAccount:
         if response.status_code != 200:
             raise SpotifyError(f"Spotify search failed (HTTP {response.status_code})")
         return [item.track() for item in SpotifySearch.model_validate(response.json()).tracks.items]
+
+    async def playback(self, action: str, *, uri: str | None = None, volume: int | None = None) -> None:
+        """Control the user's existing Spotify Connect device, never create an Osmo DRM player."""
+        if action not in {"play", "pause", "resume", "next", "previous", "volume"}:
+            raise SpotifyError("unknown Spotify playback action")
+        token, _ = await self.access_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        # A Spotify client must already be open. A restricted or missing device cannot be controlled.
+        try:
+            devices_response = await self.http.get(f"{SPOTIFY_API}/me/player/devices", headers=headers)
+        except httpx.HTTPError as exc:
+            raise SpotifyError(f"could not reach Spotify: {type(exc).__name__}") from None
+        if devices_response.status_code != 200:
+            raise SpotifyError(f"could not retrieve Spotify devices (HTTP {devices_response.status_code})")
+        devices = devices_response.json().get("devices", [])
+        device = next((d for d in devices if d.get("is_active") and not d.get("is_restricted")), None)
+        if device is None:
+            device = next((d for d in devices if d.get("id") and not d.get("is_restricted")), None)
+        if device is None or not device.get("id"):
+            raise SpotifyError("Open Spotify on your computer or phone, then retry playback in Osmo")
+        device_id = str(device["id"])
+        endpoints = {
+            "play": ("PUT", "/me/player/play"),
+            "resume": ("PUT", "/me/player/play"),
+            "pause": ("PUT", "/me/player/pause"),
+            "next": ("POST", "/me/player/next"),
+            "previous": ("POST", "/me/player/previous"),
+            "volume": ("PUT", "/me/player/volume"),
+        }
+        method, endpoint = endpoints[action]
+        params: dict[str, str] = {"device_id": device_id}
+        if volume is not None and action == "volume":
+            params["volume_percent"] = str(max(0, min(100, volume)))
+        body = {"uris": [uri]} if action == "play" and uri else None
+        try:
+            response = await self.http.request(
+                method, f"{SPOTIFY_API}{endpoint}", params=params, headers=headers, json=body
+            )
+        except httpx.HTTPError as exc:
+            raise SpotifyError(f"could not control Spotify: {type(exc).__name__}") from None
+        if response.status_code not in (200, 202, 204):
+            if response.status_code in (403, 404):
+                raise SpotifyError("Spotify playback needs Premium and an available Spotify device")
+            raise SpotifyError(f"Spotify playback failed (HTTP {response.status_code})")

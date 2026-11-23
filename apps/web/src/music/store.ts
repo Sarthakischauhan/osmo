@@ -23,6 +23,8 @@ export interface MusicEngine {
   setGain(gain: number): void;
   /** Where playback is, ms. */
   position(): number;
+  /** Spotify Connect can set device volume without ducking via the renderer. */
+  setVolume?(volume: number): void;
   /** Set once by the player: the track ended (go on), or it could not play (say why). */
   listen(handlers: { ended: () => void; failed: (message: string) => void }): void;
 }
@@ -40,6 +42,7 @@ export interface MusicSnapshot {
   /** What the engine plays at now, 0..1 (volume × ducking, mid-ramp while it moves). */
   gain: number;
   error: string | undefined;
+  handoffQuery?: string;
 }
 
 interface Timers {
@@ -57,6 +60,7 @@ export class MusicPlayer {
   private readonly listeners = new Set<() => void>();
   private readonly engines = new Map<Track["source"], MusicEngine>();
   private ramp: number | undefined;
+  private loadGeneration = 0;
 
   constructor(private readonly makeEngine: EngineFactory, private readonly timers: Timers = browserTimers) {}
 
@@ -90,20 +94,34 @@ export class MusicPlayer {
       case "volume":
         if (command.volume != null) this.setVolume(command.volume);
         return;
+      case "handoff":
+        this.handoff(command.query ?? "music");
+        return;
     }
   }
 
   async playQueue(queue: readonly Track[], index: number): Promise<void> {
     const track = queue[index];
     if (!track) return;
+    const generation = ++this.loadGeneration;
     const previous = this.snapshot.track;
-    if (previous && previous.source !== track.source) await this.engine(previous.source).pause();
-    this.set({ queue, index, track, playing: true, error: undefined });
+    if (previous && previous.source !== track.source) {
+      try { await this.engine(previous.source).pause(); }
+      catch { /* Switching source must not leave the new request stuck. */ }
+    }
+    if (generation !== this.loadGeneration) return;
+    this.set({ queue, index, track, playing: false, error: undefined, handoffQuery: undefined });
     try {
       await this.engine(track.source).load(track, this.snapshot.gain);
+      if (generation === this.loadGeneration) this.set({ playing: true });
     } catch (cause) {
-      this.fail(cause instanceof Error ? cause.message : String(cause));
+      if (generation === this.loadGeneration) this.fail(cause instanceof Error ? cause.message : String(cause));
     }
+  }
+
+  handoff(query: string): void {
+    ++this.loadGeneration;
+    this.set({ queue: [], index: 0, track: undefined, playing: false, error: undefined, handoffQuery: query.trim().slice(0, 200) || "music" });
   }
 
   async toggle(): Promise<void> {
@@ -114,15 +132,17 @@ export class MusicPlayer {
     const { track } = this.snapshot;
     if (!track) return;
     this.set({ playing: false });
-    await this.engine(track.source).pause();
+    try { await this.engine(track.source).pause(); }
+    catch (cause) { this.fail(cause instanceof Error ? cause.message : String(cause)); }
   }
 
   async resume(): Promise<void> {
     const { track } = this.snapshot;
     if (!track) return;
-    this.set({ playing: true, error: undefined });
+    this.set({ playing: false, error: undefined });
     try {
       await this.engine(track.source).play();
+      this.set({ playing: true });
     } catch (cause) {
       this.fail(cause instanceof Error ? cause.message : String(cause));
     }
@@ -141,14 +161,18 @@ export class MusicPlayer {
   setVolume(volume: number): void {
     const clamped = Math.round(Math.min(100, Math.max(0, volume)));
     this.set({ volume: clamped });
-    this.rampTo(this.target(), DUCK_UP_MS);
+    if (this.snapshot.track?.source === "spotify") {
+      this.engine("spotify").setVolume?.(clamped);
+      this.set({ gain: clamped / 100 });
+    } else this.rampTo(this.target(), DUCK_UP_MS);
   }
 
   /** Osmo started or stopped speaking: dip the music under its voice, then bring it back. */
   duck(on: boolean): void {
     if (on === this.snapshot.ducked) return;
     this.set({ ducked: on });
-    this.rampTo(this.target(), on ? DUCK_DOWN_MS : DUCK_UP_MS);
+    // No control over external Spotify audio gain: avoid rapid device-volume calls.
+    if (this.snapshot.track?.source !== "spotify") this.rampTo(this.target(), on ? DUCK_DOWN_MS : DUCK_UP_MS);
   }
 
   private target(): number {

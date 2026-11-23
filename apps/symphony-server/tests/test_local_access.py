@@ -95,16 +95,13 @@ def test_a_cross_site_page_cannot_open_the_voice_socket(tmp_path: Path) -> None:
             pass
 
 
-def test_the_spotify_token_is_for_the_desktop_app_only() -> None:
-    # Re-review N2: without the per-launch token any local process could forge Sec-Fetch-Site, so nothing gets it.
+def test_spotify_access_tokens_are_never_exposed_to_the_renderer() -> None:
+    # Spotify Connect commands now run on the server. No browser route returns bearer tokens.
     with make_client(Settings()) as client:
-        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "same-origin"}).status_code == 403
-        assert client.get("/api/music/spotify/token", headers={"origin": "http://127.0.0.1:8787"}).status_code == 403
-        assert client.get("/api/music/spotify/token").status_code == 403
+        assert client.get("/api/music/spotify/token").status_code == 404
     with make_client(Settings(app_token=TOKEN)) as client:
-        assert client.get("/api/music/spotify/token", headers={"sec-fetch-site": "same-origin"}).status_code == 401
-        # Spotify is not connected, so the app (with the token) gets 409.
-        assert client.get("/api/music/spotify/token", headers={"x-osmo-desktop-token": TOKEN}).status_code == 409
+        assert client.get("/api/music/spotify/token").status_code == 401
+        assert client.get("/api/music/spotify/token", headers={"x-osmo-desktop-token": TOKEN}).status_code == 404
 
 
 def test_the_origin_must_be_the_servers_own_scheme_host_and_port(tmp_path: Path) -> None:

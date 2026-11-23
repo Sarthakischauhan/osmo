@@ -1,13 +1,8 @@
-"""Music: the user's own audio files and their Spotify, played by the app and driven by the voice model.
+"""Music tools, local file playback, Spotify Connect controls and Spotify search handoff.
 
-Playback happens in the app (the sidebar player): local files stream from `GET /api/music/local/{id}` into an
-audio element, and Spotify plays through its Web Playback SDK, which needs Widevine (the desktop app runs on
-castLabs ECS for it; Chrome has it built in). The server finds what to play and tells the app: the voice tools
-`music_play` and `music_control` send a `music.command` event, and the app reports what it is playing back with
-`music.state`, which `MusicNow` keeps for `music_status`. Osmo ducks the music while it speaks (the app does it).
-
-The local files are `music_library.LocalLibrary`; the Spotify sign-in is `spotify.SpotifyAccount`. This module has
-the tools and the `/api/music` routes over both.
+Local files play in Osmo. Spotify runs in the user's own Spotify client (no DRM SDK);
+Osmo issues commands through its server while tokens stay server-side. Without a connected
+account or available catalog result, the app offers a clickable Spotify search URL.
 """
 
 from __future__ import annotations
@@ -19,11 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core_harness import EventSink, Tool
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from symphony_server.local_access import require_app
 from symphony_server.music_library import MEDIA_TYPES, SEARCH_LIMIT_MAX, LocalLibrary, art_of
 from symphony_server.protocol import MusicCommand, MusicState, Track
 from symphony_server.spotify import SpotifyAccount, SpotifyError
@@ -71,7 +65,7 @@ class MusicPlayTool(Tool):
     def __init__(self, library: LocalLibrary, spotify: SpotifyAccount) -> None:
         super().__init__(
             name="music_play",
-            description="Find music and play it in the Osmo app (Spotify when connected, or the user's own files). Say what is playing in one short line.",
+            description="Search music and request playback in Osmo; if Spotify is unavailable, offer a Spotify search link. Never claim playback started until confirmed by the player.",
             parameters=PlayArgs.model_json_schema(),
         )
         self.library, self.spotify = library, spotify
@@ -84,10 +78,13 @@ class MusicPlayTool(Tool):
             return json.dumps({"error": str(exc)})
         found, notes = await self.find(command)
         if not found:
+            if command.source != "local":
+                await sink.emit(OSMO_MUSIC, MusicCommand(action="handoff", query=command.query).model_dump(mode="json"))
+                return json.dumps({"handoff": "spotify", "query": command.query, "message": "Open Spotify from the music player to find this. Playback has not started.", "notes": notes})
             return json.dumps({"error": "nothing found to play", "notes": notes})
         tracks = found[: PLAY_QUEUE + 1]
         await sink.emit(OSMO_MUSIC, MusicCommand(action="play", tracks=tracks).model_dump(mode="json"))
-        return json.dumps({"playing": tracks[0].label(), "source": tracks[0].source, "queued": len(tracks) - 1, "notes": notes})
+        return json.dumps({"requested": tracks[0].label(), "source": tracks[0].source, "queued": len(tracks) - 1, "status": "pending_player_confirmation", "notes": notes})
 
     async def find(self, command: PlayArgs) -> tuple[list[Track], list[str]]:
         """The tracks for a request, and notes on the sources that could not be searched."""
@@ -127,7 +124,7 @@ class MusicControlTool(Tool):
         if command.action == "volume" and command.volume is None:
             return json.dumps({"error": "volume needs a value from 0 to 100"})
         await sink.emit(OSMO_MUSIC, MusicCommand(action=command.action, volume=command.volume).model_dump(mode="json"))
-        return json.dumps({"done": command.action, **({"volume": command.volume} if command.action == "volume" else {})})
+        return json.dumps({"requested": command.action, "status": "pending_player_confirmation", **({"volume": command.volume} if command.action == "volume" else {})})
 
 
 class MusicStatusTool(Tool):
@@ -183,6 +180,14 @@ class LoginResponse(BaseModel):
     """Where to send the user to connect Spotify."""
 
     url: str
+
+
+class SpotifyPlaybackRequest(BaseModel):
+    """Validated command to the user's existing Spotify Connect device."""
+
+    action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+    uri: str | None = Field(default=None, max_length=100)
+    volume: int | None = Field(default=None, ge=0, le=100)
 
 
 CALLBACK_PAGE = """<!doctype html><meta charset="utf-8"><title>Osmo</title>
@@ -260,15 +265,18 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         return HTMLResponse(CALLBACK_PAGE.format(message="Spotify is connected."))
 
-    @router.get("/spotify/token", dependencies=[Depends(require_app)])
-    async def token() -> dict[str, Any]:
-        """A fresh Spotify access token for the app's player, and nothing else (local_access.require_app)."""
+    @router.post("/spotify/playback")
+    async def playback(command: SpotifyPlaybackRequest) -> dict[str, bool]:
+        """Control an already-open Spotify client. Tokens stay entirely server-side."""
+        if command.action == "play" and (not command.uri or not command.uri.startswith("spotify:track:")):
+            raise HTTPException(422, "select a Spotify track first")
+        if command.action == "volume" and command.volume is None:
+            raise HTTPException(422, "volume must be specified")
         try:
-            access, expires = await spotify.access_token()
+            await spotify.playback(command.action, uri=command.uri, volume=command.volume)
         except SpotifyError as exc:
             raise HTTPException(409, str(exc)) from None
-        # The Playback SDK runs in the app and needs the token itself; it is short-lived and never logged.
-        return {"accessToken": access, "expiresAt": expires}
+        return {"accepted": True}
 
     @router.post("/spotify/logout", status_code=204)
     async def logout() -> None:

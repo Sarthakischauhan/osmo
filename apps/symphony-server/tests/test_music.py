@@ -156,6 +156,8 @@ class FakeSpotify:
     def __init__(self) -> None:
         self.token_forms: list[dict[str, list[str]]] = []
         self.searches: list[httpx.Request] = []
+        self.playback_requests: list[httpx.Request] = []
+        self.available_devices: list[dict[str, Any]] = [{"id": "spotify-device", "is_active": True, "is_restricted": False}]
         self.issued = 0
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -167,6 +169,11 @@ class FakeSpotify:
             if form["grant_type"] == ["authorization_code"]:
                 body["refresh_token"] = "refresh-1"
             return httpx.Response(200, json=body)
+        if request.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": self.available_devices})
+        if request.url.path.startswith("/v1/me/player/"):
+            self.playback_requests.append(request)
+            return httpx.Response(204)
         if request.url.path == "/v1/search":
             self.searches.append(request)
             return httpx.Response(
@@ -189,6 +196,29 @@ class FakeSpotify:
         raise AssertionError(f"unexpected request {request.url}")
 
 
+async def test_spotify_connect_controls_an_existing_device_and_no_device_fails() -> None:
+    api = FakeSpotify()
+    account = SpotifyAccount(
+        "client-123",
+        CredentialStore(FileSecretStore(None)),
+        httpx.AsyncClient(transport=httpx.MockTransport(api)),
+    )
+    state = parse_qs(urlsplit(account.login_url("http://127.0.0.1/cb")).query)["state"][0]
+    await account.finish("code", state)
+    await account.playback("play", uri="spotify:track:t1")
+    assert api.playback_requests[-1].method == "PUT"
+    assert api.playback_requests[-1].url.path == "/v1/me/player/play"
+    assert api.playback_requests[-1].url.params["device_id"] == "spotify-device"
+    assert json.loads(api.playback_requests[-1].content) == {"uris": ["spotify:track:t1"]}
+    await account.playback("pause")
+    assert api.playback_requests[-1].url.path == "/v1/me/player/pause"
+    await account.playback("volume", volume=40)
+    assert api.playback_requests[-1].url.params["volume_percent"] == "40"
+    api.available_devices = []
+    with pytest.raises(SpotifyError, match="Open Spotify"):
+        await account.playback("play", uri="spotify:track:t1")
+
+
 class Clock:
     def __init__(self) -> None:
         self.now = 1_000_000.0
@@ -207,7 +237,7 @@ async def test_spotify_sign_in_uses_pkce_keeps_tokens_in_the_store_and_refreshes
     url = urlsplit(account.login_url("http://127.0.0.1:8787/api/music/spotify/callback"))
     query = {key: values[0] for key, values in parse_qs(url.query).items()}
     assert url.netloc == "accounts.spotify.com" and query["response_type"] == "code" and query["client_id"] == "client-123"
-    assert query["code_challenge_method"] == "S256" and "streaming" in query["scope"].split()
+    assert query["code_challenge_method"] == "S256" and "user-modify-playback-state" in query["scope"].split()
     verifier = account.pending[query["state"]].verifier
     assert query["code_challenge"] == base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode() == pkce_challenge(verifier)
 
@@ -262,11 +292,11 @@ def test_the_spotify_routes_sign_in_and_hand_the_app_a_token(music_dir: Path) ->
         url = client.get("/api/music/spotify/login").json()["url"]
         query = parse_qs(urlsplit(url).query)
         assert query["redirect_uri"] == ["http://127.0.0.1:8787/api/music/spotify/callback"]
-        assert client.get("/api/music/spotify/token").status_code == 409
+        assert client.get("/api/music/spotify/token").status_code == 404
         page = client.get("/api/music/spotify/callback", params={"code": "c", "state": query["state"][0]})
         assert page.status_code == 200 and "Spotify is connected" in page.text
         assert client.get("/api/music/status").json()["spotifyConnected"] is True
-        assert client.get("/api/music/spotify/token").json()["accessToken"] == "access-1"
+        assert client.get("/api/music/spotify/token").status_code == 404
         denied = client.get("/api/music/spotify/callback", params={"error": "access_denied"})
         assert denied.status_code == 400
         assert client.post("/api/music/spotify/logout").status_code == 204
@@ -296,12 +326,12 @@ async def test_music_play_prefers_connected_spotify_falls_back_to_files_and_cont
     now = MusicNow()
 
     result, [command] = await run("music_play", library, offline, now, query="the xx")
-    assert result["playing"] == "Angels by The xx" and result["source"] == "local" and result["queued"] == 1
+    assert result["requested"] == "Angels by The xx" and result["source"] == "local" and result["queued"] == 1
     assert command.action == "play" and [t.title for t in command.tracks] == ["Angels", "Crystalised"]
     result, commands = await run("music_play", library, offline, now, query="the xx", source="spotify")
-    assert commands == [] and "not connected" in result["notes"][0]
+    assert commands[0].action == "handoff" and commands[0].query == "the xx" and "not connected" in result["notes"][0]
     result, commands = await run("music_play", library, offline, now, query="nothing like this")
-    assert result["error"] == "nothing found to play" and commands == []
+    assert result["handoff"] == "spotify" and commands[0].action == "handoff"
 
     store = FileSecretStore(None)
     online = SpotifyAccount("client-123", CredentialStore(store), httpx.AsyncClient(transport=httpx.MockTransport(FakeSpotify())))
@@ -313,7 +343,7 @@ async def test_music_play_prefers_connected_spotify_falls_back_to_files_and_cont
     assert command.tracks[0].source == "local"
 
     result, [command] = await run("music_control", library, online, now, action="volume", volume=30)
-    assert result == {"done": "volume", "volume": 30} and command.action == "volume" and command.volume == 30
+    assert result == {"requested": "volume", "status": "pending_player_confirmation", "volume": 30} and command.action == "volume" and command.volume == 30
     assert (await run("music_control", library, online, now, action="volume"))[0]["error"].startswith("volume needs")
     assert (await run("music_control", library, online, now, action="next"))[1][0].action == "next"
 
@@ -335,7 +365,7 @@ def test_the_voice_model_plays_music_in_the_app_and_hears_what_it_plays(grok: Fa
         call(grok, "music_play", {"query": "bonobo"}, "m1")
         command = next_event(ws, "music.command")
         assert command["action"] == "play" and command["tracks"][0]["title"] == "Kerala"
-        assert tool_output(grok)["playing"] == "Kerala by Bonobo"
+        assert tool_output(grok)["requested"] == "Kerala by Bonobo"
 
         # The app reports its player; the next status reads it.
         ws.send_text(json.dumps({"type": "music.state", "playing": True, "track": command["tracks"][0], "positionMs": 5000, "volume": 70}))
