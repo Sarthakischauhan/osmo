@@ -26,6 +26,17 @@ Talking over Osmo ends its speech, not its background work. The client detects r
 
 `packages/osmo-composer/src/echoGuard.ts` keeps playback from being mistaken for user speech: microphone frames are held back unless they stand out from the assistant's audio. While music plays, only speech that stands out from it reaches server turn detection; other frames become silence. The client also ducks music during spoken responses.
 
+
+## Spotify integration: handoff by default, Spotify Connect when authorized
+
+Osmo **does not stream Spotify audio or create a DRM-protected playback device**. Local files remain playable in the embedded music player. The optional connected Spotify mode sends play, pause, resume and volume requests to the user's *existing Spotify client* through server-side Spotify Web API calls. OAuth PKCE access tokens remain encrypted server-side and are no longer sent to the browser renderer.
+
+For a user without a connected account or a playable search result, `music_play` emits `music.command(action="handoff", query=...)`. The sidebar offers a **user-clickable** Spotify search link. Handoff opens a search page; it does not guarantee a track starts playing and cannot automatically control the app.
+
+Connected control requires Spotify Premium, an accessible Spotify playback device, and Spotify API access for the OAuth app. As of November 2026, development-mode Spotify apps are limited to five authorized users; public deployment needs approved expanded access. If the device is unavailable, the player reports that Spotify needs to be opened.
+
+Osmo only reports playback as accepted after the local audio engine or Spotify Connect endpoint succeeds. Spotify remote audio cannot be ducked from the embedded renderer, and provider-side turn detection still operates independently of music playback.
+
 ## Local Silero VAD
 
 Osmo uses **Silero VAD v5 locally** for speech evidence during assistant playback and music. It shares the microphone stream with the 24 kHz PCM capture, and uses the bundled ONNX model, worklet, and WASM assets under \`/vad/\`. No model weights or microphone audio need to be downloaded or uploaded for local VAD.
