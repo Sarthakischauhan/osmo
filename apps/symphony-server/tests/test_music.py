@@ -156,6 +156,8 @@ class FakeSpotify:
     def __init__(self) -> None:
         self.token_forms: list[dict[str, list[str]]] = []
         self.searches: list[httpx.Request] = []
+        self.playback_requests: list[httpx.Request] = []
+        self.available_devices: list[dict[str, Any]] = [{"id": "spotify-device", "is_active": True, "is_restricted": False}]
         self.issued = 0
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -167,6 +169,11 @@ class FakeSpotify:
             if form["grant_type"] == ["authorization_code"]:
                 body["refresh_token"] = "refresh-1"
             return httpx.Response(200, json=body)
+        if request.url.path == "/v1/me/player/devices":
+            return httpx.Response(200, json={"devices": self.available_devices})
+        if request.url.path.startswith("/v1/me/player/"):
+            self.playback_requests.append(request)
+            return httpx.Response(204)
         if request.url.path == "/v1/search":
             self.searches.append(request)
             return httpx.Response(
@@ -187,6 +194,29 @@ class FakeSpotify:
                 },
             )
         raise AssertionError(f"unexpected request {request.url}")
+
+
+async def test_spotify_connect_controls_an_existing_device_and_no_device_fails() -> None:
+    api = FakeSpotify()
+    account = SpotifyAccount(
+        "client-123",
+        CredentialStore(FileSecretStore(None)),
+        httpx.AsyncClient(transport=httpx.MockTransport(api)),
+    )
+    state = parse_qs(urlsplit(account.login_url("http://127.0.0.1/cb")).query)["state"][0]
+    await account.finish("code", state)
+    await account.playback("play", uri="spotify:track:t1")
+    assert api.playback_requests[-1].method == "PUT"
+    assert api.playback_requests[-1].url.path == "/v1/me/player/play"
+    assert api.playback_requests[-1].url.params["device_id"] == "spotify-device"
+    assert json.loads(api.playback_requests[-1].content) == {"uris": ["spotify:track:t1"]}
+    await account.playback("pause")
+    assert api.playback_requests[-1].url.path == "/v1/me/player/pause"
+    await account.playback("volume", volume=40)
+    assert api.playback_requests[-1].url.params["volume_percent"] == "40"
+    api.available_devices = []
+    with pytest.raises(SpotifyError, match="Open Spotify"):
+        await account.playback("play", uri="spotify:track:t1")
 
 
 class Clock:
