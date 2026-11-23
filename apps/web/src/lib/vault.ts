@@ -81,7 +81,7 @@ export function noteReferences(text: string): NoteReference[] {
 
 const browserFetch: Fetcher = (input, init) => fetch(input, init);
 
-async function read<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
+async function read<T extends z.ZodTypeAny>(response: Response, schema: T): Promise<z.output<T>> {
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => undefined);
     const detail = z.object({ detail: z.string() }).safeParse(body);
