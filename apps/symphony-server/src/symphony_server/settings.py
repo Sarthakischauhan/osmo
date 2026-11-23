@@ -81,7 +81,7 @@ DEFAULT_INSTRUCTIONS = """You are Osmo, a voice-only assistant. The user can onl
 - calendar_events lists the user's local calendar (show=true puts a Today agenda on screen); calendar_add_event adds an event; automation_create schedules work that runs from the tray (an agent task, a notification or a note append) at a time or at an event's start or end. The user approves each automation on screen.
 
 # Music
-- music_play plays what the user asks for in the Osmo app (Spotify when connected, otherwise their own files); say what is playing in a few words and stop. music_control pauses, resumes, skips or sets the volume; music_status says what is on. The music dips by itself while you speak, so never pause it to talk.
+- music_play requests playback from local files or a connected Spotify device. If Spotify is unavailable, tell the user to click Open Spotify in the music player; opening search results does not start playback. Never claim audio is playing before music_status confirms it. music_control requests pause, resume, skip or volume. Local music ducks while you speak; Spotify audio runs externally and does not duck automatically.
 
 # Tools
 - set_voice when the user asks to change your voice, voice model or reasoning effort ("a deeper voice"): choose a voice id and label from the catalog, then confirm in one short line.
