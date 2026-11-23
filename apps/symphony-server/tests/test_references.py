@@ -56,9 +56,9 @@ async def test_vault_list_is_available_without_write_approval(tmp_path: Path) ->
 
 
 def test_frontmatter_tag_metadata_and_search(tmp_path: Path) -> None:
-    assert frontmatter_tags("---\\ntags: [one, two, one]\\n---\\n# A") == ["one", "two"]
-    assert frontmatter_tags("---\\ntags:\\n  - voice\\n  - agent\\n---\\n# B") == ["voice", "agent"]
-    assert frontmatter_tags("# A\\ntags: hidden") == []
+    assert frontmatter_tags("---\ntags: [one, two, one]\n---\n# A") == ["one", "two"]
+    assert frontmatter_tags("---\ntags:\n  - voice\n  - agent\n---\n# B") == ["voice", "agent"]
+    assert frontmatter_tags("# A\ntags: hidden") == []
     index = index_for(tmp_path)
     try:
         assert index.read("Planning.md").tags == ["osmo", "agent", "bugs"]
@@ -71,7 +71,7 @@ def test_frontmatter_tag_metadata_and_search(tmp_path: Path) -> None:
 def test_legacy_vault_index_reindexes_tags_on_migration(tmp_path: Path) -> None:
     root = tmp_path / "vault"
     root.mkdir()
-    (root / "Work.md").write_text("---\\ntags: [planning]\\n---\\n# Work\\n")
+    (root / "Work.md").write_text("---\ntags: [planning]\n---\n# Work\n")
     db_file = tmp_path / "index.sqlite"
     with sqlite3.connect(db_file) as db:
         db.execute("CREATE TABLE notes (vault TEXT NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, mtime REAL NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (vault, path))")
