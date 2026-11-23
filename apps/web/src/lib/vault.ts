@@ -3,8 +3,8 @@ import type { Fetcher } from "./usage";
 
 /** The editor's side of `/api/vault` (symphony_server/vault_api.py): the user's own reads and saves. */
 export const vaultListSchema = z.object({ vaults: z.array(z.object({ name: z.string(), root: z.string() })) });
-export const noteEntrySchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), modified: z.number(), size: z.number() });
-export const noteHitSchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), snippet: z.string() });
+export const noteEntrySchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), modified: z.number(), size: z.number(), tags: z.array(z.string()).default([]) });
+export const noteHitSchema = z.object({ vault: z.string(), path: z.string(), title: z.string(), snippet: z.string(), tags: z.array(z.string()).default([]) });
 export const noteSchema = z.object({
   vault: z.string(),
   path: z.string(),
@@ -12,12 +12,56 @@ export const noteSchema = z.object({
   text: z.string(),
   modified: z.number(),
   backlinks: z.array(z.string()),
+  tags: z.array(z.string()).default([]),
 });
 
 export type VaultInfo = z.infer<typeof vaultListSchema>["vaults"][number];
 export type NoteEntry = z.infer<typeof noteEntrySchema>;
 export type NoteHit = z.infer<typeof noteHitSchema>;
 export type Note = z.infer<typeof noteSchema>;
+
+/** Parse just frontmatter tags; supports YAML inline and dash-list forms. */
+export function frontmatterTags(markdown: string): string[] {
+  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(markdown);
+  if (!match) return [];
+  const lines = match[1]!.split(/\r?\n/);
+  const index = lines.findIndex((line) => /^tags:[ \t]*/.test(line));
+  if (index < 0) return [];
+  const raw = lines[index]!.slice(5).trim();
+  const values = raw.startsWith("[") && raw.endsWith("]")
+    ? raw.slice(1, -1).split(",")
+    : raw ? [raw] : [];
+  // Consume dash-list items until the first non-list line.
+  const items = raw === "" ? [] as string[] : values;
+  if (raw === "") for (const line of lines.slice(index + 1)) {
+    const item = /^[ \t]*-[ \t]+(.+?)[ \t]*$/.exec(line);
+    if (!item) break;
+    items.push(item[1]!);
+  }
+  return [...new Set(items.map((tag) => tag.trim().replace(/^['"]|['"]$/g, "").replace(/^#/, "").trim())
+    .filter((tag) => tag.length > 0 && tag.length <= 64))].slice(0, 32);
+}
+
+/** Update only the tags frontmatter field, preserving all other metadata and body. */
+export function withFrontmatterTags(markdown: string, tags: string[]): string {
+  const clean = [...new Set(tags.map((tag) => tag.trim().replace(/^#/, ""))
+    .filter((tag) => /^[\p{L}\p{N}_/-]{1,64}$/u.test(tag)))].slice(0, 32);
+  const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/.exec(markdown);
+  const declaration = "tags: [" + clean.join(", ") + "]";
+  if (!match) return clean.length ? "---\n" + declaration + "\n---\n" + markdown : markdown;
+  const lines = match[1]!.split(/\r?\n/);
+  const index = lines.findIndex((line) => /^tags:[ \t]*/.test(line));
+  if (index >= 0) {
+    let end = index + 1;
+    if (/^tags:[ \t]*$/.test(lines[index]!)) {
+      while (end < lines.length && /^[ \t]*-[ \t]+/.test(lines[end]!)) end++;
+    }
+    lines.splice(index, end - index, ...(clean.length ? [declaration] : []));
+  } else if (clean.length) {
+    lines.push(declaration);
+  }
+  return "---\n" + lines.join("\n") + "\n---" + (match[2] || "\n") + markdown.slice(match[0].length);
+}
 
 export type NoteReference = { kind: "chat" | "automation" | "event"; id: string };
 /** Stable IDs written as wiki-links in note text, e.g. [[chat:abc123]]. */
