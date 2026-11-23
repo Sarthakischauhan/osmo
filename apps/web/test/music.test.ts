@@ -57,6 +57,37 @@ describe("the music player", () => {
     expect(music.getSnapshot()).toMatchObject({ playing: false, track: { id: "b" } });
   });
 
+  it("offers a Spotify handoff without claiming playback started", async () => {
+    const { music } = player();
+    await music.command({ type: "music.command", action: "handoff", tracks: [], query: "Daft Punk" });
+    expect(music.getSnapshot()).toMatchObject({ handoffQuery: "Daft Punk", playing: false, track: undefined });
+    expect(music.state()).toMatchObject({ playing: false, track: null });
+  });
+
+  it("does not report an async load as playing until the engine accepts it", async () => {
+    let finish: (() => void) | undefined;
+    const engine = new FakeEngine();
+    engine.load = async () => new Promise<void>((resolve) => { finish = resolve; });
+    const music = new MusicPlayer(() => engine);
+    const pending = music.playQueue([track("delayed")], 0);
+    expect(music.getSnapshot().playing).toBe(false);
+    finish?.();
+    await pending;
+    expect(music.getSnapshot().playing).toBe(true);
+  });
+
+  it("ignores a stale playback failure after a newer handoff", async () => {
+    let rejectOld: ((cause: Error) => void) | undefined;
+    const engine = new FakeEngine();
+    engine.load = async () => new Promise<void>((_resolve, reject) => { rejectOld = reject; });
+    const music = new MusicPlayer(() => engine);
+    const pending = music.playQueue([track("old")], 0);
+    music.handoff("New Song");
+    rejectOld?.(new Error("Old playback failed"));
+    await pending;
+    expect(music.getSnapshot()).toMatchObject({ handoffQuery: "New Song", error: undefined, playing: false });
+  });
+
   it("switches engines between a local file and Spotify, pausing the one it leaves", async () => {
     const { engines, music } = player();
     await music.playQueue([track("a"), track("s", "spotify")], 0);
