@@ -727,3 +727,15 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
 .osmo-orb-caret { display:inline-block; width:4px; height:12px; margin-left:3px; vertical-align:-2px; background:var(--foreground); animation:osmo-orb-live-pulse .9s steps(1,end) infinite; }
 @keyframes osmo-orb-live-pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .osmo-orb-live-indicator, .osmo-orb-caret { animation:none; opacity:1; } }
+
+/* Thinking orb is visually active on hover, without changing the click/drag hitbox. */
+.osmo-floating-orb[data-mode="thinking"]:hover::after,
+.osmo-floating-orb[data-mode="working"]:hover::after {
+  content:""; position:absolute; inset:14px; border:1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius:50%; pointer-events:none; box-shadow:0 0 22px color-mix(in srgb, var(--foreground) 10%, transparent);
+  animation:osmo-orb-live-pulse 1.8s ease-in-out infinite;
+}
+@media(prefers-reduced-motion:reduce) {
+  .osmo-floating-orb[data-mode="thinking"]:hover::after,
+  .osmo-floating-orb[data-mode="working"]:hover::after { animation:none; }
+}
