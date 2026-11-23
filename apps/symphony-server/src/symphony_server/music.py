@@ -188,6 +188,14 @@ class LoginResponse(BaseModel):
     url: str
 
 
+class SpotifyPlaybackRequest(BaseModel):
+    """Validated command to the user's existing Spotify Connect device."""
+
+    action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+    uri: str | None = Field(default=None, max_length=100)
+    volume: int | None = Field(default=None, ge=0, le=100)
+
+
 CALLBACK_PAGE = """<!doctype html><meta charset="utf-8"><title>Osmo</title>
 <body style="font:14px system-ui;background:#0a0a0a;color:#ededed;display:grid;place-items:center;height:100vh;margin:0">
 <p>{message} You can close this tab and go back to Osmo.</p></body>"""
@@ -262,11 +270,6 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             log.warning("spotify sign-in failed: %s", exc)
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         return HTMLResponse(CALLBACK_PAGE.format(message="Spotify is connected."))
-
-    class SpotifyPlaybackRequest(BaseModel):
-        action: Literal["play", "pause", "resume", "next", "previous", "volume"]
-        uri: str | None = Field(default=None, max_length=100)
-        volume: int | None = Field(default=None, ge=0, le=100)
 
     @router.post("/spotify/playback")
     async def playback(command: SpotifyPlaybackRequest) -> dict[str, bool]:
