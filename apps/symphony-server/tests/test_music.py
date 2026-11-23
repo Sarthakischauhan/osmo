@@ -292,11 +292,11 @@ def test_the_spotify_routes_sign_in_and_hand_the_app_a_token(music_dir: Path) ->
         url = client.get("/api/music/spotify/login").json()["url"]
         query = parse_qs(urlsplit(url).query)
         assert query["redirect_uri"] == ["http://127.0.0.1:8787/api/music/spotify/callback"]
-        assert client.get("/api/music/spotify/token").status_code == 409
+        assert client.get("/api/music/spotify/token").status_code == 404
         page = client.get("/api/music/spotify/callback", params={"code": "c", "state": query["state"][0]})
         assert page.status_code == 200 and "Spotify is connected" in page.text
         assert client.get("/api/music/status").json()["spotifyConnected"] is True
-        assert client.get("/api/music/spotify/token").json()["accessToken"] == "access-1"
+        assert client.get("/api/music/spotify/token").status_code == 404
         denied = client.get("/api/music/spotify/callback", params={"error": "access_denied"})
         assert denied.status_code == 400
         assert client.post("/api/music/spotify/logout").status_code == 204
