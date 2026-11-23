@@ -19,6 +19,28 @@ export type NoteEntry = z.infer<typeof noteEntrySchema>;
 export type NoteHit = z.infer<typeof noteHitSchema>;
 export type Note = z.infer<typeof noteSchema>;
 
+export const vaultIssueSchema = z.object({
+  vault: z.string(), path: z.string(), title: z.string(), task: z.string(),
+  status: z.string(), priority: z.string().nullish(), line: z.number().int().nullish(),
+});
+export type VaultIssue = z.infer<typeof vaultIssueSchema>;
+
+export type NoteReference = { kind: "chat" | "automation" | "event"; id: string };
+/** Stable IDs written as wiki-links in note text, e.g. [[chat:abc123]]. */
+export function noteReferences(text: string): NoteReference[] {
+  const matches = text.matchAll(/\[\[(chat|automation|event):([a-zA-Z0-9_-]{1,128})\]\]/g);
+  const seen = new Set<string>();
+  const refs: NoteReference[] = [];
+  for (const match of matches) {
+    const kind = match[1] as NoteReference["kind"];
+    const id = match[2]!;
+    if (seen.has(kind + ":" + id)) continue;
+    seen.add(kind + ":" + id);
+    refs.push({ kind, id });
+  }
+  return refs;
+}
+
 const browserFetch: Fetcher = (input, init) => fetch(input, init);
 
 async function read<T>(response: Response, schema: z.ZodType<T>): Promise<T> {
@@ -38,6 +60,11 @@ export function vaultApi(fetcher: Fetcher = browserFetch) {
     async notes(vault: string): Promise<NoteEntry[]> {
       const query = new URLSearchParams({ vault });
       return (await read(await fetcher(`/api/vault/notes?${query}`), z.object({ notes: z.array(noteEntrySchema) }))).notes;
+    },
+    async issues(vault: string, status: "open" | "done" | "all" = "open"): Promise<VaultIssue[]> {
+      const query = new URLSearchParams({ vault, status });
+      return (await read(await fetcher(`/api/vault/issues?${query}`),
+        z.object({ issues: z.array(vaultIssueSchema) }))).issues;
     },
     async search(vault: string, q: string): Promise<NoteHit[]> {
       const query = new URLSearchParams({ vault, q });
