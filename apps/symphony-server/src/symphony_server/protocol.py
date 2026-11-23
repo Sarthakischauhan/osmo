@@ -144,7 +144,8 @@ class MusicCommand(_Event):
     """`music.command`: what the app's player should do. `play` plays `tracks[0]` and queues the rest."""
 
     type: Literal["music.command"] = "music.command"
-    action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+    action: Literal["play", "pause", "resume", "next", "previous", "volume", "handoff"]
+    query: str | None = Field(default=None, max_length=200)
     tracks: list[Track] = []
     volume: int | None = Field(default=None, ge=0, le=100)
 
