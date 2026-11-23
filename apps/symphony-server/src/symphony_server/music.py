@@ -263,6 +263,24 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             return HTMLResponse(CALLBACK_PAGE.format(message="Spotify was not connected."), status_code=400)
         return HTMLResponse(CALLBACK_PAGE.format(message="Spotify is connected."))
 
+    class SpotifyPlaybackRequest(BaseModel):
+        action: Literal["play", "pause", "resume", "next", "previous", "volume"]
+        uri: str | None = Field(default=None, max_length=100)
+        volume: int | None = Field(default=None, ge=0, le=100)
+
+    @router.post("/spotify/playback")
+    async def playback(command: SpotifyPlaybackRequest) -> dict[str, bool]:
+        """Control an already-open Spotify client. Tokens stay entirely server-side."""
+        if command.action == "play" and (not command.uri or not command.uri.startswith("spotify:track:")):
+            raise HTTPException(422, "select a Spotify track first")
+        if command.action == "volume" and command.volume is None:
+            raise HTTPException(422, "volume must be specified")
+        try:
+            await spotify.playback(command.action, uri=command.uri, volume=command.volume)
+        except SpotifyError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"accepted": True}
+
     @router.get("/spotify/token", dependencies=[Depends(require_app)])
     async def token() -> dict[str, Any]:
         """A fresh Spotify access token for the app's player, and nothing else (local_access.require_app)."""
