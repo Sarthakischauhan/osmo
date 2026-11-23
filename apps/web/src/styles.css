@@ -739,3 +739,11 @@ html.osmo-orb-window, html.osmo-orb-window body { background: transparent; overf
   .osmo-floating-orb[data-mode="thinking"]:hover::after,
   .osmo-floating-orb[data-mode="working"]:hover::after { animation:none; }
 }
+
+.osmo-orb-entry { display:flex; flex-direction:column; align-items:flex-start; gap:4px; min-width:0; }
+.osmo-orb-entry p { margin:0; }
+.osmo-orb-line .osmo-orb-step { font-size:11px; line-height:16px; color:var(--muted-foreground); }
+.osmo-orb-step-marker { display:inline-block; width:12px; color:var(--muted-foreground); }
+.osmo-orb-pending { font-style:italic; }
+.osmo-orb-stream-dot { display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--foreground); animation:osmo-orb-live-pulse 1.4s infinite; }
+@media(prefers-reduced-motion:reduce) { .osmo-orb-stream-dot { animation:none; } }
