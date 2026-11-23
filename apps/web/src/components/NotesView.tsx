@@ -25,6 +25,7 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
   const [query, setQuery] = useState("");
   const [selectedTag, setSelectedTag] = useState("");
   const [tagDraft, setTagDraft] = useState("");
+  const [tagRevision, setTagRevision] = useState(0);
   const [note, setNote] = useState<Note>();
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
@@ -64,6 +65,7 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
         const opened = await api.note(vault, path);
         setNote(opened);
         setDraft(opened.text);
+        setTagDraft("");
         setError(undefined);
       } catch (cause) {
         fail(cause);
@@ -113,7 +115,10 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
   const allRows = listed.kind === "notes" ? listed.notes : listed.hits;
   const tags = [...new Set(allRows.flatMap((row) => row.tags))].sort((a, b) => a.localeCompare(b));
   const rows = selectedTag ? allRows.filter((row) => row.tags.includes(selectedTag)) : allRows;
-  const editTags = (next: string[]) => setDraft((current) => withFrontmatterTags(current, next));
+  const editTags = (next: string[]) => {
+    setDraft((current) => withFrontmatterTags(current, next));
+    setTagRevision((current) => current + 1);
+  };
   const addTag = () => {
     const tag = tagDraft.trim().replace(/^#/, "");
     if (!/^[\p{L}\p{N}_/-]{1,64}$/u.test(tag)) {
@@ -212,7 +217,7 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
                   onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} />
                 <button type="button" className="osmo-note-tags-add" onClick={addTag} disabled={!tagDraft.trim()}>Add tag</button>
               </div>
-              <MarkdownEditor docKey={`${note.vault}/${note.path}@${note.modified}`} value={note.text} onChange={setDraft} onSave={() => void save()} />
+              <MarkdownEditor docKey={`${note.vault}/${note.path}@${note.modified}:${tagRevision}`} value={draft} onChange={setDraft} onSave={() => void save()} />
               {noteReferences(draft).length > 0 && (
                 <footer className="osmo-notes-backlinks osmo-notes-references">
                   <span>References</span>
