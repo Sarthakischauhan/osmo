@@ -65,7 +65,10 @@ export function MusicMini({ player, collapsed = false }: { player: MusicPlayer; 
         ) : music.handoffQuery ? (
           <a className="osmo-music-connect" href={searchLink} target="_blank" rel="noopener noreferrer">Open Spotify results</a>
         ) : status?.spotifyConfigured && !status.spotifyConnected ? (
-          <button type="button" className="osmo-music-connect" onClick={() => void connect()}>Connect Spotify</button>
+          <div className="osmo-music-actions">
+            <a className="osmo-music-connect" href="https://open.spotify.com/" target="_blank" rel="noopener noreferrer">Open Spotify</a>
+            <button type="button" className="osmo-music-connect" onClick={() => void connect()}>Connect for voice control</button>
+          </div>
         ) : (
           <a className="osmo-music-connect" href="https://open.spotify.com/" target="_blank" rel="noopener noreferrer">Open Spotify</a>
         )}
