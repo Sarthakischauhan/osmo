@@ -97,6 +97,8 @@ export function OrbApp({ bridge }: { bridge: DesktopBridge }) {
   return (
     <FloatingOrb
       mode={orbMode(connection, state, false)}
+      voiceState={state}
+      detail={session.detail}
       outputLevel={session.outputLevel}
       inputLevel={session.inputLevel}
       runs={runs}
