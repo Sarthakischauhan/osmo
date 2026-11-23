@@ -61,22 +61,21 @@ For an opt-in, privacy-safe trace (frame counts only, no PCM or transcripts in t
 
 If capture increases but forwarded stays flat, investigate EchoGuard. If forwarded increases but provider speech events do not arrive, check provider connection and VAD. If a transcript reaches the server but does not render, inspect the client event/parser path.
 
-## Notes as agent context and issue tracker
+## Notes as agent context and cross-references
 
 The voice model and background Symphony agent both have read access to the configured notes vaults **by default**, through the same indexed vault. The new read-only tools are:
 
 - `vault_list`: titles and paths across configured vaults
-- `vault_issues`: markdown checkbox tasks (`- [ ]` / `- [x]`) plus notes with `status: todo`, `status: doing`, or `status: done`; optional priority metadata
 - `conversation_search` / `conversation_read`: earlier stored Osmo chat threads, titles and bounded messages
 - `automation_list` / `event_search`: existing local scheduled automations and calendar events
 
-The Notes screen has **All notes** and **Issues** tabs. Clicking an issue opens its source markdown note, which remains the source of truth. No issue database or automatic destructive edits. Existing `vault_write` approval remains required for an agent to create, append or replace a note.
+The existing Notes view remains the only interface. Notes support YAML frontmatter tags for filtering and discovery. Agents can list, search and read tagged notes as references. Existing `vault_write` approval remains required for an agent to create, append or replace a note.
 
 Notes can refer to other Osmo records using explicit links:
 `[[chat:THREAD_ID]]`, `[[automation:AUTOMATION_ID]]`, and `[[event:EVENT_ID]]`.
 The editor displays these as clickable reference chips, navigating to a stored chat or its calendar record. Reference content is treated as untrusted data, not a new instruction. Lookups stay bounded and on the user's existing local storage. Agent results should mention source titles and IDs.
 
-The issues endpoint scans up to 300 note files and returns at most 100 issue rows, avoiding unbounded background retrieval. It is a lightweight issue view, not a GitHub Issues synchronization. Users can choose a task for `run_agent` without exposing their complete note collection as prompt context.
+Agents can pick up work described in the notes when asked, without a separate issue database or issues tab.
 
 ## Background work
 
