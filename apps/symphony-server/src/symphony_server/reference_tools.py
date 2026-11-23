@@ -47,7 +47,7 @@ class LookupArgs(Args):
 class VaultListTool(Tool):
     def __init__(self, index: VaultIndex) -> None:
         super().__init__(name="vault_list",
-                         description=f"List notes and titles across all configured vaults. {UNTRUSTED}",
+                         description=f"List notes and frontmatter tags across all configured vaults to find relevant tasks and reference material. {UNTRUSTED}",
                          parameters=VaultListArgs.model_json_schema())
         self.index = index
 
