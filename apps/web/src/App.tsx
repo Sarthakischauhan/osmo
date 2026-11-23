@@ -291,7 +291,7 @@ function Osmo({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => v
     setView("calendar");
   };
   const screen =
-    view === "notes" ? <NotesView /> : view === "calendar" ? <CalendarView focus={calendarFocus} onOpenTask={(id) => void openThread(id)} /> : undefined;
+    view === "notes" ? <NotesView onOpenThread={(id) => void openThread(id)} onOpenAutomation={openAutomation} onOpenEvent={(id) => openAutomation("event:" + id)} /> : view === "calendar" ? <CalendarView focus={calendarFocus} onOpenTask={(id) => void openThread(id)} /> : undefined;
 
   return (
     <>
