@@ -164,7 +164,7 @@ export function NotesView({ api: given, initialPath, onOpenThread, onOpenAutomat
       <div className="osmo-notes-pane">
         <nav className="osmo-notes-list" aria-label={listed.kind === "hits" ? "Search results" : "Notes"}>
 
-          {rows.length === 0 && <p className="osmo-notes-empty">{selectedTag ? "No notes with that tag." : listed.kind === "hits" ? "No notes match." : "No notes yet. Osmo keeps them as markdown files in your vault folder."}</p>
+          {rows.length === 0 && <p className="osmo-notes-empty">{selectedTag ? "No notes with that tag." : listed.kind === "hits" ? "No notes match." : "No notes yet. Osmo keeps them as markdown files in your vault folder."}</p>}
           {rows.map((row) => (
             <button
               key={row.path}
