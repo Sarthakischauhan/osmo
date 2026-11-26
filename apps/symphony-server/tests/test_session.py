@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from typing import Any
 
@@ -13,10 +12,6 @@ from starlette.testclient import WebSocketTestSession
 from conftest import FakeGrok, make_client
 from symphony_server.settings import Settings
 
-WEATHER_CARD = {
-    "type": "card",
-    "props": {"title": "Palo Alto weekend", "body": "**72°** Sat · sunny\n\n**68°** Sun · partly cloudy"},
-}
 DINNER = {
     "type": "options",
     "props": {
@@ -101,17 +96,6 @@ def answer(grok: FakeGrok, text: str, response_id: str) -> None:
     grok.send({"type": "response.done", "response": {"id": response_id}})
 
 
-def render(ws: WebSocketTestSession, grok: FakeGrok, widget: dict[str, Any], call_id: str) -> str:
-    """One full turn that renders `widget`; returns its id once the turn is over."""
-    say(grok, "show me")
-    call(grok, "render_widget", widget, call_id, f"{call_id}-a")
-    widget_id: str = next_event(ws, "widget.render")["widget"]["id"]
-    assert tool_output(grok)["id"] == widget_id
-    answer(grok, "Done.", f"{call_id}-b")
-    wait_listening(ws)
-    return widget_id
-
-
 def wait_listening(ws: WebSocketTestSession) -> None:
     while next_event(ws, "state")["state"] != "listening":
         pass
@@ -127,7 +111,7 @@ def test_session_start_configures_grok_server_side(client: TestClient, grok: Fak
         assert session["turn_detection"] == {"type": "server_vad"}
         names = {tool["name"] for tool in session["tools"]}
         assert names == {
-            "render_widget", "update_widget", "write_code", "set_voice",
+            "web_search", "set_voice",
             "run_agent", "agent_status", "cancel_agent",
             "vault_search", "vault_read", "vault_write",
             "calendar_events", "calendar_add_event", "automation_create",
@@ -155,57 +139,39 @@ def test_the_first_utterance_names_the_thread(client: TestClient, grok: FakeGrok
         assert heard(ws)["text"] == "And Sunday?"
 
 
-def test_a_spoken_turn_runs_the_harness_and_its_tool_renders_a_widget(client: TestClient, grok: FakeGrok) -> None:
+def test_a_spoken_turn_runs_a_voice_tool(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
-        say(grok, "Weather this weekend?")
+        say(grok, "What's playing?")
         assert next_event(ws, "transcript.delta") == {"type": "transcript.delta", "role": "user", "text": "", "itemId": "u1"}
-        assert heard(ws) == {"type": "transcript.delta", "role": "user", "text": "Weather this weekend?", "itemId": "u1", "final": True}
+        assert heard(ws) == {"type": "transcript.delta", "role": "user", "text": "What's playing?", "itemId": "u1", "final": True}
 
-        call(grok, "render_widget", WEATHER_CARD, "c1")
-        assert next_event(ws, "state") == {"type": "state", "state": "working", "detail": "Running render_widget"}
-        rendered = next_event(ws, "widget.render")["widget"]
-        assert re.fullmatch(r"w-[0-9a-f]{32}", rendered["id"])
-        assert rendered == {"id": rendered["id"], "type": "card", "props": WEATHER_CARD["props"]}
-        assert tool_output(grok) == {"shown": 'card "Palo Alto weekend"', "id": rendered["id"]}
+        call(grok, "music_status", {}, "c1")
+        assert next_event(ws, "state")["state"] == "working"
+        assert tool_output(grok)["playing"] is False
 
-        answer(grok, "Sunny, 72.", "r2")
-        assert next_event(ws, "transcript.delta").items() >= {"role": "assistant", "text": "Sunny, 72."}.items()
+        answer(grok, "Nothing right now.", "r2")
+        assert next_event(ws, "transcript.delta").items() >= {"role": "assistant", "text": "Nothing right now."}.items()
         wait_listening(ws)
 
 
 def test_grok_string_status_details_does_not_discard_tool_calls(client: TestClient, grok: FakeGrok) -> None:
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
-        say(grok, "show me")
+        say(grok, "what's playing")
         grok.send({"type": "response.created", "response": {"id": "r1"}})
-        grok.send({"type": "response.function_call_arguments.done", "response_id": "r1", "call_id": "c1", "name": "render_widget", "arguments": json.dumps(WEATHER_CARD)})
+        grok.send({"type": "response.function_call_arguments.done", "response_id": "r1", "call_id": "c1", "name": "music_status", "arguments": "{}"})
         grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed", "status_details": "unimplemented"}})
-        rendered = next_event(ws, "widget.render")["widget"]
-        assert rendered["type"] == "card"
-        assert tool_output(grok)["id"] == rendered["id"]
+        assert tool_output(grok)["playing"] is False
 
 
-def test_write_code_emits_fenced_markdown_without_creating_a_widget(client: TestClient, grok: FakeGrok) -> None:
+def test_the_voice_model_cannot_draw_widgets(client: TestClient, grok: FakeGrok) -> None:
+    """Widgets are the background agent's: the voice model's render_widget call is an unknown tool."""
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
-        say(grok, "show me a go server")
-        grok.send({"type": "response.created", "response": {"id": "r1"}})
-        grok.send(
-            {
-                "type": "response.function_call_arguments.done",
-                "response_id": "r1",
-                "call_id": "c1",
-                "name": "write_code",
-                "arguments": json.dumps({"language": "go", "code": 'package main\nfunc main() {}'}),
-            }
-        )
-        grok.send({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
-        delta = next_event(ws, "transcript.delta")
-        while delta.get("role") != "assistant" or "```go" not in delta.get("text", ""):
-            delta = next_event(ws, "transcript.delta")
-        assert "package main" in delta["text"]
-        assert tool_output(grok)["shown"] == "go snippet (2 lines)"
+        say(grok, "show me")
+        call(grok, "render_widget", DINNER, "c1")
+        assert tool_output(grok) == {"error": "unknown tool render_widget"}
 
 
 def test_realtime_reasoning_deltas_are_streamed_to_the_browser(client: TestClient, grok: FakeGrok) -> None:
@@ -226,19 +192,16 @@ def test_a_model_switch_replays_the_thread(client: TestClient, grok: FakeGrok) -
     """History lives in the stored thread: a new voice session on another model is seeded from it."""
     with client.websocket_connect("/ws") as ws:
         start(ws, grok)
-        widget_id = render(ws, grok, DINNER, "h1")
+        say(grok, "show me")
+        answer(grok, "Done.", "h1")
+        wait_listening(ws)
         ws.send_text(json.dumps({"type": "session.configure", "model": "grok-voice-3.0", "voice": "eve"}))
         assert next_event(ws, "voice.configured")["selection"]["model"] == "grok-voice-3.0"
         assert grok.closed.get(timeout=5) == "/v1/realtime?model=grok-voice-latest"
         grok.next_of("session.update")
 
-        ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
-        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(3)]
-        assert [replayed_entry(item) for item in replayed] == [
-            ("user", "show me"),
-            ("assistant", "Done."),
-            ("user", f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"),
-        ]
+        replayed = [grok.next_of("conversation.item.create")["item"] for _ in range(2)]
+        assert [replayed_entry(item) for item in replayed] == [("user", "show me"), ("assistant", "Done.")]
 
 
 def replayed_entry(item: dict[str, Any]) -> tuple[str, str]:
@@ -248,92 +211,6 @@ def replayed_entry(item: dict[str, Any]) -> tuple[str, str]:
     if item["type"] == "function_call_output":
         return "function_call_output", item["call_id"]
     return item["role"], item["content"][0]["text"]
-
-
-def test_invalid_widget_never_reaches_canvas(client: TestClient, grok: FakeGrok) -> None:
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        say(grok, "chart it")
-        call(grok, "render_widget", {"type": "chart", "props": {"kind": "pie", "series": []}}, "c2")
-        result = tool_output(grok)
-        assert result["shown"] is None and "invalid widget" in result["error"]
-        answer(grok, "Sorry.", "r2")
-        while True:
-            event = json.loads(ws.receive_text())
-            assert event["type"] != "widget.render"
-            if event == {"type": "state", "state": "listening"}:
-                break
-
-
-def test_widget_action_becomes_a_user_turn(client: TestClient, grok: FakeGrok) -> None:
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        widget_id = render(ws, grok, DINNER, "c3")
-        ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
-        assert asked(grok) == f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"
-
-
-def test_a_widget_takes_one_answer(client: TestClient, grok: FakeGrok) -> None:
-    """Review S4: a repeated (or frame-forged) tap on an answered widget is not another user turn."""
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        first = render(ws, grok, DINNER, "c3")
-        second = render(ws, grok, DINNER, "c4")
-        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "ramen"}))
-        assert asked(grok) == f"[Tapped on screen] options widget {first}: select -> option 2, Ramen counter"
-        ws.send_text(json.dumps({"type": "widget.action", "id": first, "action": "select", "value": "tacos"}))
-        ws.send_text(json.dumps({"type": "widget.action", "id": second, "action": "select", "value": "ramen"}))
-        # The next turn the model hears is the second widget's: the repeat on the first was dropped.
-        assert asked(grok) == f"[Tapped on screen] options widget {second}: select -> option 2, Ramen counter"
-
-
-def test_update_touches_only_the_targeted_widget(client: TestClient, grok: FakeGrok) -> None:
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        first = render(ws, grok, WEATHER_CARD, "c6")
-        second = render(ws, grok, WEATHER_CARD, "c7")
-        assert first != second
-
-        say(grok, "rename it")
-        call(grok, "update_widget", {"id": second, "patch": {"title": "Only the new one"}}, "c8")
-        assert next_event(ws, "widget.update") == {"type": "widget.update", "id": second, "patch": {"title": "Only the new one"}}
-        assert tool_output(grok)["id"] == second
-
-
-def test_two_renders_then_update_second_leaves_first_unchanged(client: TestClient, grok: FakeGrok) -> None:
-    stock = {"type": "card", "props": {"title": "TSLA", "body": "Loading"}}
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        first = render(ws, grok, WEATHER_CARD, "r1")
-        second = render(ws, grok, stock, "r2")
-        assert first != second
-
-        say(grok, "update the price")
-        call(grok, "update_widget", {"id": second, "patch": {"title": "TSLA $251"}}, "u1")
-        assert next_event(ws, "widget.update") == {"type": "widget.update", "id": second, "patch": {"title": "TSLA $251"}}
-        assert tool_output(grok) == {"shown": 'updated card "TSLA $251"', "id": second}
-
-        # An empty patch reports the stored widget as is: the first card kept its own title.
-        call(grok, "update_widget", {"id": first, "patch": {}}, "u2")
-        assert tool_output(grok) == {"shown": f'updated card "{WEATHER_CARD["props"]["title"]}"', "id": first}
-
-
-def test_widget_ids_never_repeat_across_sessions(client: TestClient, grok: FakeGrok) -> None:
-    """The browser keeps earlier widgets on screen after End + restart, so a new session must not reuse their ids."""
-    ids = []
-    for call_id in ("s1", "s2"):
-        with client.websocket_connect("/ws") as ws:
-            start(ws, grok)
-            ids.append(render(ws, grok, WEATHER_CARD, call_id))
-    assert ids[0] != ids[1]
-
-
-def test_update_for_an_unknown_id_is_rejected(client: TestClient, grok: FakeGrok) -> None:
-    with client.websocket_connect("/ws") as ws:
-        start(ws, grok)
-        say(grok, "rename it")
-        call(grok, "update_widget", {"id": "w1", "patch": {"title": "x"}}, "c9")
-        assert "no widget 'w1'" in tool_output(grok)["error"]
 
 
 def test_barge_in_cancels_the_turn_and_drops_its_late_audio(client: TestClient, grok: FakeGrok) -> None:

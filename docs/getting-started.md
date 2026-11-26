@@ -32,7 +32,7 @@ Open **http://localhost:5173**, connect xAI in the **Providers** panel, and star
 
 The server listens on `127.0.0.1:8787`. Vite serves the client on port `5173` and proxies `/ws`, `/api`, `/voice-models`, and `/providers` to it. Override the targets with `SYMPHONY_URL` (WebSocket) and `SYMPHONY_HTTP_URL` (HTTP) if needed.
 
-Try a small request first. Background-agent models and optional browser, coding, and desktop tools depend on your provider connections and configuration. A connected provider unlocks only its supported capabilities, not every feature.
+Try a small request first. Background-agent models and optional browser and desktop tools depend on your provider connections and configuration. A connected provider unlocks only its supported capabilities, not every feature.
 
 ## Keep your work
 

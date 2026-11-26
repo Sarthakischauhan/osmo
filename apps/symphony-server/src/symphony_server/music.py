@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core_harness import EventSink, Tool
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from symphony_server.local_access import require_app
 from symphony_server.music_library import MEDIA_TYPES, SEARCH_LIMIT_MAX, LocalLibrary, art_of
 from symphony_server.protocol import MusicCommand, MusicState, Track
 from symphony_server.spotify import SpotifyAccount, SpotifyError
@@ -168,6 +169,9 @@ class MusicStatus(BaseModel):
     localReady: bool
     spotifyConfigured: bool
     spotifyConnected: bool
+    # Whether the app may set the client id (not when OSMO_SPOTIFY_CLIENT_ID does), and the redirect to register.
+    spotifyClientIdEditable: bool
+    spotifyRedirectUri: str
 
 
 class LibraryResponse(BaseModel):
@@ -180,6 +184,13 @@ class LoginResponse(BaseModel):
     """Where to send the user to connect Spotify."""
 
     url: str
+
+
+class SpotifyClientRequest(BaseModel):
+    """The Spotify app's client id, from the user's Spotify developer dashboard (public: PKCE has no secret)."""
+
+    model_config = ConfigDict(extra="forbid")
+    clientId: str = Field(min_length=1, max_length=64)
 
 
 class SpotifyPlaybackRequest(BaseModel):
@@ -205,7 +216,7 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
         return redirect_uri or str(request.url_for("spotify_callback"))
 
     @router.get("/status")
-    async def status() -> MusicStatus:
+    async def status(request: Request) -> MusicStatus:
         """The music sources' status."""
         return MusicStatus(
             localFolders=[str(root.path) for root in library.roots],
@@ -213,6 +224,8 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
             localReady=library.ready.is_set(),
             spotifyConfigured=spotify.configured,
             spotifyConnected=spotify.connected,
+            spotifyClientIdEditable=spotify.client_id_editable,
+            spotifyRedirectUri=callback_uri(request),
         )
 
     @router.get("/library")
@@ -239,11 +252,30 @@ def create_music_router(library: LocalLibrary, spotify: SpotifyAccount, redirect
         return Response(data, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
 
     @router.post("/rescan")
-    async def rescan() -> MusicStatus:
+    async def rescan(request: Request) -> MusicStatus:
         """Scan the local folders again."""
         await asyncio.to_thread(library.scan)
         library.ready.set()
-        return await status()
+        return await status(request)
+
+    # Only Osmo's own windows: the agent's sandbox must not point the sign-in at another Spotify app.
+    @router.put("/spotify/client", dependencies=[Depends(require_app)])
+    async def set_client(body: SpotifyClientRequest, request: Request) -> MusicStatus:
+        """Use the user's Spotify app (its client id) for signing in."""
+        try:
+            spotify.set_client_id(body.clientId)
+        except SpotifyError as exc:
+            raise HTTPException(422 if spotify.client_id_editable else 409, str(exc)) from None
+        return await status(request)
+
+    @router.delete("/spotify/client", dependencies=[Depends(require_app)])
+    async def clear_client(request: Request) -> MusicStatus:
+        """Forget the Spotify app set from Osmo (and its sign-in)."""
+        try:
+            spotify.set_client_id(None)
+        except SpotifyError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return await status(request)
 
     @router.get("/spotify/login")
     async def login(request: Request) -> LoginResponse:

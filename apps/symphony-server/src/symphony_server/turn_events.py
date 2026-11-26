@@ -83,18 +83,4 @@ def activity_label(name: str, args: Mapping[str, Any]) -> str:
         return f"{verb} {args.get('path', '')}"
     if name == "create_image":
         return "Drawing a picture"
-    if name == "workspace_open":
-        return f"Opening {args.get('repo', 'the repository')}"
-    if name == "shell":
-        command = " ".join(str(args.get("command", "")).split())
-        return f"Running · {command[:80]}{'…' if len(command) > 80 else ''}"
-    if name == "read_file":
-        return f"Reading {args.get('path', '')}"
-    if name in ("write_file", "edit_file"):
-        return f"Editing {args.get('path', '')}"
-    if name == "open_pull_request":
-        return f"Opening a pull request · {args.get('title', '')}"
-    if name == "write_code":
-        lang = str(args.get("language") or "").strip()
-        return f"Writing {lang} code" if lang else "Writing code"
     return f"Running {name}"

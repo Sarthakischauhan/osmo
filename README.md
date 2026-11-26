@@ -31,10 +31,6 @@ Send research and browser tasks to a background agent while you keep talking. Fo
 
 Search and edit local Markdown notes. Keep events in a calendar and schedule automations that start a task, send a notification, or append to a note. Play local music—or connect Spotify in the desktop app—with playback that quiets down while Osmo speaks.
 
-### Go from a request to a pull request.
-
-On macOS, the coding agent can work in its own repository workspace, make changes, and propose a pull request for your approval. Describe the change you want without leaving the conversation.
-
 ### Stay close, without taking over your screen.
 
 Use Osmo in the browser or as a desktop app with a compact, always-on-top orb. When you explicitly enable computer support, it can inspect your primary screen and help with mouse and keyboard actions. You stay in control of when that access starts and stops.
@@ -49,7 +45,7 @@ Use Osmo in the browser or as a desktop app with a compact, always-on-top orb. W
 >
 > “Look at my screen and help me find the browser settings.”
 
-Available actions depend on the providers and optional tools you connect. Computer support requires native consent and a vision model; coding tools currently require macOS. Spotify playback requires Premium and desktop setup.
+Available actions depend on the providers and optional tools you connect. Computer support requires native consent and a vision model. Spotify playback requires Premium and desktop setup.
 
 ## One workspace, several ways to work
 
@@ -57,7 +53,7 @@ Available actions depend on the providers and optional tools you connect. Comput
 flowchart LR
   You[Your voice] --> Osmo[Osmo]
   Osmo <--> Canvas[Conversation and interactive canvas]
-  Osmo <--> Tasks[Research, browser and coding tasks]
+  Osmo <--> Tasks[Research and browser tasks]
   Osmo <--> Day[Notes, calendar and automations]
   Osmo <--> Desktop[Opt-in computer support]
 ```
@@ -84,4 +80,4 @@ For the implementation rather than the tour:
 - [Configuration](docs/configuration.md) — providers, storage, tools, approvals, and integrations.
 - [Contributing](CONTRIBUTING.md) — development setup and checks.
 
-**Before enabling tools:** browser actions, coding tasks, and computer support can affect real websites, repositories, and your desktop. Review [approvals and browser controls](docs/configuration.md#approvals-and-status) and [desktop controls and limits](apps/desktop/README.md#use). Approval prompts do not undo actions already taken.
+**Before enabling tools:** browser actions and computer support can affect real websites and your desktop. Review [approvals and browser controls](docs/configuration.md#approvals-and-status) and [desktop controls and limits](apps/desktop/README.md#use). Approval prompts do not undo actions already taken.

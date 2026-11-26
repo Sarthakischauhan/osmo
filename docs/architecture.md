@@ -63,13 +63,9 @@ If capture increases but forwarded stays flat, investigate EchoGuard. If forward
 
 ## Notes as agent context and cross-references
 
-The voice model and background Symphony agent both have read access to the configured notes vaults **by default**, through the same indexed vault. The new read-only tools are:
+The voice model reads the configured notes vaults **by default** with `vault_search` and `vault_read`; `vault_write` needs approval to create, append or replace a note. The background agent has no notes or calendar tools: when its result should be saved, the voice model saves it.
 
-- `vault_list`: titles and paths across configured vaults
-- `conversation_search` / `conversation_read`: earlier stored Osmo chat threads, titles and bounded messages
-- `automation_list` / `event_search`: existing local scheduled automations and calendar events
-
-The existing Notes view remains the only interface. Notes support YAML frontmatter tags for filtering and discovery. Agents can list, search and read tagged notes as references. Existing `vault_write` approval remains required for an agent to create, append or replace a note.
+The Notes view is the only interface. Notes support YAML frontmatter tags for filtering and discovery.
 
 Notes can refer to other Osmo records using explicit links:
 `[[chat:THREAD_ID]]`, `[[automation:AUTOMATION_ID]]`, and `[[event:EVENT_ID]]`.
@@ -90,7 +86,6 @@ See [configuration](configuration.md) for recovery limits, retention, browser li
 - Provider keys stay in the server's secret store, separately from conversation records.
 - Threads and integrations use local SQLite storage; durable execution has its own adjacent run database.
 - Browser actions use approvals, site rules, and explicit takeover controls. A persistent Osmo browser profile can carry user logins into later agent runs.
-- macOS coding execution uses Seatbelt workspaces; host-side clone and publish operations are separate from sandbox execution.
 - Vault tools validate paths and enforce approval for writes by default.
 - Desktop computer support requires native consent and acts on the user's primary display, not a server desktop.
 

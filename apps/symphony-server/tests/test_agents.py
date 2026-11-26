@@ -18,7 +18,7 @@ from starlette.testclient import WebSocketTestSession
 
 from conftest import FakeGrok, make_client, xai_key_store
 from symphony_server.settings import Settings
-from test_session import answer, call, next_event, say, start, tool_output
+from test_session import DINNER, answer, asked, call, next_event, say, start, tool_output
 
 
 @dataclass(frozen=True)
@@ -94,18 +94,21 @@ def start_agent(ws: WebSocketTestSession, grok: FakeGrok, task: str) -> str:
     return run_id
 
 
+CAT_CARD = {"type": "card", "props": {"title": "A cat", "body": "Found one."}}
+
+
 @pytest.fixture
-def denied_search() -> ScriptedAgent:
-    return ScriptedAgent([Step(tool="web_search", arguments=json.dumps({"query": "a cat"})), Step(text="Skipped the search.")])
+def denied_card() -> ScriptedAgent:
+    return ScriptedAgent([Step(tool="render_widget", arguments=json.dumps(CAT_CARD)), Step(text="Skipped the card.")])
 
 
-def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_search: ScriptedAgent) -> None:
-    with agent_client(grok, denied_search, approval_tools=("web_search",)) as client, client.websocket_connect("/ws") as ws:
+def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_card: ScriptedAgent) -> None:
+    with agent_client(grok, denied_card, approval_tools=("render_widget",)) as client, client.websocket_connect("/ws") as ws:
         run_id = start_agent(ws, grok, "look up a cat")
 
         assert next_event(ws, "agent.update")["status"] == "waiting_approval"
         asked = next_event(ws, "approval.request")
-        assert asked["runId"] == run_id and asked["tool"] == "web_search"
+        assert asked["runId"] == run_id and asked["tool"] == "render_widget"
         # Approval is queued until the voice model completes its current acknowledgement.
         answer(grok, "I'm working on it.", "r1-ack")
         # Needing approval is announced once idle, without interrupting speech.
@@ -126,21 +129,43 @@ def test_an_agent_run_asks_for_approval_and_reports_back(grok: FakeGrok, denied_
         done = next_event(ws, "agent.update")
         while done["status"] != "completed":
             done = next_event(ws, "agent.update")
-        assert done["result"] == "Skipped the search."
+        assert done["result"] == "Skipped the card."
         assert client.get("/api/runs").json()["approvals"] == []
         # Finished runs are listed only when asked for since before they finished.
         assert client.get("/api/runs", params={"since": done_after(client, thread_runs=1)}).json()["runs"] == []
         assert [run["status"] for run in client.get("/api/runs").json()["runs"]] == ["completed"]
-        assert told(grok, f"[agent {run_id}]") == f"[agent {run_id}] done: Skipped the search."
+        assert told(grok, f"[agent {run_id}]") == f"[agent {run_id}] done: Skipped the card."
         grok.next_of("response.create")
 
         thread_id = client.get("/api/threads").json()["threads"][0]["id"]
         detail = client.get(f"/api/threads/{thread_id}").json()
         assert [(run["runId"], run["status"]) for run in detail["runs"]] == [(run_id, "completed")]
         assert [m["role"] for m in detail["messages"]][:1] == ["user"]
-        assert f"[agent {run_id}] done: Skipped the search." in [m["text"] for m in detail["messages"]]
+        assert f"[agent {run_id}] done: Skipped the card." in [m["text"] for m in detail["messages"]]
         # An answered approval cannot be answered again.
         assert client.post(f"/api/approvals/{asked['approvalId']}", json={"approved": True}).status_code == 404
+
+
+def test_an_agent_shows_widgets_and_a_tap_on_one_reaches_the_voice_model_once(grok: FakeGrok) -> None:
+    shown = json.dumps(DINNER)
+    agent = ScriptedAgent([Step(tool="render_widget", arguments=shown), Step(tool="render_widget", arguments=shown), Step(text="Here are two spots.")])
+    with agent_client(grok, agent) as client, client.websocket_connect("/ws") as ws:
+        run_id = start_agent(ws, grok, "find dinner")
+        widget_id = next_event(ws, "widget.render")["widget"]["id"]
+        second = next_event(ws, "widget.render")["widget"]["id"]
+        answer(grok, "On it.", "r1-ack")
+        assert told(grok, f"[agent {run_id}]") == f"[agent {run_id}] done: Here are two spots."
+        grok.next_of("response.create")
+        answer(grok, "Two dinner spots are on screen.", "r2-ack")
+
+        ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "ramen"}))
+        assert asked(grok) == f"[Tapped on screen] options widget {widget_id}: select -> option 2, Ramen counter"
+        answer(grok, "Ramen it is.", "r3")
+        # A widget takes one answer: a repeated (or frame-forged) tap is not another user turn.
+        ws.send_text(json.dumps({"type": "widget.action", "id": widget_id, "action": "select", "value": "italian"}))
+        ws.send_text(json.dumps({"type": "widget.action", "id": second, "action": "select", "value": "ramen"}))
+        assert asked(grok) == f"[Tapped on screen] options widget {second}: select -> option 2, Ramen counter"
+        assert client.get("/api/runs").json()["runs"][0]["status"] == "completed"
 
 
 @pytest.fixture

@@ -55,7 +55,7 @@ def tool_names(categories: str | None) -> set[str]:
 
 
 def test_osmo_tools_follows_the_enabled_categories() -> None:
-    osmo = {"render_widget", "update_widget", "write_code", "set_voice", "get_weather", "get_stock_history"}
+    osmo = {"render_widget", "update_widget", "set_voice", "get_weather", "get_stock_history"}
     assert tool_names(None) == osmo | {"web_search", "create_image", "vault_search", "vault_read", "vault_write", "calendar_events", "calendar_add_event", "automation_create"} | MUSIC_TOOL_NAMES
     assert tool_names("music") == MUSIC_TOOL_NAMES == {"music_play", "music_control", "music_status"}
     assert tool_names("calendar") == {"calendar_events", "calendar_add_event", "automation_create"}
@@ -65,6 +65,17 @@ def test_osmo_tools_follows_the_enabled_categories() -> None:
     assert {"browser_back", "browser_forward", "browser_press", "browser_select", "browser_wait", "browser_click"} <= BROWSER_TOOL_NAMES
     assert tool_names("osmo") == osmo
     assert tool_names("search, image") == {"web_search", "create_image"}
+
+
+
+def test_the_voice_model_does_quick_things_and_the_agent_long_ones() -> None:
+    from symphony_server.app import AGENT_TOOLS, VOICE_TOOLS
+
+    # No tool is on both sides. Search, notes, the calendar and music are the voice model's;
+    # the computer, widgets and the browser are the agent's.
+    assert VOICE_TOOLS & AGENT_TOOLS == set()
+    assert AGENT_TOOLS == {"computer", "render_widget", "update_widget"} | BROWSER_TOOL_NAMES
+    assert {"web_search", "vault_search", "vault_read", "vault_write", "calendar_events", "calendar_add_event", "automation_create"} <= VOICE_TOOLS
 
 
 def test_unknown_categories_are_refused() -> None:

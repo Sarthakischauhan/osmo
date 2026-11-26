@@ -57,6 +57,11 @@ export function withToken(init, token) {
   return token ? { ...init, headers: { ...init?.headers, [TOKEN_HEADER]: token } } : init;
 }
 
+/** The server's own default categories (notes, calendar and music among them) plus control of this computer.
+ * Keep in step with DEFAULT_TOOL_CATEGORIES in symphony_server/settings.py: a category missing here is a tool the
+ * desktop app's voice model and agent silently lack. */
+export const DEFAULT_TOOLS = 'search,image,osmo,vault,calendar,music,desktop';
+
 /** The server's environment: the token is not in it (it goes on stdin, where other processes cannot read it), and the
  * server is told to read it from there. */
 export function serverEnvironment(base, extra) {
@@ -81,7 +86,7 @@ export async function startServer({ packaged, resourcesPath, origin, token = pro
     stdio: ['pipe', 'inherit', 'pipe'],
     env: serverEnvironment(process.env, { ...(python.home ? { PYTHONHOME: python.home } : {}),
       PYTHONPATH: [path.join(server, 'src'), path.join(vendor, 'src'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-      OSMO_STATIC_DIR: web, OSMO_TOOLS: process.env.OSMO_TOOLS ?? 'osmo,search,image,desktop' }),
+      OSMO_STATIC_DIR: web, OSMO_TOOLS: process.env.OSMO_TOOLS ?? DEFAULT_TOOLS }),
   });
   child.stdin.end(`${token}\n`);
   let error = '';

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from symphony_server.music_library import SEARCH_LIMIT_MAX
 from symphony_server.protocol import Track
 from symphony_server.providers import CredentialStore, TokenResponse, TokenSet, token_auth
+from symphony_server.storage import Storage
 
 SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
@@ -31,6 +33,10 @@ SPOTIFY_CREDENTIAL = "spotify"
 TOKEN_MARGIN_S = 60.0
 # A sign-in that has not come back by then is forgotten.
 LOGIN_TTL_S = 600.0
+# Where a client id set from the app is kept (it is public: PKCE apps have no secret). OSMO_SPOTIFY_CLIENT_ID wins.
+CLIENT_ID_SETTING = "spotify_client_id"
+# Spotify client ids are 32 lowercase hex characters.
+CLIENT_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
 class PendingLogin(BaseModel):
@@ -119,16 +125,46 @@ class SpotifyAccount:
     """The user's Spotify sign-in (authorization code with PKCE) and the Web API calls Osmo makes with it."""
 
     def __init__(
-        self, client_id: str | None, credentials: CredentialStore, http: httpx.AsyncClient, clock: Callable[[], float] = time.time
+        self,
+        client_id: str | None,
+        credentials: CredentialStore,
+        http: httpx.AsyncClient,
+        clock: Callable[[], float] = time.time,
+        *,
+        storage: Storage | None = None,
     ) -> None:
-        self.client_id, self.credentials, self.http, self.clock = client_id, credentials, http, clock
+        self.env_client_id, self.credentials, self.http, self.clock, self.storage = client_id, credentials, http, clock, storage
         self.pending: dict[str, PendingLogin] = {}
         self.refreshing = asyncio.Lock()
+
+    @property
+    def client_id(self) -> str | None:
+        """The Spotify app's client id: OSMO_SPOTIFY_CLIENT_ID, else the one saved from the app."""
+        if self.env_client_id:
+            return self.env_client_id
+        return self.storage.setting(CLIENT_ID_SETTING) if self.storage is not None else None
 
     @property
     def configured(self) -> bool:
         """Whether a Spotify client id is set."""
         return bool(self.client_id)
+
+    @property
+    def client_id_editable(self) -> bool:
+        """Whether the app may set the client id (not when OSMO_SPOTIFY_CLIENT_ID fixes it)."""
+        return self.storage is not None and not self.env_client_id
+
+    def set_client_id(self, client_id: str | None) -> None:
+        """Save (or with None, clear) the client id from the app. A different app's tokens are forgotten."""
+        if not self.client_id_editable or self.storage is None:
+            raise SpotifyError("the Spotify client id is set by OSMO_SPOTIFY_CLIENT_ID")
+        value = client_id.strip().lower() if client_id else None
+        if value is not None and not CLIENT_ID_PATTERN.fullmatch(value):
+            raise SpotifyError("a Spotify client id is 32 letters and digits (a-f, 0-9)")
+        if value != self.client_id:
+            self.logout()
+            self.pending.clear()
+        self.storage.save_setting(CLIENT_ID_SETTING, value)
 
     def tokens(self) -> TokenSet | None:
         """The stored Spotify tokens, or None."""
@@ -148,7 +184,7 @@ class SpotifyAccount:
     def login_url(self, redirect_uri: str) -> str:
         """Start a sign-in: the authorization URL to open (PKCE, with a one-time state)."""
         if not self.client_id:
-            raise SpotifyError("set OSMO_SPOTIFY_CLIENT_ID to your Spotify app's client id first")
+            raise SpotifyError("add your Spotify app's client id in Osmo (or set OSMO_SPOTIFY_CLIENT_ID) first")
         now = self.clock()
         self.pending = {state: login for state, login in self.pending.items() if now - login.created < LOGIN_TTL_S}
         state, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(64)

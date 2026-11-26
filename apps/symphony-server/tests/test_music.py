@@ -303,6 +303,40 @@ def test_the_spotify_routes_sign_in_and_hand_the_app_a_token(music_dir: Path) ->
         assert client.get("/api/music/status").json()["spotifyConnected"] is False
 
 
+
+def test_the_app_sets_the_spotify_client_id_when_the_environment_does_not(music_dir: Path) -> None:
+    spotify_api = FakeSpotify()
+    client_id = "0123456789abcdef0123456789abcdef"
+    with music_client(music_dir, spotify_api, app_token=APP_TOKEN) as client:
+        client.headers.update(FROM_THE_APP)
+        status = client.get("/api/music/status").json()
+        assert status["spotifyConfigured"] is False and status["spotifyClientIdEditable"] is True
+        assert status["spotifyRedirectUri"] == "http://127.0.0.1:8787/api/music/spotify/callback"
+        assert client.get("/api/music/spotify/login").status_code == 409
+        assert client.put("/api/music/spotify/client", json={"clientId": "not-a-client-id"}).status_code == 422
+        saved = client.put("/api/music/spotify/client", json={"clientId": client_id.upper()})
+        assert saved.status_code == 200 and saved.json()["spotifyConfigured"] is True
+        query = parse_qs(urlsplit(client.get("/api/music/spotify/login").json()["url"]).query)
+        assert query["client_id"] == [client_id]
+        assert client.get("/api/music/spotify/callback", params={"code": "c", "state": query["state"][0]}).status_code == 200
+        assert client.get("/api/music/status").json()["spotifyConnected"] is True
+        # Another Spotify app: the old app's sign-in is forgotten.
+        client.put("/api/music/spotify/client", json={"clientId": "f" * 32})
+        assert client.get("/api/music/status").json()["spotifyConnected"] is False
+        cleared = client.delete("/api/music/spotify/client").json()
+        assert cleared["spotifyConfigured"] is False
+        # Without the app's token (the agent's sandbox), it cannot be changed.
+        client.headers.pop("x-osmo-desktop-token")
+        assert client.put("/api/music/spotify/client", json={"clientId": client_id}).status_code in (401, 403)
+
+
+def test_the_environment_client_id_cannot_be_changed_from_the_app(music_dir: Path) -> None:
+    with music_client(music_dir, FakeSpotify(), client_id="client-123", app_token=APP_TOKEN) as client:
+        client.headers.update(FROM_THE_APP)
+        assert client.get("/api/music/status").json()["spotifyClientIdEditable"] is False
+        assert client.put("/api/music/spotify/client", json={"clientId": "f" * 32}).status_code == 409
+
+
 class Emitted(EventSink):
     def __init__(self) -> None:
         super().__init__()

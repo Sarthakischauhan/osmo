@@ -432,7 +432,7 @@ class RunAgentTool(Tool):
         super().__init__(
             name="run_agent",
             description=(
-                "Start a background agent for multi-step work (research, comparisons, drafting, pictures, and coding on a repository up to opening a pull request). "
+                "Start a background agent for multi-step work (research, comparisons, drafting, browsing). "
                 "Returns a run_id at once; keep talking. You will be told when it needs approval, fails or is done."
             ),
             parameters=RUN_AGENT_PARAMETERS,

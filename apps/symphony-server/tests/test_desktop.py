@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from core_ai.types import StreamEvent
 from conftest import FakeGrok, make_client, xai_key_store
-from test_session import answer, call, next_event, say, start, tool_output, wait_listening
+from test_session import call, next_event, say, start, tool_output
 from symphony_server.desktop import ComputerTool, DesktopRunLink, DesktopSession, RUN_DESKTOP
 from symphony_server.protocol import DesktopResult
 from symphony_server.settings import Settings
@@ -77,52 +77,75 @@ async def test_observation_uses_vision_and_keeps_images_out_of_voice_history() -
     finally:
         RUN_DESKTOP.reset(token)
 
-def test_harness_computer_rpc_roundtrip_and_revocation(grok: FakeGrok) -> None:
-    settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop',))
-    with make_client(settings, secret_store=xai_key_store()) as client:
-        with client.websocket_connect('/ws') as ws:
-            update = start(ws, grok)
-            assert 'computer' in {tool['name'] for tool in update['session']['tools']}
-            ws.send_json({'type': 'desktop.configure', 'enabled': True})
-            say(grok, 'Click settings')
-            call(grok, 'computer', {'action': 'click', 'x': 0.8, 'y': 0.2}, 'c1')
-            request = next_event(ws, 'desktop.request')
-            assert request['action'] == {'action': 'click', 'x': 0.8, 'y': 0.2, 'button': 'left'}
-            with client.websocket_connect('/ws') as other:
-                other.send_json({'type': 'desktop.result', 'requestId': request['requestId'], 'result': {'ok': 'wrong socket'}})
-            ws.send_json({'type': 'desktop.result', 'requestId': request['requestId'], 'result': {'ok': True}})
-            assert tool_output(grok) == {'ok': True}
-            answer(grok, 'Opened settings.', 'r2')
-            wait_listening(ws)
-            say(grok, 'Press enter')
-            call(grok, 'computer', {'action': 'key', 'keys': ['enter']}, 'c2', 'r3')
-            next_event(ws, 'desktop.request')
-            ws.send_json({'type': 'desktop.configure', 'enabled': False})
-            assert 'stopped' in tool_output(grok)['error']
-            answer(grok, 'Computer support stopped.', 'r4')
-            wait_listening(ws)
-
-def test_delegated_agent_does_not_use_the_desktop(grok: FakeGrok) -> None:
-    """Computer support stays on the voice model. A background run cannot click through it."""
+def agent_with_desktop(grok: FakeGrok, steps: list[Any]) -> Any:
     from core_ai import ModelRegistry
-    from symphony_server.app import AGENT_TOOLS
-    from test_agents import ScriptedAgent, Step
+    from test_agents import ScriptedAgent
     registry = ModelRegistry()
-    agent = ScriptedAgent([Step(text='Searched the web.')])
-    settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop', 'search'))
+    settings = Settings(xai_base_url=grok.base_url, tool_categories=('desktop',))
     client = make_client(settings, secret_store=xai_key_store(), registry=registry)
-    registry.register('grok', agent)
-    assert 'computer' not in AGENT_TOOLS
-    with client, client.websocket_connect('/ws') as ws:
+    registry.register('grok', ScriptedAgent(steps))
+    return client
+
+def test_the_computer_is_the_agents_not_the_voice_models() -> None:
+    from symphony_server.app import AGENT_TOOLS, VOICE_TOOLS
+    assert 'computer' in AGENT_TOOLS and 'computer' not in VOICE_TOOLS
+
+def test_an_agent_run_operates_the_desktop_of_its_voice_socket_until_revoked(grok: FakeGrok) -> None:
+    from test_agents import Step
+    steps = [
+        Step(tool='computer', arguments=json.dumps({'action': 'click', 'x': 0.8, 'y': 0.2})),
+        Step(tool='computer', arguments=json.dumps({'action': 'key', 'keys': ['enter']})),
+        Step(text='Clicked settings; computer support was turned off before Enter.'),
+    ]
+    with agent_with_desktop(grok, steps) as client, client.websocket_connect('/ws') as ws:
         update = start(ws, grok)
-        assert 'computer' in {tool['name'] for tool in update['session']['tools']}
+        assert 'computer' not in {tool['name'] for tool in update['session']['tools']}
         ws.send_json({'type': 'desktop.configure', 'enabled': True})
-        say(grok, 'Look this up in the background')
-        call(grok, 'run_agent', {'task': 'Search for the control'}, 'delegate')
+        say(grok, 'Click settings and press enter')
+        call(grok, 'run_agent', {'task': 'Click settings, then press Enter'}, 'delegate')
         started = tool_output(grok)
         assert started['status'] == 'running'
+
+        request = next_event(ws, 'desktop.request')
+        assert request['action'] == {'action': 'click', 'x': 0.8, 'y': 0.2, 'button': 'left'}
+        # Only the socket that started the run can answer for its desktop.
+        with client.websocket_connect('/ws') as other:
+            other.send_json({'type': 'desktop.result', 'requestId': request['requestId'], 'result': {'ok': 'wrong socket'}})
+        ws.send_json({'type': 'desktop.result', 'requestId': request['requestId'], 'result': {'ok': True}})
+
+        # Turning computer support off stops the request still waiting; the run goes on and finishes.
+        next_event(ws, 'desktop.request')
+        ws.send_json({'type': 'desktop.configure', 'enabled': False})
         done = next_event(ws, 'agent.update')
         while done['status'] != 'completed':
             done = next_event(ws, 'agent.update')
         assert done['runId'] == started['run_id']
-        assert done['result'] == 'Searched the web.'
+        assert done['result'] == 'Clicked settings; computer support was turned off before Enter.'
+
+def test_without_computer_support_the_agents_computer_call_is_refused(grok: FakeGrok) -> None:
+    from core_ai import ModelRegistry
+    from test_agents import ScriptedAgent, Step
+
+    class Recording(ScriptedAgent):
+        """Keeps what the model was sent, so the test sees the tool result it got."""
+        seen: list[Any] = []
+
+        async def stream(self, model_name: str, messages: list[Any], *args: Any, **kwargs: Any) -> Any:
+            self.seen.append(str(messages))
+            async for event in super().stream(model_name, messages, *args, **kwargs):
+                yield event
+
+    agent = Recording([Step(tool='computer', arguments=json.dumps({'action': 'observe'})), Step(text='Computer support is off.')])
+    registry = ModelRegistry()
+    client = make_client(Settings(xai_base_url=grok.base_url, tool_categories=('desktop',)), secret_store=xai_key_store(), registry=registry)
+    registry.register('grok', agent)
+    with client, client.websocket_connect('/ws') as ws:
+        start(ws, grok)
+        say(grok, 'What is on my screen?')
+        call(grok, 'run_agent', {'task': 'Describe the screen'}, 'delegate')
+        assert tool_output(grok)['status'] == 'running'
+        done = next_event(ws, 'agent.update')
+        while done['status'] != 'completed':
+            done = next_event(ws, 'agent.update')
+        assert done['result'] == 'Computer support is off.'
+        assert 'Enable computer support in the Osmo desktop app first' in agent.seen[-1]

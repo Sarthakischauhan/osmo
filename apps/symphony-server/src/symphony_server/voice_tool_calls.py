@@ -13,10 +13,10 @@ from core_harness import EventSink, Tool
 
 from symphony_server import tracing
 from symphony_server.approvals import APPROVAL_REQUIRED, ApprovalAddon, ApprovalBroker, ApprovalPayload, ApprovalResolvedPayload
-from symphony_server.canvas import OSMO_CODE, OSMO_WIDGET
+from symphony_server.canvas import OSMO_WIDGET
 from symphony_server.desktop import RUN_DESKTOP, DesktopSession
 from symphony_server.music import OSMO_MUSIC
-from symphony_server.protocol import ApprovalRequest, ApprovalResolved, MusicCommand, OsmoState, ServerEvent, TranscriptDelta, widget_event_adapter
+from symphony_server.protocol import ApprovalRequest, ApprovalResolved, MusicCommand, OsmoState, ServerEvent, widget_event_adapter
 from symphony_server.turn_events import activity_label
 from symphony_server.voice_transcript import Transcript
 from symphony_server.voices import OSMO_VOICE, Selection, SetVoiceArgs
@@ -46,11 +46,6 @@ class VoiceToolSink(EventSink):
         """Route one tool event to the browser, the transcript or the voice settings."""
         if event_type == OSMO_WIDGET:
             await self.show(widget_event_adapter.validate_python(payload))
-        elif event_type == OSMO_CODE:
-            markdown = str(payload.get("markdown") or "").strip()
-            if markdown:
-                await self.show(TranscriptDelta(role="assistant", text=f"\n\n{markdown}\n"))
-                self.transcript.hold(frozenset(self.transcript.unheard), markdown)
         elif event_type == OSMO_VOICE:
             await self.configure(SetVoiceArgs.model_validate(payload), "tool")
         elif event_type == OSMO_MUSIC:

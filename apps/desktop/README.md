@@ -33,7 +33,7 @@ For hot reload, run the backend separately with desktop tools enabled, then:
 
 ```sh
 # Terminal 1 (from repository root)
-OSMO_TOOLS=osmo,search,image,desktop OSMO_DESKTOP_VISION_MODEL=openai:gpt-4.1 make dev-server
+OSMO_TOOLS=search,image,osmo,vault,calendar,music,desktop OSMO_DESKTOP_VISION_MODEL=openai:gpt-4.1 make dev-server
 # Terminal 2
 bun run dev:desktop
 ```
@@ -91,10 +91,10 @@ stays flat in Electron.
    Ending the voice session, disconnecting, reloading, or closing the window also revokes control.
 
 `computer.observe` takes a fresh screenshot and asks the configured vision model a specific
-question. Only its textual observation is passed back to the voice model. Images are sent to the
-vision provider and are not added to conversation history by this tool. The voice model can then
-request click, type, key, and scroll operations directly or delegate a longer task with run_agent.
-The background run receives only its originating desktop session's capability; disconnecting or
+question. Only its textual observation is passed back to the model. Images are sent to the
+vision provider and are not added to conversation history by this tool. The `computer` tool belongs to
+the background agent: the voice model hands screen work to it with run_agent, and the agent observes,
+clicks, types, presses keys and scrolls. A run receives only its originating desktop session's capability; disconnecting or
 revoking consent stops pending native work without granting another thread control.
 
 The app rejects requests unless native consent is active, validates each input, serializes native

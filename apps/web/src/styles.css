@@ -440,6 +440,18 @@ button.osmo-list-row { cursor: pointer; }
 .osmo-music-play { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: var(--foreground); color: var(--background); cursor: pointer; }
 .osmo-music-connect { height: 20px; margin-top: 2px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-button); background: transparent; color: var(--foreground); font-size: 11px; cursor: pointer; }
 .osmo-music-connect:hover { border-color: var(--muted-foreground); }
+.osmo-music-connect:disabled { opacity: .5; cursor: default; }
+.osmo-music-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.osmo-music-wide { grid-column: 1 / -1; white-space: normal; }
+.osmo-music-setup { grid-column: 1 / -1; display: grid; gap: 6px; color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.osmo-music-setup p { margin: 0; }
+.osmo-music-setup a { color: var(--foreground); text-decoration: underline; }
+.osmo-music-setup .osmo-music-sub { white-space: normal; }
+.osmo-music-setup-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.osmo-music-setup-row .osmo-music-connect { flex: none; margin-top: 0; }
+.osmo-music-setup code { flex: 1; min-width: 0; overflow: hidden; padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--foreground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.osmo-music-setup input { height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--foreground); font: inherit; font-family: ui-monospace, monospace; }
+.osmo-music-setup input:focus { outline: none; border-color: var(--muted-foreground); }
 .desktop-support { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-button); background: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .desktop-support.active { color: var(--background); background: var(--foreground); }
 .desktop-support-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); }

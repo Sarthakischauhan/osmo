@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { serverEnvironment, socketProtocols, trustedServer, withToken } from '../src/server.js';
+import { readFileSync } from 'node:fs';
+import { DEFAULT_TOOLS, serverEnvironment, socketProtocols, trustedServer, withToken } from '../src/server.js';
 
 test('a local server is trusted only when it echoes this app token', async () => {
   const pages = {
@@ -33,4 +34,12 @@ test('without a token main sends nothing extra; with one it adds the header and 
   assert.equal(withToken(undefined, undefined), undefined);
   assert.deepEqual(withToken({ method: 'POST', headers: { 'Content-Type': 'application/json' } }, 't'),
     { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Osmo-Desktop-Token': 't' } });
+});
+
+test("the app's server gets every one of the server's default tool categories, plus desktop", () => {
+  const settings = readFileSync(new URL('../../symphony-server/src/symphony_server/settings.py', import.meta.url), 'utf8');
+  const line = /^DEFAULT_TOOL_CATEGORIES[^=]*= \(([^)]*)\)/m.exec(settings)?.[1];
+  assert.ok(line, 'DEFAULT_TOOL_CATEGORIES not found');
+  const server = [...line.matchAll(/"([a-z]+)"/g)].map(match => match[1]);
+  assert.deepEqual(DEFAULT_TOOLS.split(',').sort(), [...server, 'desktop'].sort());
 });
